@@ -71,6 +71,7 @@ const state = {
 }
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
+let containerRO: ResizeObserver | null = null
 
 /** Yardımcılar */
 function qsa<T extends Element = Element>(root: ParentNode, sel: string): T[] {
@@ -192,30 +193,42 @@ function updateTransform() {
 }
 function fitToScreen() {
   if (!canvasContainer.value || !canvasEl.value || !annotationsSvg.value) return
-  const containerW = canvasContainer.value.clientWidth
-  const containerH = canvasContainer.value.clientHeight
-  const imgW = state.img.naturalWidth
-  const imgH = state.img.naturalHeight
 
-  // canvas boyutu
-  canvasEl.value.width = imgW
-  canvasEl.value.height = imgH
+  // container ölçüsü hazır değilse tekrar dene
+  const cw = canvasContainer.value.clientWidth
+  const ch = canvasContainer.value.clientHeight
+  if (!cw || !ch) {
+    requestAnimationFrame(fitToScreen)
+    return
+  }
 
-  // svg boyutu
-  annotationsSvg.value.setAttribute('viewBox', `0 0 ${imgW} ${imgH}`)
-  annotationsSvg.value.setAttribute('width', String(imgW))
-  annotationsSvg.value.setAttribute('height', String(imgH))
+  // görsel ölçüsü hazır değilse tekrar dene
+  const iw = state.img.naturalWidth || canvasEl.value.width
+  const ih = state.img.naturalHeight || canvasEl.value.height
+  if (!iw || !ih) {
+    requestAnimationFrame(fitToScreen)
+    return
+  }
 
-  // scale/translate
-  const scaleX = containerW / imgW
-  const scaleY = containerH / imgH
-  state.scale = Math.min(scaleX, scaleY) * 0.98
-  state.translateX = (containerW - imgW * state.scale) / 2
-  state.translateY = (containerH - imgH * state.scale) / 2
+  // Canvas & SVG boyutu
+  canvasEl.value.width = iw
+  canvasEl.value.height = ih
+  annotationsSvg.value.setAttribute('viewBox', `0 0 ${iw} ${ih}`)
+  annotationsSvg.value.setAttribute('width', String(iw))
+  annotationsSvg.value.setAttribute('height', String(ih))
 
-  // resmi bir kez çiz
+  // Ölçek ve konum
+  const s = Math.min(cw / iw, ch / ih) * 0.98
+  state.scale = Number.isFinite(s) && s > 0 ? s : 1
+
+  const tx = (cw - iw * state.scale) / 2
+  const ty = (ch - ih * state.scale) / 2
+  state.translateX = Number.isFinite(tx) ? tx : 0
+  state.translateY = Number.isFinite(ty) ? ty : 0
+
+  // Görseli çiz
   const ctx = canvasEl.value.getContext('2d')!
-  ctx.clearRect(0, 0, imgW, imgH)
+  ctx.clearRect(0, 0, iw, ih)
   ctx.drawImage(state.img, 0, 0)
 
   updateTransform()
@@ -223,16 +236,27 @@ function fitToScreen() {
 function zoom(delta: number, clientX: number, clientY: number) {
   if (!canvasContainer.value) return
   const rect = canvasContainer.value.getBoundingClientRect()
+
+  // geçersiz ölçek varsa önce sığdır
+  if (!Number.isFinite(state.scale) || state.scale <= 0) {
+    fitToScreen()
+  }
+
   const mouseX = clientX - rect.left
   const mouseY = clientY - rect.top
   const worldX = (mouseX - state.translateX) / state.scale
   const worldY = (mouseY - state.translateY) / state.scale
-  const newScale = Math.max(0.1, Math.min(state.scale + delta * state.scale, 10))
+
+  // çarpan ile ölçekle (patlamasın)
+  const newScale = Math.max(0.05, Math.min(state.scale * (1 + delta), 10))
+
   state.translateX = mouseX - worldX * newScale
   state.translateY = mouseY - worldY * newScale
   state.scale = newScale
+
   updateTransform()
 }
+
 const onWheel = (e: WheelEvent) => {
   e.preventDefault()
   const delta = e.deltaY > 0 ? -0.1 : 0.1
@@ -323,6 +347,11 @@ onMounted(() => {
   fitScreenBtn.value?.addEventListener('click', () => fitToScreen())
   resetViewBtn.value?.addEventListener('click', () => fitToScreen())
   window.addEventListener('resize', fitToScreen)
+  // Container boyutu değişince yeniden sığdır
+  containerRO = new ResizeObserver(() => {
+    requestAnimationFrame(fitToScreen)
+  })
+  if (canvasContainer.value) containerRO.observe(canvasContainer.value)
 
   // Çizim & Pan
   canvasContainer.value?.addEventListener('mousedown', (e: MouseEvent) => {
@@ -363,6 +392,17 @@ onMounted(() => {
 
     const imgX = (mouseX - state.translateX) / state.scale
     const imgY = (mouseY - state.translateY) / state.scale
+
+    if (
+      !Number.isFinite(imgX) ||
+      !Number.isFinite(imgY) ||
+      !Number.isFinite(state.scale) ||
+      state.scale <= 0
+    ) {
+      if (coords.value) coords.value.textContent = 'X: -, Y: -'
+      return
+    }
+
     if (coords.value) coords.value.textContent = `X: ${Math.round(imgX)}, Y: ${Math.round(imgY)}`
 
     if (state.isDrawing) {
@@ -436,6 +476,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('resize', fitToScreen)
   canvasContainer.value?.removeEventListener('wheel', onWheel as any)
+  containerRO?.disconnect()
 })
 </script>
 
