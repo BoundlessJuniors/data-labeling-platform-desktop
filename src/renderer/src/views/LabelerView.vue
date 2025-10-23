@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref } from 'vue'
 import { createPopper } from '@popperjs/core'
+import undoIcon from '@renderer/assets/icons/custom/undo.svg'
+import redoIcon from '@renderer/assets/icons/custom/redo.svg'
 
 /** Basit tipler */
 type BBox = {
@@ -417,9 +419,7 @@ onMounted(() => {
       tempRect.setAttribute('width', String(w))
       tempRect.setAttribute('height', String(h))
     } else if (state.isPanning) {
-      // @ts-expect-error: dinamik
       state.translateX = e.clientX - state.startPanX
-      // @ts-expect-error: dinamik
       state.translateY = e.clientY - state.startPanY
       updateTransform()
     }
@@ -677,17 +677,17 @@ onBeforeUnmount(() => {
               <button
                 ref="undoBtn"
                 class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
-                title="Undo (Ctrl+Z)"
-              >
-                <span class="material-symbols-outlined">undo</span>
+                title="Undo (Ctrl+Z)" >
+                <img :src="undoIcon" alt="Undo" class="h-5 w-5" draggable="false" />
               </button>
+
               <button
                 ref="redoBtn"
                 class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
-                title="Redo (Ctrl+Y)"
-              >
-                <span class="material-symbols-outlined">redo</span>
+                title="Redo (Ctrl+Y)">
+                <img :src="redoIcon" alt="Redo" class="h-5 w-5" draggable="false" />
               </button>
+
             </div>
           </div>
 
