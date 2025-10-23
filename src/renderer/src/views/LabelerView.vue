@@ -1,242 +1,441 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, reactive, ref } from 'vue'
+import { onMounted, onBeforeUnmount, ref } from 'vue'
+import { createPopper } from '@popperjs/core'
 
-type Task = {
+/** Basit tipler */
+type BBox = {
   id: number
-  name: string
-  type: 'Image Labeling' | 'Audio Labeling' | 'Text Labeling'
-  done: boolean
+  type: 'bbox'
+  label: string | null
+  x: number
+  y: number
+  width: number
+  height: number
 }
+type Annotation = BBox
 
-const tasks = reactive<Task[]>([
-  { id: 1, name: 'Task 1', type: 'Image Labeling', done: true },
-  { id: 2, name: 'Task 2', type: 'Image Labeling', done: true },
-  { id: 3, name: 'Task 3', type: 'Audio Labeling', done: true },
-  { id: 4, name: 'Task 4', type: 'Text Labeling', done: false },
-  { id: 5, name: 'Task 5', type: 'Image Labeling', done: false },
-  { id: 6, name: 'Task 6', type: 'Text Labeling', done: false }
-])
-
-const currentTaskIndex = ref(0)
-const taskTitle = ref('Image Annotation - Task 1')
-
-function setActiveTask(i: number) {
-  currentTaskIndex.value = i
-  taskTitle.value = `Image Annotation - ${tasks[i].name}`
-}
-function nextTask() {
-  if (currentTaskIndex.value < tasks.length - 1) setActiveTask(currentTaskIndex.value + 1)
-}
-function prevTask() {
-  if (currentTaskIndex.value > 0) setActiveTask(currentTaskIndex.value - 1)
-}
-
-const isDark = ref(false)
-function toggleTheme() {
-  isDark.value = !isDark.value
-  const root = document.documentElement
-  root.classList.toggle('dark', isDark.value)
-  root.classList.toggle('light', !isDark.value)
-}
-
-/** Canvas refs & state */
+/** Refs (DOM erişimi) */
 const canvasContainer = ref<HTMLDivElement | null>(null)
 const canvasEl = ref<HTMLCanvasElement | null>(null)
-const coordsText = ref('X: 0, Y: 0')
-const crossH = ref<HTMLDivElement | null>(null)
-const crossV = ref<HTMLDivElement | null>(null)
+const annotationsSvg = ref<SVGSVGElement | null>(null)
 
-const state = reactive({
+const shapesToolBtn = ref<HTMLButtonElement | null>(null)
+const shapesDropdown = ref<HTMLDivElement | null>(null)
+
+const filterBtn = ref<HTMLButtonElement | null>(null)
+const filterDropdown = ref<HTMLDivElement | null>(null)
+
+const crosshairH = ref<HTMLDivElement | null>(null)
+const crosshairV = ref<HTMLDivElement | null>(null)
+const coords = ref<HTMLDivElement | null>(null)
+
+const zoomInBtn = ref<HTMLButtonElement | null>(null)
+const zoomOutBtn = ref<HTMLButtonElement | null>(null)
+const fitScreenBtn = ref<HTMLButtonElement | null>(null)
+const resetViewBtn = ref<HTMLButtonElement | null>(null)
+
+const toolGroup = ref<HTMLDivElement | null>(null)
+const labelList = ref<HTMLDivElement | null>(null)
+const annotationList = ref<HTMLDivElement | null>(null)
+
+const undoBtn = ref<HTMLButtonElement | null>(null)
+const redoBtn = ref<HTMLButtonElement | null>(null)
+const saveBtn = ref<HTMLButtonElement | null>(null)
+const themeToggle = ref<HTMLButtonElement | null>(null)
+
+const taskTitle = ref<HTMLHeadingElement | null>(null)
+
+/** İç durum */
+const state = {
+  annotations: [] as Annotation[],
+  selectedAnnotationId: null as number | null,
+  history: [] as Annotation[][],
+  historyIndex: -1,
+
   scale: 1,
-  isPanning: false,
-  startX: 0,
-  startY: 0,
   translateX: 0,
   translateY: 0,
-  img: new Image(),
-  svg: new Image()
-})
+  startPanX: 0,
+  startPanY: 0,
 
-let ctx: CanvasRenderingContext2D | null = null
+  isPanning: false,
+  isDrawing: false,
+  drawingStartX: 0,
+  drawingStartY: 0,
 
-function drawCanvas() {
-  if (!ctx || !canvasEl.value) return
-  const c = canvasEl.value
-  ctx.clearRect(0, 0, c.width, c.height)
-  ctx.save()
-  ctx.translate(state.translateX, state.translateY)
-  ctx.scale(state.scale, state.scale)
-  ctx.drawImage(state.img, 0, 0)
-  ctx.globalAlpha = 0.5
-  ctx.drawImage(state.svg, 0, 0)
-  ctx.globalAlpha = 1
-  ctx.restore()
+  lastUsedTool: 'select' as 'select' | 'sam' | 'shapes',
+  lastUsedShape: 'bbox' as 'bbox' | 'polygon',
+  activeLabel: null as string | null,
+
+  img: new Image()
 }
 
+const SVG_NS = 'http://www.w3.org/2000/svg'
+
+/** Yardımcılar */
+function qsa<T extends Element = Element>(root: ParentNode, sel: string): T[] {
+  return Array.from(root.querySelectorAll(sel)) as T[]
+}
+function setActiveTool(el: HTMLElement | null) {
+  if (!toolGroup.value) return
+  qsa<HTMLElement>(toolGroup.value, '.annotation-tool').forEach((e) => e.classList.remove('active'))
+  if (el) {
+    el.classList.add('active')
+    if (el.closest('#shapes-dropdown')) {
+      shapesToolBtn.value?.classList.add('active')
+      state.lastUsedShape = (el.dataset.tool as any) ?? 'bbox'
+      state.lastUsedTool = 'shapes'
+    } else {
+      state.lastUsedTool = (el.dataset.tool as any) ?? 'select'
+    }
+  }
+  updateCursor()
+}
+function setActiveLabel(el: HTMLElement | null) {
+  if (!labelList.value) return
+  qsa<HTMLElement>(labelList.value, '.label-item').forEach((e) => e.classList.remove('active'))
+  if (el) {
+    el.classList.add('active')
+    state.activeLabel = el.dataset.label ?? null
+  } else {
+    state.activeLabel = null
+  }
+  updateCursor()
+}
+function updateCursor() {
+  const target = canvasContainer.value
+  if (!target) return
+  const isToolActive =
+    !!state.activeLabel && (state.lastUsedTool === 'shapes' || state.lastUsedTool === 'sam')
+  target.classList.toggle('tool-active', isToolActive)
+}
+
+/** Render */
+function renderAnnotations() {
+  if (!annotationsSvg.value || !annotationList.value) return
+  annotationsSvg.value.innerHTML = ''
+  annotationList.value.innerHTML = ''
+
+  state.annotations.forEach((ann) => {
+    if (ann.type === 'bbox') {
+      const rect = document.createElementNS(SVG_NS, 'rect')
+      rect.setAttribute('x', String(ann.x))
+      rect.setAttribute('y', String(ann.y))
+      rect.setAttribute('width', String(ann.width))
+      rect.setAttribute('height', String(ann.height))
+      rect.setAttribute('fill', 'rgba(17,115,212,0.4)')
+      rect.setAttribute('stroke', '#1173d4')
+      rect.setAttribute('stroke-width', '2')
+      rect.dataset.id = String(ann.id)
+      rect.classList.add('annotation-shape')
+      if (ann.id === state.selectedAnnotationId) rect.classList.add('selected')
+      annotationsSvg.value!.appendChild(rect)
+    }
+
+    const item = document.createElement('div')
+    item.className =
+      'p-3 rounded-lg bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 cursor-pointer annotation-item'
+    if (ann.id === state.selectedAnnotationId) item.classList.add('selected')
+    item.dataset.id = String(ann.id)
+    item.innerHTML = `
+      <div class="flex justify-between items-center pointer-events-none">
+        <p class="text-sm font-medium">${ann.label ?? 'Unlabeled'} ${String(ann.id).slice(-4)}</p>
+      </div>
+      <p class="text-xs text-gray-600 dark:text-gray-400 mt-1 pointer-events-none">${ann.type}</p>
+    `
+    annotationList.value!.appendChild(item)
+  })
+}
+
+/** History */
+function recordHistory() {
+  state.history = state.history.slice(0, state.historyIndex + 1)
+  state.history.push(JSON.parse(JSON.stringify(state.annotations)))
+  state.historyIndex++
+  updateUndoRedoButtons()
+}
+function undo() {
+  if (state.historyIndex > 0) {
+    state.historyIndex--
+    state.annotations = JSON.parse(JSON.stringify(state.history[state.historyIndex]))
+    renderAnnotations()
+    updateUndoRedoButtons()
+  }
+}
+function redo() {
+  if (state.historyIndex < state.history.length - 1) {
+    state.historyIndex++
+    state.annotations = JSON.parse(JSON.stringify(state.history[state.historyIndex]))
+    renderAnnotations()
+    updateUndoRedoButtons()
+  }
+}
+function updateUndoRedoButtons() {
+  if (undoBtn.value) undoBtn.value.disabled = state.historyIndex <= 0
+  if (redoBtn.value) redoBtn.value.disabled = state.historyIndex >= state.history.length - 1
+}
+function selectAnnotation(id: number) {
+  state.selectedAnnotationId = id
+  const selectTool = toolGroup.value?.querySelector(
+    '.annotation-tool[data-tool="select"]'
+  ) as HTMLElement | null
+  setActiveTool(selectTool)
+  renderAnnotations()
+}
+
+/** Görüntüleme/Transform */
 function updateTransform() {
-  if (!canvasEl.value) return
-  canvasEl.value.style.transform = `translate(-50%, -50%) translate(${state.translateX}px, ${state.translateY}px) scale(${state.scale})`
-  drawCanvas()
+  if (!canvasEl.value || !annotationsSvg.value) return
+  const transformValue = `translate(${state.translateX}px, ${state.translateY}px) scale(${state.scale})`
+  canvasEl.value.style.transform = transformValue
+  annotationsSvg.value.style.transform = transformValue
 }
-
 function fitToScreen() {
-  const container = canvasContainer.value
-  const c = canvasEl.value
-  if (!container || !c) return
+  if (!canvasContainer.value || !canvasEl.value || !annotationsSvg.value) return
+  const containerW = canvasContainer.value.clientWidth
+  const containerH = canvasContainer.value.clientHeight
+  const imgW = state.img.naturalWidth
+  const imgH = state.img.naturalHeight
 
-  const containerW = container.clientWidth
-  const containerH = container.clientHeight
-  const imgW = state.img.naturalWidth || 1280
-  const imgH = state.img.naturalHeight || 720
+  // canvas boyutu
+  canvasEl.value.width = imgW
+  canvasEl.value.height = imgH
 
-  c.width = imgW
-  c.height = imgH
+  // svg boyutu
+  annotationsSvg.value.setAttribute('viewBox', `0 0 ${imgW} ${imgH}`)
+  annotationsSvg.value.setAttribute('width', String(imgW))
+  annotationsSvg.value.setAttribute('height', String(imgH))
 
+  // scale/translate
   const scaleX = containerW / imgW
   const scaleY = containerH / imgH
-  state.scale = Math.min(scaleX, scaleY)
-  state.translateX = 0
-  state.translateY = 0
+  state.scale = Math.min(scaleX, scaleY) * 0.98
+  state.translateX = (containerW - imgW * state.scale) / 2
+  state.translateY = (containerH - imgH * state.scale) / 2
 
-  c.style.width = `${imgW * state.scale}px`
-  c.style.height = `${imgH * state.scale}px`
+  // resmi bir kez çiz
+  const ctx = canvasEl.value.getContext('2d')!
+  ctx.clearRect(0, 0, imgW, imgH)
+  ctx.drawImage(state.img, 0, 0)
+
   updateTransform()
 }
-
-function zoom(delta: number, clientX?: number, clientY?: number) {
-  const c = canvasEl.value
-  if (!c) return
-  const rect = c.getBoundingClientRect()
-  const mouseX = clientX ? clientX - rect.left : rect.width / 2
-  const mouseY = clientY ? clientY - rect.top : rect.height / 2
-
-  const worldX = (mouseX - (rect.width / 2 + state.translateX)) / state.scale
-  const worldY = (mouseY - (rect.height / 2 + state.translateY)) / state.scale
-
+function zoom(delta: number, clientX: number, clientY: number) {
+  if (!canvasContainer.value) return
+  const rect = canvasContainer.value.getBoundingClientRect()
+  const mouseX = clientX - rect.left
+  const mouseY = clientY - rect.top
+  const worldX = (mouseX - state.translateX) / state.scale
+  const worldY = (mouseY - state.translateY) / state.scale
   const newScale = Math.max(0.1, Math.min(state.scale + delta * state.scale, 10))
-  state.translateX = mouseX - rect.width / 2 - worldX * newScale
-  state.translateY = mouseY - rect.height / 2 - worldY * newScale
+  state.translateX = mouseX - worldX * newScale
+  state.translateY = mouseY - worldY * newScale
   state.scale = newScale
-
-  if (c) {
-    c.style.width = `${c.width * state.scale}px`
-    c.style.height = `${c.height * state.scale}px`
-  }
   updateTransform()
 }
-
-function resetView() {
-  fitToScreen()
-}
-
-/** Events */
-function onWheel(e: WheelEvent) {
+const onWheel = (e: WheelEvent) => {
   e.preventDefault()
   const delta = e.deltaY > 0 ? -0.1 : 0.1
   zoom(delta, e.clientX, e.clientY)
 }
 
-function onMouseDown(e: MouseEvent) {
-  if (e.button !== 0) return
-  state.isPanning = true
-  state.startX = e.clientX - state.translateX
-  state.startY = e.clientY - state.translateY
-  if (canvasContainer.value) canvasContainer.value.style.cursor = 'grabbing'
-}
-
-function onMouseUp() {
-  state.isPanning = false
-  if (canvasContainer.value) canvasContainer.value.style.cursor = 'grab'
-}
-
-function onMouseLeave() {
-  onMouseUp()
-}
-
-function onMouseMove(e: MouseEvent) {
-  const c = canvasEl.value
-  const container = canvasContainer.value
-  if (!c || !container) return
-
-  const rect = c.getBoundingClientRect()
-  const x = e.clientX - rect.left
-  const y = e.clientY - rect.top
-
-  const containerRect = container.getBoundingClientRect()
-  const crossX = e.clientX - containerRect.left
-  const crossY = e.clientY - containerRect.top
-  if (crossH.value) crossH.value.style.top = `${crossY}px`
-  if (crossV.value) crossV.value.style.left = `${crossX}px`
-
-  const imgX = x / state.scale - state.translateX / state.scale + c.width / 2
-  const imgY = y / state.scale - state.translateY / state.scale + c.height / 2
-  coordsText.value = `X: ${Math.round(imgX)}, Y: ${Math.round(imgY)}`
-
-  if (state.isPanning) {
-    state.translateX = e.clientX - state.startX
-    state.translateY = e.clientY - state.startY
-    updateTransform()
-  }
-}
-
-function keyNav(e: KeyboardEvent) {
-  if (e.key === 'ArrowRight') {
-    e.preventDefault()
-    nextTask()
-  }
-  if (e.key === 'ArrowLeft') {
-    e.preventDefault()
-    prevTask()
-  }
-}
-
+/** Mount */
 onMounted(() => {
-  // tema
-  document.documentElement.classList.add('light')
+  // Başlık
+  if (taskTitle.value) taskTitle.value.textContent = 'Image Annotation - Task 1'
 
-  // canvas & ctx
-  ctx = canvasEl.value?.getContext('2d') ?? null
+  // Dropdown (shapes) – Popper
+  if (shapesToolBtn.value && shapesDropdown.value) {
+    createPopper(shapesToolBtn.value, shapesDropdown.value, { placement: 'bottom-start' })
+    const show = () => shapesDropdown.value!.classList.add('show')
+    const hide = () => shapesDropdown.value!.classList.remove('show')
+    ;['mouseenter', 'focus'].forEach((e) => {
+      shapesToolBtn.value!.addEventListener(e, show)
+      shapesDropdown.value!.addEventListener(e, show)
+    })
+    ;['mouseleave', 'blur'].forEach((e) => {
+      shapesToolBtn.value!.addEventListener(e, hide)
+      shapesDropdown.value!.addEventListener(e, hide)
+    })
+  }
 
-  // arka plan resmi
-  state.img.src =
-    'https://lh3.googleusercontent.com/aida-public/AB6AXuDoDZlkwd2fe6baaerK6-NnJ2m2Cmp8ybU4-q-NnY_xvFG_XXDzXL3imRKjdxhdRKQA2yy9ikkvUxP2kCvQWZWfXXKPsnP2hUPOBpbtJs6gCN3pkJ310CVasZ7nfKeK7EpxiAjufAUKKgt0tVSDWflQjPO_pDcYUjIR8CzRyGTw9RfC5MTPdl6ggC5igc9ESHmZDp6rhqibG6-DoV4nJQT_SiepYOmQtOl8-IdZAUZkrXu0F5Zp7CfTkaC1Tq4I-kmcWbcNS4VRF_0'
+  // Tema
+  themeToggle.value?.addEventListener('click', () => {
+    document.documentElement.classList.toggle('dark')
+  })
 
-  // örnek anotasyon SVG’si
-  const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720">
-      <path d="M 300 200 L 350 180 L 400 220 L 420 300 L 380 350 L 300 320 Z"
-            fill="rgba(17,115,212,0.4)" stroke="#1173d4" stroke-width="2"/>
-      <rect x="550" y="400" width="150" height="100"
-            fill="rgba(17,115,212,0.4)" stroke="#1173d4" stroke-width="2"/>
-    </svg>`
-  state.svg.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg)
+  // Araç tıklamaları
+  toolGroup.value?.addEventListener('click', (e) => {
+    const target = (e.target as HTMLElement).closest('.annotation-tool') as HTMLElement | null
+    if (!target) return
+    if ((target as HTMLElement).tagName === 'A') (e as MouseEvent).preventDefault()
+    setActiveTool(target)
+  })
 
-  const onReady = () => fitToScreen()
+  // Label seçimi
+  labelList.value?.addEventListener('click', (e) => {
+    const target = (e.target as HTMLElement).closest('.label-item') as HTMLElement | null
+    if (target) setActiveLabel(target)
+  })
+
+  // Sağ panel / SVG seçim
+  annotationList.value?.addEventListener('click', (e) => {
+    const t = (e.target as HTMLElement).closest('.annotation-item') as HTMLElement | null
+    if (t) selectAnnotation(parseInt(t.dataset.id!))
+  })
+  annotationsSvg.value?.addEventListener('click', (e) => {
+    const t = (e.target as HTMLElement).closest('.annotation-shape') as HTMLElement | null
+    if (t) selectAnnotation(parseInt(t.dataset.id!))
+  })
+
+  // Undo/Redo/Save
+  undoBtn.value?.addEventListener('click', () => undo())
+  redoBtn.value?.addEventListener('click', () => redo())
+  saveBtn.value?.addEventListener('click', () => {
+    // eslint-disable-next-line no-console
+    console.log('--- ANNOTATION DATA (JSON) ---\n', JSON.stringify(state.annotations, null, 2))
+    alert('Annotation JSON verisi konsola yazıldı (F12).')
+  })
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.key === 'z') {
+      e.preventDefault()
+      undo()
+    }
+    if (e.ctrlKey && e.key === 'y') {
+      e.preventDefault()
+      redo()
+    }
+  })
+  canvasContainer.value?.addEventListener('wheel', onWheel, { passive: false })
+
+  // Zoom toolbar
+  zoomInBtn.value?.addEventListener('click', () => {
+    if (!canvasContainer.value) return
+    const r = canvasContainer.value.getBoundingClientRect()
+    zoom(0.2, r.left + r.width / 2, r.top + r.height / 2)
+  })
+  zoomOutBtn.value?.addEventListener('click', () => {
+    if (!canvasContainer.value) return
+    const r = canvasContainer.value.getBoundingClientRect()
+    zoom(-0.2, r.left + r.width / 2, r.top + r.height / 2)
+  })
+
+  fitScreenBtn.value?.addEventListener('click', () => fitToScreen())
+  resetViewBtn.value?.addEventListener('click', () => fitToScreen())
+  window.addEventListener('resize', fitToScreen)
+
+  // Çizim & Pan
+  canvasContainer.value?.addEventListener('mousedown', (e: MouseEvent) => {
+    if (e.button !== 0) return
+    const isToolActive = canvasContainer.value!.classList.contains('tool-active')
+    if (isToolActive) {
+      state.isDrawing = true
+      const rect = canvasContainer.value!.getBoundingClientRect()
+      const mouseX = e.clientX - rect.left
+      const mouseY = e.clientY - rect.top
+      state.drawingStartX = (mouseX - state.translateX) / state.scale
+      state.drawingStartY = (mouseY - state.translateY) / state.scale
+
+      // temp rect
+      const tempRect = document.createElementNS(SVG_NS, 'rect')
+      tempRect.setAttribute('id', 'temp-shape')
+      tempRect.setAttribute('stroke', '#ffc107')
+      tempRect.setAttribute('stroke-width', '2')
+      tempRect.setAttribute('fill', 'none')
+      annotationsSvg.value!.appendChild(tempRect)
+    } else {
+      state.isPanning = true
+
+      state.startPanX = e.clientX - state.translateX
+
+      state.startPanY = e.clientY - state.translateY
+      canvasContainer.value!.classList.add('panning')
+    }
+  })
+
+  canvasContainer.value?.addEventListener('mousemove', (e: MouseEvent) => {
+    const rect = canvasContainer.value!.getBoundingClientRect()
+    const mouseX = e.clientX - rect.left
+    const mouseY = e.clientY - rect.top
+
+    if (crosshairH.value) crosshairH.value.style.top = `${mouseY}px`
+    if (crosshairV.value) crosshairV.value.style.left = `${mouseX}px`
+
+    const imgX = (mouseX - state.translateX) / state.scale
+    const imgY = (mouseY - state.translateY) / state.scale
+    if (coords.value) coords.value.textContent = `X: ${Math.round(imgX)}, Y: ${Math.round(imgY)}`
+
+    if (state.isDrawing) {
+      const tempRect = annotationsSvg.value!.querySelector('#temp-shape') as SVGRectElement | null
+      if (!tempRect) return
+      const x = Math.min(imgX, state.drawingStartX)
+      const y = Math.min(imgY, state.drawingStartY)
+      const w = Math.abs(imgX - state.drawingStartX)
+      const h = Math.abs(imgY - state.drawingStartY)
+      tempRect.setAttribute('x', String(x))
+      tempRect.setAttribute('y', String(y))
+      tempRect.setAttribute('width', String(w))
+      tempRect.setAttribute('height', String(h))
+    } else if (state.isPanning) {
+      // @ts-expect-error: dinamik
+      state.translateX = e.clientX - state.startPanX
+      // @ts-expect-error: dinamik
+      state.translateY = e.clientY - state.startPanY
+      updateTransform()
+    }
+  })
+
+  const finishPointer = () => {
+    if (state.isDrawing) {
+      const tempRect = annotationsSvg.value!.querySelector('#temp-shape') as SVGRectElement | null
+      if (tempRect) {
+        const w = parseFloat(tempRect.getAttribute('width') || '0')
+        const h = parseFloat(tempRect.getAttribute('height') || '0')
+        if (w > 5 && h > 5) {
+          const newAnn: Annotation = {
+            id: Date.now(),
+            type: 'bbox',
+            label: state.activeLabel,
+            x: parseFloat(tempRect.getAttribute('x') || '0'),
+            y: parseFloat(tempRect.getAttribute('y') || '0'),
+            width: w,
+            height: h
+          }
+          state.annotations.push(newAnn)
+          recordHistory()
+          renderAnnotations()
+        }
+        tempRect.remove()
+      }
+    }
+    state.isDrawing = false
+    state.isPanning = false
+    canvasContainer.value?.classList.remove('panning')
+  }
+  canvasContainer.value?.addEventListener('mouseup', finishPointer)
+  canvasContainer.value?.addEventListener('mouseleave', finishPointer)
+
+  // Başlangıç resmi
+  state.img.crossOrigin = 'anonymous'
+  state.img.src = 'https://i.imgur.com/g88T35b.jpeg' // istersen assets içine yerel resim koyabiliriz
+  const onReady = () => {
+    fitToScreen()
+    // varsayılan label + tool
+    const firstLabel = labelList.value?.querySelector('.label-item') as HTMLElement | null
+    setActiveLabel(firstLabel)
+    const selectTool = toolGroup.value?.querySelector(
+      '.annotation-tool[data-tool="select"]'
+    ) as HTMLElement | null
+    setActiveTool(selectTool)
+    recordHistory()
+  }
   if (state.img.complete) onReady()
   else state.img.onload = onReady
-  if (state.svg.complete) onReady()
-  else state.svg.onload = onReady
-
-  // events
-  canvasContainer.value?.addEventListener('wheel', onWheel, { passive: false })
-  canvasContainer.value?.addEventListener('mousedown', onMouseDown)
-  canvasContainer.value?.addEventListener('mouseup', onMouseUp)
-  canvasContainer.value?.addEventListener('mouseleave', onMouseLeave)
-  canvasContainer.value?.addEventListener('mousemove', onMouseMove)
-  window.addEventListener('resize', fitToScreen)
-  document.addEventListener('keydown', keyNav)
-
-  setActiveTask(0)
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('resize', fitToScreen)
   canvasContainer.value?.removeEventListener('wheel', onWheel as any)
-  canvasContainer.value?.removeEventListener('mousedown', onMouseDown as any)
-  canvasContainer.value?.removeEventListener('mouseup', onMouseUp as any)
-  canvasContainer.value?.removeEventListener('mouseleave', onMouseLeave as any)
-  canvasContainer.value?.removeEventListener('mousemove', onMouseMove as any)
-  window.removeEventListener('resize', fitToScreen as any)
-  document.removeEventListener('keydown', keyNav as any)
 })
 </script>
 
@@ -244,54 +443,77 @@ onBeforeUnmount(() => {
   <div
     class="flex h-screen bg-background-light dark:bg-background-dark font-display text-gray-800 dark:text-gray-200"
   >
-    <!-- Sidebar -->
+    <!-- Sidebar (kısa) -->
     <aside
-      class="flex flex-col w-64 bg-white dark:bg-background-dark border-r border-gray-200 dark:border-gray-800"
+      class="flex flex-col w-72 bg-white dark:bg-background-dark border-r border-gray-200 dark:border-gray-800"
     >
       <div class="p-6">
         <h1 class="text-2xl font-bold text-gray-900 dark:text-white">LabelGun</h1>
       </div>
-      <nav class="flex-1 px-4 space-y-2">
+
+      <nav class="flex-1 px-4 space-y-2 overflow-y-auto">
         <h2
-          class="px-2 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider"
+          class="px-2 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2"
         >
           Tasks
         </h2>
-        <ul class="space-y-1">
-          <li v-for="(t, i) in tasks" :key="t.id" class="relative group">
+        <ul class="space-y-3">
+          <li>
             <a
+              class="block rounded-lg overflow-hidden border-2 border-primary dark:border-primary/80 bg-primary/5"
               href="#"
-              @click.prevent="setActiveTask(i)"
-              class="flex items-center justify-between px-2 py-2 text-sm font-medium rounded"
-              :class="
-                i === currentTaskIndex
-                  ? 'bg-primary/10 text-primary dark:bg-primary/20'
-                  : 'hover:bg-gray-100 dark:hover:bg-gray-800'
-              "
             >
-              <span>{{ t.name }}</span>
-              <span
-                class="material-symbols-outlined"
-                :class="t.done ? 'text-green-500' : 'text-gray-400 dark:text-gray-600'"
-              >
-                {{ t.done ? 'check_circle' : 'radio_button_unchecked' }}
-              </span>
+              <div class="h-24 bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
+                <span class="material-symbols-outlined text-4xl text-gray-400 dark:text-gray-500"
+                  >image</span
+                >
+              </div>
+              <div class="p-3">
+                <div class="flex justify-between items-start">
+                  <span class="text-sm font-medium">Task 1</span>
+                  <span
+                    class="text-xs font-semibold px-2 py-1 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300"
+                    >In Progress</span
+                  >
+                </div>
+              </div>
             </a>
-            <div
-              class="hidden group-hover:block absolute left-full top-0 ml-2 w-max px-3 py-1.5 bg-gray-900 dark:bg-gray-700 text-white text-xs font-medium rounded-md shadow-lg z-10"
+          </li>
+          <li>
+            <a
+              class="block rounded-lg overflow-hidden border-2 border-transparent hover:border-primary/50"
+              href="#"
             >
-              {{ t.type }}
-            </div>
+              <div class="h-24 bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
+                <span class="material-symbols-outlined text-4xl text-gray-400 dark:text-gray-500"
+                  >image</span
+                >
+              </div>
+              <div class="p-3">
+                <div class="flex justify-between items-start">
+                  <span class="text-sm font-medium">Task 2</span>
+                  <span
+                    class="text-xs font-semibold px-2 py-1 rounded-full bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300"
+                    >Completed</span
+                  >
+                </div>
+              </div>
+            </a>
           </li>
         </ul>
       </nav>
-      <div class="p-4 border-t border-gray-200 dark:border-gray-800">
+
+      <div class="p-4 border-t border-gray-200 dark:border-gray-800 relative">
         <button
-          class="w-full flex items-center justify-center gap-2 rounded bg-primary/10 dark:bg-primary/20 py-2 px-4 text-sm font-semibold text-primary hover:bg-primary/20 dark:hover:bg-primary/30"
+          ref="filterBtn"
+          class="w-full flex items-center justify-center gap-2 rounded bg-primary/10 dark:bg-primary/20 py-2 px-4 text-sm font-semibold text-primary hover:bg-primary/20"
         >
           <span class="material-symbols-outlined">filter_list</span>
           <span>Filter Tasks</span>
         </button>
+        <div ref="filterDropdown" class="absolute bottom-full mb-2 w-full left-0 px-4">
+          <!-- demo dropdown -->
+        </div>
       </div>
     </aside>
 
@@ -301,22 +523,12 @@ onBeforeUnmount(() => {
         class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-background-dark"
       >
         <div class="flex items-center gap-4">
-          <h2 class="text-xl font-bold text-gray-900 dark:text-white">{{ taskTitle }}</h2>
+          <h2 ref="taskTitle" class="text-xl font-bold">Image Annotation - Task 1</h2>
           <div class="flex items-center gap-2">
-            <button
-              class="p-1 rounded-md bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700"
-              :disabled="currentTaskIndex === 0"
-              @click="prevTask"
-              title="Previous Task (←)"
-            >
+            <button class="p-1 rounded-md bg-gray-100 dark:bg-gray-800 hover:bg-gray-200">
               <span class="material-symbols-outlined">arrow_back</span>
             </button>
-            <button
-              class="p-1 rounded-md bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700"
-              :disabled="currentTaskIndex === tasks.length - 1"
-              @click="nextTask"
-              title="Next Task (→)"
-            >
+            <button class="p-1 rounded-md bg-gray-100 dark:bg-gray-800 hover:bg-gray-200">
               <span class="material-symbols-outlined">arrow_forward</span>
             </button>
           </div>
@@ -324,23 +536,18 @@ onBeforeUnmount(() => {
 
         <div class="flex items-center gap-4">
           <button
-            id="theme-toggle"
-            @click="toggleTheme"
-            class="relative inline-flex items-center h-8 w-14 rounded-full bg-gray-200 dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary"
+            ref="themeToggle"
+            class="relative inline-flex items-center h-8 w-14 rounded-full bg-gray-200 dark:bg-gray-700"
           >
-            <span class="sr-only">Toggle theme</span>
             <span
-              class="absolute left-1.5 top-1.5 h-5 w-5 bg-white dark:bg-gray-800 rounded-full shadow-md transform transition-transform duration-300 ease-in-out"
-              :class="isDark ? 'translate-x-6' : ''"
+              class="absolute left-1.5 top-1.5 h-5 w-5 bg-white dark:bg-gray-800 rounded-full shadow-md transform transition-transform duration-300 dark:translate-x-6 flex items-center justify-center"
             >
               <span
-                class="material-symbols-outlined text-sm text-gray-600"
-                :class="isDark ? 'opacity-0' : 'opacity-100'"
+                class="material-symbols-outlined text-sm text-gray-600 dark:text-yellow-400 dark:opacity-0 opacity-100"
                 >light_mode</span
               >
               <span
-                class="material-symbols-outlined text-sm text-yellow-400 absolute"
-                :class="isDark ? 'opacity-100' : 'opacity-0'"
+                class="material-symbols-outlined text-sm text-yellow-400 dark:text-gray-300 absolute opacity-0 dark:opacity-100"
                 >dark_mode</span
               >
             </span>
@@ -348,116 +555,97 @@ onBeforeUnmount(() => {
 
           <div class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
             <span class="material-symbols-outlined">timer</span>
-            <div class="flex items-center gap-1 font-mono">
-              <div
-                class="bg-gray-100 dark:bg-gray-800 rounded px-2 py-1 text-lg font-bold text-gray-900 dark:text-white"
-              >
-                01
-              </div>
-              <span>:</span>
-              <div
-                class="bg-gray-100 dark:bg-gray-800 rounded px-2 py-1 text-lg font-bold text-gray-900 dark:text-white"
-              >
-                23
-              </div>
-              <span>:</span>
-              <div
-                class="bg-gray-100 dark:bg-gray-800 rounded px-2 py-1 text-lg font-bold text-gray-900 dark:text-white"
-              >
-                45
-              </div>
+            <div class="font-mono bg-gray-100 dark:bg-gray-800 rounded px-2 py-1 text-lg font-bold">
+              01:23:45
             </div>
           </div>
 
           <button
-            class="flex items-center justify-center gap-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 py-2 px-4 text-sm font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+            ref="saveBtn"
+            class="flex items-center gap-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 py-2 px-4 text-sm font-semibold hover:bg-gray-50"
           >
-            <span class="material-symbols-outlined text-green-500">cloud_done</span>
-            <span>Save Draft</span>
+            <span class="material-symbols-outlined text-green-500">save</span
+            ><span>Save Draft</span>
           </button>
           <button
-            class="flex items-center justify-center gap-2 rounded bg-primary py-2 px-4 text-sm font-semibold text-white hover:opacity-90"
+            class="flex items-center gap-2 rounded bg-primary py-2 px-4 text-sm font-semibold text-white hover:opacity-90"
           >
-            <span>Submit Work</span>
-            <span class="material-symbols-outlined">arrow_forward</span>
+            <span>Submit Work</span><span class="material-symbols-outlined">arrow_forward</span>
           </button>
         </div>
       </header>
 
       <div class="flex-1 flex p-2 gap-2 overflow-y-auto">
         <div class="flex-1 flex flex-col gap-2">
-          <!-- Toolbar (şimdilik pasif ikonlar) -->
+          <!-- Toolbar -->
           <div
             class="flex items-center justify-between gap-1 p-2 bg-white dark:bg-background-dark rounded-lg border border-gray-200 dark:border-gray-800"
           >
-            <div class="flex items-center gap-1">
+            <div ref="toolGroup" class="flex items-center gap-1" id="tool-group">
               <button
-                class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
+                class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 annotation-tool"
+                data-tool="select"
                 title="Select/Edit"
               >
                 <span class="material-symbols-outlined">touch_app</span>
               </button>
               <div class="h-6 w-px bg-gray-200 dark:bg-gray-700 mx-1"></div>
-              <button class="p-2 rounded-lg bg-primary/10 text-primary" title="SAM">
+
+              <button
+                class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 annotation-tool"
+                data-tool="sam"
+                title="SAM"
+              >
                 <span class="material-symbols-outlined">auto_fix</span>
               </button>
-              <button
-                class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
-                title="Bounding Box"
-              >
-                <span class="material-symbols-outlined">crop_square</span>
-              </button>
-              <button
-                class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
-                title="Polygon"
-              >
-                <span class="material-symbols-outlined">pentagon</span>
-              </button>
-              <button
-                class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
-                title="Polyline"
-              >
-                <span class="material-symbols-outlined">timeline</span>
-              </button>
-              <button
-                class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
-                title="Keypoint"
-              >
-                <span class="material-symbols-outlined">radio_button_checked</span>
-              </button>
-              <button
-                class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
-                title="Circle"
-              >
-                <span class="material-symbols-outlined">radio_button_unchecked</span>
-              </button>
+
+              <div class="relative">
+                <button
+                  ref="shapesToolBtn"
+                  class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center gap-1"
+                  id="shapes-tool-btn"
+                  title="Annotation Shapes"
+                >
+                  <span class="material-symbols-outlined">category</span>
+                  <span class="material-symbols-outlined text-sm">arrow_drop_down</span>
+                </button>
+                <div
+                  ref="shapesDropdown"
+                  class="absolute top-full mt-2 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-xl z-20"
+                  id="shapes-dropdown"
+                >
+                  <a
+                    href="#"
+                    class="flex items-center gap-3 px-4 py-2 text-sm hover:bg-gray-100 annotation-tool"
+                    data-tool="bbox"
+                  >
+                    <span class="material-symbols-outlined">crop_square</span
+                    ><span>Bounding Box</span>
+                  </a>
+                  <a
+                    href="#"
+                    class="flex items-center gap-3 px-4 py-2 text-sm hover:bg-gray-100 annotation-tool"
+                    data-tool="polygon"
+                  >
+                    <span class="material-symbols-outlined">pentagon</span><span>Polygon</span>
+                  </a>
+                </div>
+              </div>
+
               <div class="h-6 w-px bg-gray-200 dark:bg-gray-700 mx-1"></div>
-              <button class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800" title="Undo">
+              <button
+                ref="undoBtn"
+                class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
+                title="Undo (Ctrl+Z)"
+              >
                 <span class="material-symbols-outlined">undo</span>
               </button>
-              <button class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800" title="Redo">
+              <button
+                ref="redoBtn"
+                class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
+                title="Redo (Ctrl+Y)"
+              >
                 <span class="material-symbols-outlined">redo</span>
-              </button>
-              <div class="h-6 w-px bg-gray-200 dark:bg-gray-700 mx-1"></div>
-              <button
-                class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
-                title="Visibility"
-              >
-                <span class="material-symbols-outlined">visibility</span>
-              </button>
-              <button
-                class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
-                title="Layer Order"
-              >
-                <span class="material-symbols-outlined">layers</span>
-              </button>
-            </div>
-            <div class="flex items-center gap-2">
-              <button
-                class="flex items-center gap-2 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
-                title="Pan"
-              >
-                <span class="material-symbols-outlined">pan_tool</span>
               </button>
             </div>
           </div>
@@ -467,90 +655,61 @@ onBeforeUnmount(() => {
             ref="canvasContainer"
             class="relative w-full flex-1 rounded-lg bg-gray-200 dark:bg-gray-800 overflow-hidden canvas-container"
           >
-            <canvas ref="canvasEl" class="object-contain"></canvas>
+            <canvas ref="canvasEl" id="canvas"></canvas>
+            <svg ref="annotationsSvg" id="annotations-svg"></svg>
 
             <div class="crosshair-lines">
-              <div ref="crossH" class="crosshair-line crosshair-horizontal"></div>
-              <div ref="crossV" class="crosshair-line crosshair-vertical"></div>
+              <div ref="crosshairH" class="crosshair-line crosshair-horizontal"></div>
+              <div ref="crosshairV" class="crosshair-line crosshair-vertical"></div>
             </div>
 
             <div
               class="absolute bottom-4 right-4 flex items-center gap-1 bg-black/50 p-1 rounded-lg text-white"
             >
-              <button class="p-2 rounded-md hover:bg-white/20" @click="zoom(-0.1)">
+              <button ref="zoomOutBtn" class="p-2 rounded-md hover:bg-white/20" title="Zoom Out">
                 <span class="material-symbols-outlined">zoom_out</span>
               </button>
-              <button class="p-2 rounded-md hover:bg-white/20" @click="zoom(0.1)">
+              <button ref="zoomInBtn" class="p-2 rounded-md hover:bg-white/20" title="Zoom In">
                 <span class="material-symbols-outlined">zoom_in</span>
               </button>
-              <button class="p-2 rounded-md hover:bg-white/20" @click="fitToScreen()">
+              <button
+                ref="fitScreenBtn"
+                class="p-2 rounded-md hover:bg-white/20"
+                title="Fit to Screen"
+              >
                 <span class="material-symbols-outlined">fit_screen</span>
               </button>
-              <button class="p-2 rounded-md hover:bg-white/20" @click="resetView()">
+              <button
+                ref="resetViewBtn"
+                class="p-2 rounded-md hover:bg-white/20"
+                title="Reset View"
+              >
                 <span class="material-symbols-outlined">restart_alt</span>
               </button>
             </div>
 
             <div
+              ref="coords"
               class="absolute bottom-4 left-4 bg-black/50 text-white text-xs font-mono rounded px-2 py-1"
             >
-              {{ coordsText }}
+              X: 0, Y: 0
             </div>
           </div>
         </div>
 
-        <!-- Right panels -->
-        <div class="w-full lg:w-96 flex flex-col gap-4">
+        <!-- Sağ paneller -->
+        <div class="w-full lg:w-96 flex flex-col gap-4 pt-0">
           <div
             class="bg-white dark:bg-background-dark p-4 rounded-lg border border-gray-200 dark:border-gray-800"
           >
-            <h3 class="text-lg font-semibold mb-3 text-gray-900 dark:text-white">Annotations</h3>
-            <div class="space-y-3">
-              <div class="p-3 rounded-lg bg-primary/10 dark:bg-primary/20 border border-primary/30">
-                <div class="flex justify-between items-center">
-                  <p class="text-sm font-medium text-primary">Car 1</p>
-                  <div class="flex items-center gap-1">
-                    <button class="p-1 rounded-full hover:bg-black/10 dark:hover:bg-white/10">
-                      <span class="material-symbols-outlined text-sm">edit</span>
-                    </button>
-                    <button class="p-1 rounded-full hover:bg-black/10 dark:hover:bg-white/10">
-                      <span class="material-symbols-outlined text-sm">delete</span>
-                    </button>
-                  </div>
-                </div>
-                <p class="text-xs text-gray-600 dark:text-gray-400 mt-1">SAM Polygon</p>
-              </div>
-
-              <div
-                class="p-3 rounded-lg bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700"
-              >
-                <div class="flex justify-between items-center">
-                  <p class="text-sm font-medium text-gray-800 dark:text-gray-200">Person 1</p>
-                  <div class="flex items-center gap-1">
-                    <button class="p-1 rounded-full hover:bg-black/10 dark:hover:bg-white/10">
-                      <span class="material-symbols-outlined text-sm">edit</span>
-                    </button>
-                    <button class="p-1 rounded-full hover:bg-black/10 dark:hover:bg-white/10">
-                      <span class="material-symbols-outlined text-sm">delete</span>
-                    </button>
-                  </div>
-                </div>
-                <p class="text-xs text-gray-600 dark:text-gray-400 mt-1">Bounding Box</p>
-              </div>
-            </div>
-            <div class="mt-4 flex justify-end gap-2">
-              <button
-                class="rounded bg-primary px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
-              >
-                Add New
-              </button>
-            </div>
+            <h3 class="text-lg font-semibold mb-3">Annotations</h3>
+            <div ref="annotationList" class="space-y-3"></div>
           </div>
 
           <div
             class="bg-white dark:bg-background-dark p-4 rounded-lg border border-gray-200 dark:border-gray-800 flex flex-col flex-1"
           >
-            <h3 class="text-lg font-semibold mb-3 text-gray-900 dark:text-white">Labels</h3>
+            <h3 class="text-lg font-semibold mb-3">Labels</h3>
             <div class="relative mb-3">
               <span
                 class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
@@ -559,37 +718,19 @@ onBeforeUnmount(() => {
               <input
                 type="search"
                 placeholder="Search labels..."
-                class="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 focus:ring-primary focus:border-primary"
+                class="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800"
               />
             </div>
-            <div class="flex flex-wrap gap-2">
+            <div ref="labelList" class="flex flex-wrap gap-2">
               <span
-                class="cursor-pointer bg-primary text-white text-xs font-medium px-2.5 py-1 rounded-full border border-primary"
+                class="cursor-pointer bg-primary/10 text-primary text-xs font-medium px-2.5 py-1 rounded-full hover:bg-primary/20 label-item"
+                data-label="Car"
                 >Car</span
               >
               <span
-                class="cursor-pointer bg-primary/10 text-primary text-xs font-medium px-2.5 py-1 rounded-full hover:bg-primary/20"
+                class="cursor-pointer bg-primary/10 text-primary text-xs font-medium px-2.5 py-1 rounded-full hover:bg-primary/20 label-item"
+                data-label="Pedestrian"
                 >Pedestrian</span
-              >
-              <span
-                class="cursor-pointer bg-primary/10 text-primary text-xs font-medium px-2.5 py-1 rounded-full hover:bg-primary/20"
-                >Traffic Light</span
-              >
-              <span
-                class="cursor-pointer bg-primary/10 text-primary text-xs font-medium px-2.5 py-1 rounded-full hover:bg-primary/20"
-                >Bicycle</span
-              >
-              <span
-                class="cursor-pointer bg-primary/10 text-primary text-xs font-medium px-2.5 py-1 rounded-full hover:bg-primary/20"
-                >Bus</span
-              >
-              <span
-                class="cursor-pointer bg-primary/10 text-primary text-xs font-medium px-2.5 py-1 rounded-full hover:bg-primary/20"
-                >Motorcycle</span
-              >
-              <span
-                class="cursor-pointer bg-primary/10 text-primary text-xs font-medium px-2.5 py-1 rounded-full hover:bg-primary/20"
-                >Truck</span
               >
             </div>
           </div>
@@ -598,3 +739,95 @@ onBeforeUnmount(() => {
     </main>
   </div>
 </template>
+
+<style>
+.material-symbols-outlined {
+  font-variation-settings:
+    'FILL' 0,
+    'wght' 400,
+    'GRAD' 0,
+    'opsz' 24;
+}
+.canvas-container {
+  user-select: none;
+  cursor: grab;
+}
+.canvas-container.panning {
+  cursor: grabbing;
+}
+.canvas-container.tool-active {
+  cursor: crosshair;
+}
+.crosshair-lines {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.canvas-container.tool-active:hover .crosshair-lines {
+  opacity: 1;
+}
+.crosshair-line {
+  position: absolute;
+  background-color: rgba(229, 231, 235, 0.7);
+  box-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
+}
+.crosshair-horizontal {
+  width: 100%;
+  height: 1px;
+  left: 0;
+}
+.crosshair-vertical {
+  width: 1px;
+  height: 100%;
+  top: 0;
+}
+#canvas,
+#annotations-svg {
+  will-change: transform;
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+}
+#annotations-svg {
+  pointer-events: none;
+}
+#annotations-svg > * {
+  pointer-events: auto;
+  cursor: pointer;
+}
+#shapes-dropdown {
+  display: none;
+}
+#shapes-dropdown.show {
+  display: block;
+}
+.annotation-tool.active {
+  background-color: #1173d41a;
+  color: #1173d4;
+}
+html.dark .annotation-tool.active {
+  background-color: #1173d433;
+}
+.label-item.active {
+  background-color: #1173d4;
+  color: #fff;
+  border-color: #1173d4;
+}
+.annotation-item.selected {
+  background-color: #1173d41a;
+  border-color: #1173d480;
+}
+#annotations-svg .annotation-shape.selected {
+  stroke-width: 4;
+  stroke: #ffc107;
+}
+#temp-shape {
+  stroke-dasharray: 5, 5;
+}
+</style>
