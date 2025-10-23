@@ -1,0 +1,76 @@
+# -------------------------
+# OS/Editor
+# -------------------------
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.idea/
+*.iml
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# -------------------------
+# Node/NPM
+# -------------------------
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+logs/
+*.log
+*.pid
+*.pid.lock
+.npmrc
+
+# -------------------------
+# Vite / Build çıktılarını alma
+# -------------------------
+dist/
+dist-*/
+dist-electron/
+out/
+release/
+coverage/
+*.lcov
+.cache/
+temp/
+tmp/
+.tmp/
+
+# -------------------------
+# Electron paketleri / artefaktlar
+# -------------------------
+*.asar
+*.dmg
+*.exe
+*.app
+*.AppImage
+*.deb
+*.rpm
+*.snap
+*.nupkg
+*.zip
+*.tar.gz
+
+# -------------------------
+# TypeScript
+# -------------------------
+*.tsbuildinfo
+
+# -------------------------
+# Env & Secrets
+# -------------------------
+.env
+.env.local
+.env.*.local
+# Örnek dosyayı tut (eklersen)
+!.env.example
+
+# -------------------------
+# OneDrive/çakışma dosyaları (Windows)
+# -------------------------
+*.tmp.drivedownload
+*.crdownload
