@@ -250,6 +250,18 @@ function updateCursor() {
   const isToolActive =
     !!state.activeLabel && (state.lastUsedTool === 'shapes' || state.lastUsedTool === 'sam')
   target.classList.toggle('tool-active', isToolActive)
+  
+  // Eğer pan yapılıyorsa cursor grabbing olsun
+  if (state.isPanning) {
+    target.style.cursor = 'grabbing'
+  }
+  // Eğer polygon/polyline çizimi devam ediyorsa, cursor'ı crosshair yap
+  else if (state.isDrawing && (state.drawingShape === 'polygon' || state.drawingShape === 'polyline')) {
+    target.style.cursor = 'crosshair'
+  } else {
+    // Diğer durumlarda normal cursor
+    target.style.cursor = isToolActive ? 'crosshair' : 'grab'
+  }
 }
 
 /** Render */
@@ -568,14 +580,14 @@ submitBtn?.addEventListener('click', () => {
   })
   if (canvasContainer.value) containerRO.observe(canvasContainer.value)
 
-  // Çizim & Pan
-  canvasContainer.value?.addEventListener('mousedown', (e: MouseEvent) => {
-  // Sol click (button 0) - normal işlemler
-  // Sağ click (button 2) - etiketleme modunda pan yap
+
+ // Çizim & Pan
+canvasContainer.value?.addEventListener('mousedown', (e: MouseEvent) => {
   const isToolActive = canvasContainer.value!.classList.contains('tool-active')
   
-  if (e.button === 2 && isToolActive) {
-    // Sağ click + etiketleme modu = PAN
+  // SAĞ CLICK (button 2) - HER ZAMAN PAN YAPSIN
+  // Çizim modunda bile sağ click pan yapabilmeli
+  if (e.button === 2) {
     e.preventDefault() // context menu'yu engelle
     state.isPanning = true
     state.startPanX = e.clientX - state.translateX
@@ -585,9 +597,10 @@ submitBtn?.addEventListener('click', () => {
     return
   }
   
+  // SOL CLICK (button 0) işlemleri
   if (e.button !== 0) return
 
-  // SAM şimdilik pasif: tıklandığında çizim yapma
+  // SAM şimdilik pasif
   if (state.lastUsedTool === 'sam') { return }
 
   if (isToolActive && state.lastUsedTool === 'shapes') {
@@ -642,7 +655,7 @@ submitBtn?.addEventListener('click', () => {
     }
     else if (shape === 'polygon' || shape === 'polyline') {
       if (!state.isDrawing || state.drawingShape !== shape) {
-        // yeni başlat
+        // yeni çizim başlat
         state.isDrawing = true
         state.drawingShape = shape
         state.polyPoints = [{ x: imgX, y: imgY }]
@@ -653,6 +666,9 @@ submitBtn?.addEventListener('click', () => {
         temp.setAttribute('fill', shape === 'polygon' ? 'rgba(255,193,7,0.08)' : 'none')
         temp.setAttribute('points', `${imgX},${imgY}`)
         annotationsSvg.value!.appendChild(temp)
+        
+        // Polygon/polyline çiziminde cursor'ı crosshair yap
+        canvasContainer.value!.style.cursor = 'crosshair'
       } else {
         // noktaya devam
         state.polyPoints.push({ x: imgX, y: imgY })
@@ -678,33 +694,37 @@ canvasContainer.value?.addEventListener('contextmenu', (e: Event) => {
 })
 
   // Polygon / Polyline bitir
-  const commitPoly = () => {
-    if (!state.isDrawing || !(state.drawingShape === 'polygon' || state.drawingShape === 'polyline')) return
-    const minPts = state.drawingShape === 'polygon' ? 3 : 2
-    if (state.polyPoints.length >= minPts) {
-      const ann = (state.drawingShape === 'polygon')
-        ? ({ id: Date.now(), type: 'polygon', label: state.activeLabel, points: [...state.polyPoints] } as PolygonAnn)
-        : ({ id: Date.now(), type: 'polyline', label: state.activeLabel, points: [...state.polyPoints] } as PolylineAnn)
-      state.annotations.push(ann)
-      recordHistory()
-      renderAnnotations()
-    }
-    // temp’i temizle
-    const temp = annotationsSvg.value!.querySelector('#temp-shape')
-    temp?.remove()
-    state.polyPoints = []
-    state.drawingShape = null
-    state.isDrawing = false
-  }
+const cancelPoly = () => {
+  if (!state.isDrawing) return
+  const temp = annotationsSvg.value!.querySelector('#temp-shape')
+  temp?.remove()
+  state.polyPoints = []
+  state.drawingShape = null
+  state.isDrawing = false
+  // Cursor'ı normale döndür
+  updateCursor()
+}
 
-  const cancelPoly = () => {
-    if (!state.isDrawing) return
-    const temp = annotationsSvg.value!.querySelector('#temp-shape')
-    temp?.remove()
-    state.polyPoints = []
-    state.drawingShape = null
-    state.isDrawing = false
+const commitPoly = () => {
+  if (!state.isDrawing || !(state.drawingShape === 'polygon' || state.drawingShape === 'polyline')) return
+  const minPts = state.drawingShape === 'polygon' ? 3 : 2
+  if (state.polyPoints.length >= minPts) {
+    const ann = (state.drawingShape === 'polygon')
+      ? ({ id: Date.now(), type: 'polygon', label: state.activeLabel, points: [...state.polyPoints] } as PolygonAnn)
+      : ({ id: Date.now(), type: 'polyline', label: state.activeLabel, points: [...state.polyPoints] } as PolylineAnn)
+    state.annotations.push(ann)
+    recordHistory()
+    renderAnnotations()
   }
+  // temp'i temizle
+  const temp = annotationsSvg.value!.querySelector('#temp-shape')
+  temp?.remove()
+  state.polyPoints = []
+  state.drawingShape = null
+  state.isDrawing = false
+  // Cursor'ı normale döndür
+  updateCursor()
+}
 
   // Enter: bitir, Esc: iptal
   document.addEventListener('keydown', (e) => {
@@ -723,122 +743,132 @@ canvasContainer.value?.addEventListener('contextmenu', (e: Event) => {
   })
 
 
-  canvasContainer.value?.addEventListener('mousemove', (e: MouseEvent) => {
-    const rect = canvasContainer.value!.getBoundingClientRect()
-    const mouseX = e.clientX - rect.left
-    const mouseY = e.clientY - rect.top
+canvasContainer.value?.addEventListener('mousemove', (e: MouseEvent) => {
+  const rect = canvasContainer.value!.getBoundingClientRect()
+  const mouseX = e.clientX - rect.left
+  const mouseY = e.clientY - rect.top
 
-    if (crosshairH.value) crosshairH.value.style.top = `${mouseY}px`
-    if (crosshairV.value) crosshairV.value.style.left = `${mouseX}px`
+  if (crosshairH.value) crosshairH.value.style.top = `${mouseY}px`
+  if (crosshairV.value) crosshairV.value.style.left = `${mouseX}px`
 
-    const imgX = (mouseX - state.translateX) / state.scale
-    const imgY = (mouseY - state.translateY) / state.scale
+  const imgX = (mouseX - state.translateX) / state.scale
+  const imgY = (mouseY - state.translateY) / state.scale
 
-    if (
-      !Number.isFinite(imgX) ||
-      !Number.isFinite(imgY) ||
-      !Number.isFinite(state.scale) ||
-      state.scale <= 0
-    ) {
-      if (coords.value) coords.value.textContent = 'X: -, Y: -'
-      return
-    }
-
-    if (coords.value) coords.value.textContent = `X: ${Math.round(imgX)}, Y: ${Math.round(imgY)}`
-
-    if (state.isDrawing) {
-      if (state.drawingShape === 'bbox') {
-        const temp = annotationsSvg.value!.querySelector('#temp-shape') as SVGRectElement | null
-        if (!temp) return
-        const x = Math.min(imgX, state.drawingStartX)
-        const y = Math.min(imgY, state.drawingStartY)
-        const w = Math.abs(imgX - state.drawingStartX)
-        const h = Math.abs(imgY - state.drawingStartY)
-        temp.setAttribute('x', String(x))
-        temp.setAttribute('y', String(y))
-        temp.setAttribute('width', String(w))
-        temp.setAttribute('height', String(h))
-      }
-      else if (state.drawingShape === 'circle') {
-        const temp = annotationsSvg.value!.querySelector('#temp-shape') as SVGCircleElement | null
-        if (!temp) return
-        const dx = imgX - state.drawingStartX
-        const dy = imgY - state.drawingStartY
-        const r = Math.sqrt(dx*dx + dy*dy)
-        temp.setAttribute('r', String(r))
-      }
-      else if (state.drawingShape === 'polygon' || state.drawingShape === 'polyline') {
-        const temp = annotationsSvg.value!.querySelector('#temp-shape') as SVGPolylineElement | null
-        if (!temp) return
-        const pts = [...state.polyPoints, { x: imgX, y: imgY }]
-        temp.setAttribute('points', pts.map(p => `${p.x},${p.y}`).join(' '))
-      }
-    } else if (state.isPanning) {
-      state.translateX = e.clientX - state.startPanX
-      state.translateY = e.clientY - state.startPanY
-      updateTransform()
-    }
-
-  })
-
-  const finishPointer = () => {
-    if (state.isDrawing) {
-      if (state.drawingShape === 'bbox') {
-        const temp = annotationsSvg.value!.querySelector('#temp-shape') as SVGRectElement | null
-        if (temp) {
-          const w = parseFloat(temp.getAttribute('width') || '0')
-          const h = parseFloat(temp.getAttribute('height') || '0')
-          if (w > 5 && h > 5) {
-            const newAnn: BBox = {
-              id: Date.now(),
-              type: 'bbox',
-              label: state.activeLabel,
-              x: parseFloat(temp.getAttribute('x') || '0'),
-              y: parseFloat(temp.getAttribute('y') || '0'),
-              width: w,
-              height: h
-            }
-            state.annotations.push(newAnn)
-            recordHistory()
-            renderAnnotations()
-          }
-          temp.remove()
-        }
-        state.drawingShape = null
-        state.isDrawing = false
-      }
-      else if (state.drawingShape === 'circle') {
-        const temp = annotationsSvg.value!.querySelector('#temp-shape') as SVGCircleElement | null
-        if (temp) {
-          const r = parseFloat(temp.getAttribute('r') || '0')
-          if (r > 3) {
-            const newAnn: CircleAnn = {
-              id: Date.now(),
-              type: 'circle',
-              label: state.activeLabel,
-              cx: parseFloat(temp.getAttribute('cx') || '0'),
-              cy: parseFloat(temp.getAttribute('cy') || '0'),
-              r
-            }
-            state.annotations.push(newAnn)
-            recordHistory()
-            renderAnnotations()
-          }
-          temp.remove()
-        }
-        state.drawingShape = null
-        state.isDrawing = false
-      }
-      // polygon/polyline mouseup ile bitmez (dblclick/Enter ile bitecek)
-    }
-    state.isPanning = false
-    canvasContainer.value?.classList.remove('panning')
-
-    // Cursor'ı resetle
-    const isToolActive = canvasContainer.value!.classList.contains('tool-active')
-    canvasContainer.value!.style.cursor = isToolActive ? 'crosshair' : 'grab'
-
+  if (
+    !Number.isFinite(imgX) ||
+    !Number.isFinite(imgY) ||
+    !Number.isFinite(state.scale) ||
+    state.scale <= 0
+  ) {
+    if (coords.value) coords.value.textContent = 'X: -, Y: -'
+    return
   }
+
+  if (coords.value) coords.value.textContent = `X: ${Math.round(imgX)}, Y: ${Math.round(imgY)}`
+
+  // ÖNCE PAN KONTROLÜ - pan öncelikli olsun
+  if (state.isPanning) {
+    state.translateX = e.clientX - state.startPanX
+    state.translateY = e.clientY - state.startPanY
+    updateTransform()
+  } 
+  // Sonra çizim kontrolü
+  else if (state.isDrawing) {
+    if (state.drawingShape === 'bbox') {
+      const temp = annotationsSvg.value!.querySelector('#temp-shape') as SVGRectElement | null
+      if (!temp) return
+      const x = Math.min(imgX, state.drawingStartX)
+      const y = Math.min(imgY, state.drawingStartY)
+      const w = Math.abs(imgX - state.drawingStartX)
+      const h = Math.abs(imgY - state.drawingStartY)
+      temp.setAttribute('x', String(x))
+      temp.setAttribute('y', String(y))
+      temp.setAttribute('width', String(w))
+      temp.setAttribute('height', String(h))
+    }
+    else if (state.drawingShape === 'circle') {
+      const temp = annotationsSvg.value!.querySelector('#temp-shape') as SVGCircleElement | null
+      if (!temp) return
+      const dx = imgX - state.drawingStartX
+      const dy = imgY - state.drawingStartY
+      const r = Math.sqrt(dx*dx + dy*dy)
+      temp.setAttribute('r', String(r))
+    }
+    else if (state.drawingShape === 'polygon' || state.drawingShape === 'polyline') {
+      const temp = annotationsSvg.value!.querySelector('#temp-shape') as SVGPolylineElement | null
+      if (!temp) return
+      const pts = [...state.polyPoints, { x: imgX, y: imgY }]
+      temp.setAttribute('points', pts.map(p => `${p.x},${p.y}`).join(' '))
+    }
+  }
+
+  // Cursor güncelleme
+  updateCursor()
+})
+
+const finishPointer = () => {
+  if (state.isDrawing && !state.isPanning) {
+    // Sadece çizim yapılıyorsa ve pan yapılmıyorsa çizim işlemlerini bitir
+    if (state.drawingShape === 'bbox') {
+      const temp = annotationsSvg.value!.querySelector('#temp-shape') as SVGRectElement | null
+      if (temp) {
+        const w = parseFloat(temp.getAttribute('width') || '0')
+        const h = parseFloat(temp.getAttribute('height') || '0')
+        if (w > 5 && h > 5) {
+          const newAnn: BBox = {
+            id: Date.now(),
+            type: 'bbox',
+            label: state.activeLabel,
+            x: parseFloat(temp.getAttribute('x') || '0'),
+            y: parseFloat(temp.getAttribute('y') || '0'),
+            width: w,
+            height: h
+          }
+          state.annotations.push(newAnn)
+          recordHistory()
+          renderAnnotations()
+        }
+        temp.remove()
+      }
+      state.drawingShape = null
+      state.isDrawing = false
+    }
+    else if (state.drawingShape === 'circle') {
+      const temp = annotationsSvg.value!.querySelector('#temp-shape') as SVGCircleElement | null
+      if (temp) {
+        const r = parseFloat(temp.getAttribute('r') || '0')
+        if (r > 3) {
+          const newAnn: CircleAnn = {
+            id: Date.now(),
+            type: 'circle',
+            label: state.activeLabel,
+            cx: parseFloat(temp.getAttribute('cx') || '0'),
+            cy: parseFloat(temp.getAttribute('cy') || '0'),
+            r
+          }
+          state.annotations.push(newAnn)
+          recordHistory()
+          renderAnnotations()
+        }
+        temp.remove()
+      }
+      state.drawingShape = null
+      state.isDrawing = false
+    }
+    // polygon/polyline çizimi devam ediyorsa, cursor'ı crosshair olarak koru
+    else if (state.drawingShape === 'polygon' || state.drawingShape === 'polyline') {
+      // Çizim devam ediyor, cursor crosshair kalacak
+      canvasContainer.value!.style.cursor = 'crosshair'
+    }
+  }
+  
+  state.isPanning = false
+  canvasContainer.value?.classList.remove('panning')
+
+  // Cursor'ı güncelle
+  updateCursor()
+}
+
   canvasContainer.value?.addEventListener('mouseup', finishPointer)
   canvasContainer.value?.addEventListener('mouseleave', finishPointer)
 
