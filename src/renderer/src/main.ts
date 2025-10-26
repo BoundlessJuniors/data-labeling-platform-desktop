@@ -1,4 +1,3 @@
-import './assets/main.css'
 import './styles/tailwind.css'
 import './styles/icons.css'
 

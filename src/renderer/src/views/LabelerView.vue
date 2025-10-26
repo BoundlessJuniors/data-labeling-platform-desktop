@@ -621,7 +621,7 @@ onBeforeUnmount(() => {
               class="absolute left-1.5 top-1.5 h-5 w-5 bg-white dark:bg-gray-800 rounded-full shadow-md transform transition-transform duration-300 dark:translate-x-6 flex items-center justify-center"
             >
               <SunIcon  class="ui-svg h-4 w-4 text-gray-600  opacity-100 dark:opacity-0" />
-             <MoonIcon class="ui-svg h-4 w-4 text-yellow-400 absolute opacity-0 dark:opacity-100" />
+             <MoonIcon class="ui-svg h-4 w-4 text-primary absolute opacity-0 dark:opacity-100" />
             </span>
           </button>
 
