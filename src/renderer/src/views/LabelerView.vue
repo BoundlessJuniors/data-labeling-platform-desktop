@@ -570,9 +570,23 @@ submitBtn?.addEventListener('click', () => {
 
   // Çizim & Pan
   canvasContainer.value?.addEventListener('mousedown', (e: MouseEvent) => {
+  // Sol click (button 0) - normal işlemler
+  // Sağ click (button 2) - etiketleme modunda pan yap
+  const isToolActive = canvasContainer.value!.classList.contains('tool-active')
+  
+  if (e.button === 2 && isToolActive) {
+    // Sağ click + etiketleme modu = PAN
+    e.preventDefault() // context menu'yu engelle
+    state.isPanning = true
+    state.startPanX = e.clientX - state.translateX
+    state.startPanY = e.clientY - state.translateY
+    canvasContainer.value!.classList.add('panning')
+    canvasContainer.value!.style.cursor = 'grabbing'
+    return
+  }
+  
   if (e.button !== 0) return
 
-  const isToolActive = canvasContainer.value!.classList.contains('tool-active')
   // SAM şimdilik pasif: tıklandığında çizim yapma
   if (state.lastUsedTool === 'sam') { return }
 
@@ -647,10 +661,19 @@ submitBtn?.addEventListener('click', () => {
       }
     }
   } else {
+    // Normal pan (sol click + etiketleme modu değil)
     state.isPanning = true
     state.startPanX = e.clientX - state.translateX
     state.startPanY = e.clientY - state.translateY
     canvasContainer.value!.classList.add('panning')
+  }
+})
+
+// Context menu'yu engelle (sağ click menüsü)
+canvasContainer.value?.addEventListener('contextmenu', (e: Event) => {
+  const isToolActive = canvasContainer.value!.classList.contains('tool-active')
+  if (isToolActive) {
+    e.preventDefault()
   }
 })
 
@@ -810,6 +833,10 @@ submitBtn?.addEventListener('click', () => {
     }
     state.isPanning = false
     canvasContainer.value?.classList.remove('panning')
+
+    // Cursor'ı resetle
+    const isToolActive = canvasContainer.value!.classList.contains('tool-active')
+    canvasContainer.value!.style.cursor = isToolActive ? 'crosshair' : 'grab'
 
   }
   canvasContainer.value?.addEventListener('mouseup', finishPointer)
