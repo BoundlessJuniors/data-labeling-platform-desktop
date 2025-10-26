@@ -3,6 +3,24 @@ import { onMounted, onBeforeUnmount, ref } from 'vue'
 import { createPopper } from '@popperjs/core'
 import undoIcon from '@renderer/assets/icons/custom/undo.svg'
 import redoIcon from '@renderer/assets/icons/custom/redo.svg'
+import selectIcon from '@renderer/assets/icons/custom/touch_app.svg'
+import samIcon from '@renderer/assets/icons/custom/wand_shine.svg'
+import shapesIcon from '@renderer/assets/icons/custom/category.svg'
+import chevronDownIcon from '@renderer/assets/icons/custom/arrow_drop_down.svg'
+import arrowBack from '@renderer/assets/icons/custom/arrow_back.svg'
+import arrowForward from '@renderer/assets/icons/custom/arrow_forward.svg'
+import sunIcon from '@renderer/assets/icons/custom/light_mode.svg'
+import moonIcon from '@renderer/assets/icons/custom/dark_mode.svg'
+import timerIcon from '@renderer/assets/icons/custom/timer.svg'
+import saveIcon from '@renderer/assets/icons/custom/cloud_done.svg'
+import approvalIcon from '@renderer/assets/icons/custom/approval_delegation.svg'
+import searchIcon from '@renderer/assets/icons/custom/search.svg'
+import zoomOutIcon from '@renderer/assets/icons/custom/zoom_out.svg'
+import zoomInIcon from '@renderer/assets/icons/custom/zoom_in.svg'
+import fitScreenIcon from '@renderer/assets/icons/custom/fit_screen.svg'
+import resetViewIcon from '@renderer/assets/icons/custom/restart_alt.svg'
+import filterIcon from '@renderer/assets/icons/custom/filter_list.svg'
+
 
 /** Basit tipler */
 type BBox = {
@@ -549,7 +567,7 @@ onBeforeUnmount(() => {
           ref="filterBtn"
           class="w-full flex items-center justify-center gap-2 rounded bg-primary/10 dark:bg-primary/20 py-2 px-4 text-sm font-semibold text-primary hover:bg-primary/20"
         >
-          <span class="material-symbols-outlined">filter_list</span>
+          <img :src="filterIcon" alt="Filter" class="h-5 w-5 pointer-events-none select-none" />
           <span>Filter Tasks</span>
         </button>
         <div ref="filterDropdown" class="absolute bottom-full mb-2 w-full left-0 px-4">
@@ -567,10 +585,10 @@ onBeforeUnmount(() => {
           <h2 ref="taskTitle" class="text-xl font-bold">Image Annotation - Task 1</h2>
           <div class="flex items-center gap-2">
             <button class="p-1 rounded-md bg-gray-100 dark:bg-gray-800 hover:bg-gray-200">
-              <span class="material-symbols-outlined">arrow_back</span>
+              <img :src="arrowBack" class="h-5 w-5" alt="Previous" />
             </button>
             <button class="p-1 rounded-md bg-gray-100 dark:bg-gray-800 hover:bg-gray-200">
-              <span class="material-symbols-outlined">arrow_forward</span>
+              <img :src="arrowForward" class="h-5 w-5" alt="Next" />
             </button>
           </div>
         </div>
@@ -583,19 +601,15 @@ onBeforeUnmount(() => {
             <span
               class="absolute left-1.5 top-1.5 h-5 w-5 bg-white dark:bg-gray-800 rounded-full shadow-md transform transition-transform duration-300 dark:translate-x-6 flex items-center justify-center"
             >
-              <span
-                class="material-symbols-outlined text-sm text-gray-600 dark:text-yellow-400 dark:opacity-0 opacity-100"
-                >light_mode</span
-              >
-              <span
-                class="material-symbols-outlined text-sm text-yellow-400 dark:text-gray-300 absolute opacity-0 dark:opacity-100"
-                >dark_mode</span
-              >
+              <!-- Light icon (light mode'da görünür) -->
+              <img :src="sunIcon" alt="Light" class="h-4 w-4 opacity-100 dark:opacity-0" />
+              <!-- Dark icon (dark mode'da görünür) -->
+              <img :src="moonIcon" alt="Dark" class="h-4 w-4 absolute opacity-0 dark:opacity-100" />
             </span>
           </button>
 
           <div class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-            <span class="material-symbols-outlined">timer</span>
+            <img :src="timerIcon" class="h-5 w-5" alt="Timer" />
             <div class="font-mono bg-gray-100 dark:bg-gray-800 rounded px-2 py-1 text-lg font-bold">
               01:23:45
             </div>
@@ -605,13 +619,13 @@ onBeforeUnmount(() => {
             ref="saveBtn"
             class="flex items-center gap-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 py-2 px-4 text-sm font-semibold hover:bg-gray-50"
           >
-            <span class="material-symbols-outlined text-green-500">save</span
-            ><span>Save Draft</span>
+            <img :src="saveIcon" class="h-5 w-5" alt="Save" />
+            <span>Save Draft</span>
           </button>
           <button
-            class="flex items-center gap-2 rounded bg-primary py-2 px-4 text-sm font-semibold text-white hover:opacity-90"
-          >
-            <span>Submit Work</span><span class="material-symbols-outlined">arrow_forward</span>
+            class="flex items-center gap-2 rounded bg-primary py-2 px-4 text-sm font-semibold text-white hover:opacity-90">
+            <img :src="approvalIcon" class="h-5 w-5" alt="Submit" />
+            <span>Submit Work</span>
           </button>
         </div>
       </header>
@@ -628,8 +642,9 @@ onBeforeUnmount(() => {
                 data-tool="select"
                 title="Select/Edit"
               >
-                <span class="material-symbols-outlined">touch_app</span>
+                <img :src="selectIcon" class="h-6 w-6" alt="Select" />
               </button>
+              
               <div class="h-6 w-px bg-gray-200 dark:bg-gray-700 mx-1"></div>
 
               <button
@@ -637,7 +652,7 @@ onBeforeUnmount(() => {
                 data-tool="sam"
                 title="SAM"
               >
-                <span class="material-symbols-outlined">auto_fix</span>
+                <img :src="samIcon" class="h-6 w-6" alt="SAM" />
               </button>
 
               <div class="relative">
@@ -647,8 +662,8 @@ onBeforeUnmount(() => {
                   id="shapes-tool-btn"
                   title="Annotation Shapes"
                 >
-                  <span class="material-symbols-outlined">category</span>
-                  <span class="material-symbols-outlined text-sm">arrow_drop_down</span>
+                   <img :src="shapesIcon" class="h-6 w-6" alt="Shapes" />
+                   <img :src="chevronDownIcon" class="h-4 w-4" alt="Open" />
                 </button>
                 <div
                   ref="shapesDropdown"
@@ -708,24 +723,24 @@ onBeforeUnmount(() => {
               class="absolute bottom-4 right-4 flex items-center gap-1 bg-black/50 p-1 rounded-lg text-white"
             >
               <button ref="zoomOutBtn" class="p-2 rounded-md hover:bg-white/20" title="Zoom Out">
-                <span class="material-symbols-outlined">zoom_out</span>
+                <img :src="zoomOutIcon" alt="Zoom out" class="h-6 w-6 pointer-events-none select-none" />
               </button>
               <button ref="zoomInBtn" class="p-2 rounded-md hover:bg-white/20" title="Zoom In">
-                <span class="material-symbols-outlined">zoom_in</span>
+                <img :src="zoomInIcon" alt="Zoom in" class="h-6 w-6 pointer-events-none select-none" />
               </button>
               <button
                 ref="fitScreenBtn"
                 class="p-2 rounded-md hover:bg-white/20"
                 title="Fit to Screen"
               >
-                <span class="material-symbols-outlined">fit_screen</span>
+                <img :src="fitScreenIcon" alt="Fit to screen" class="h-6 w-6 pointer-events-none select-none" />
               </button>
               <button
                 ref="resetViewBtn"
                 class="p-2 rounded-md hover:bg-white/20"
                 title="Reset View"
               >
-                <span class="material-symbols-outlined">restart_alt</span>
+                <img :src="resetViewIcon" alt="Reset view" class="h-6 w-6 pointer-events-none select-none" />
               </button>
             </div>
 
@@ -752,10 +767,7 @@ onBeforeUnmount(() => {
           >
             <h3 class="text-lg font-semibold mb-3">Labels</h3>
             <div class="relative mb-3">
-              <span
-                class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-                >search</span
-              >
+              <img :src="searchIcon" alt="Search" class="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 pointer-events-none select-none"/>
               <input
                 type="search"
                 placeholder="Search labels..."
