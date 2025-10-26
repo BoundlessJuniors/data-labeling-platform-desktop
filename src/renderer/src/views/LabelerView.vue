@@ -393,6 +393,7 @@ function updateTransform() {
   canvasEl.value.style.transform = transformValue
   annotationsSvg.value.style.transform = transformValue
 }
+
 function fitToScreen() {
   if (!canvasContainer.value || !canvasEl.value || !annotationsSvg.value) return
 
@@ -435,6 +436,7 @@ function fitToScreen() {
 
   updateTransform()
 }
+
 function zoom(delta: number, clientX: number, clientY: number) {
   if (!canvasContainer.value) return
   const rect = canvasContainer.value.getBoundingClientRect()
@@ -461,7 +463,8 @@ function zoom(delta: number, clientX: number, clientY: number) {
 
 const onWheel = (e: WheelEvent) => {
   e.preventDefault()
-  const delta = e.deltaY > 0 ? -0.1 : 0.1
+  // Eski: 0.1, Yeni: 0.05 (%50 daha yavaş)
+  const delta = e.deltaY > 0 ? -0.05 : 0.05
   zoom(delta, e.clientX, e.clientY)
 }
 
@@ -560,16 +563,18 @@ submitBtn?.addEventListener('click', () => {
   canvasContainer.value?.addEventListener('wheel', onWheel, { passive: false })
 
   // Zoom toolbar
-  zoomInBtn.value?.addEventListener('click', () => {
-    if (!canvasContainer.value) return
-    const r = canvasContainer.value.getBoundingClientRect()
-    zoom(0.2, r.left + r.width / 2, r.top + r.height / 2)
-  })
-  zoomOutBtn.value?.addEventListener('click', () => {
-    if (!canvasContainer.value) return
-    const r = canvasContainer.value.getBoundingClientRect()
-    zoom(-0.2, r.left + r.width / 2, r.top + r.height / 2)
-  })
+zoomInBtn.value?.addEventListener('click', () => {
+  if (!canvasContainer.value) return
+  const r = canvasContainer.value.getBoundingClientRect()
+  // Eski: 0.2, Yeni: 0.1 (%50 daha yavaş)
+  zoom(0.1, r.left + r.width / 2, r.top + r.height / 2)
+})
+zoomOutBtn.value?.addEventListener('click', () => {
+  if (!canvasContainer.value) return
+  const r = canvasContainer.value.getBoundingClientRect()
+  // Eski: -0.2, Yeni: -0.1 (%50 daha yavaş)
+  zoom(-0.1, r.left + r.width / 2, r.top + r.height / 2)
+})
 
   fitScreenBtn.value?.addEventListener('click', () => fitToScreen())
   resetViewBtn.value?.addEventListener('click', () => fitToScreen())
