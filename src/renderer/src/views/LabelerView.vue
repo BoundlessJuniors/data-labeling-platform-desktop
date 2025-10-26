@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref } from 'vue'
-import { createPopper } from '@popperjs/core'
 // import undoIcon from '@renderer/assets/icons/custom/undo.svg'
 // import redoIcon from '@renderer/assets/icons/custom/redo.svg'
 // import selectIcon from '@renderer/assets/icons/custom/touch_app.svg'
@@ -39,6 +38,11 @@ import ZoomInIcon      from '@renderer/assets/icons/custom/zoom_in.svg?component
 import FitScreenIcon   from '@renderer/assets/icons/custom/fit_screen.svg?component'
 import ResetViewIcon   from '@renderer/assets/icons/custom/restart_alt.svg?component'
 import FilterIcon      from '@renderer/assets/icons/custom/filter_list.svg?component'
+import PentagonIcon    from '@renderer/assets/icons/custom/pentagon.svg?component'
+import CropSquareIcon    from '@renderer/assets/icons/custom/crop_square.svg?component'
+import PolyLineIcon    from '@renderer/assets/icons/custom/polyline.svg?component'
+import KeypointIcon    from '@renderer/assets/icons/custom/adjust.svg?component'
+import CircleIcon    from '@renderer/assets/icons/custom/circle.svg?component'
 
 
 /** Basit tipler */
@@ -111,6 +115,30 @@ const state = {
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
 let containerRO: ResizeObserver | null = null
+
+
+/** Shapes dropdown control */
+let isShapesOpen = false
+let onDocClick: ((e: MouseEvent) => void) | null = null
+let onEsc: ((e: KeyboardEvent) => void) | null = null
+
+function openShapes() {
+  if (!shapesDropdown.value) return
+  shapesDropdown.value.classList.add('show')
+  isShapesOpen = true
+}
+function closeShapes() {
+  if (!shapesDropdown.value) return
+  shapesDropdown.value.classList.remove('show')
+  isShapesOpen = false
+}
+function toggleShapes(e?: Event) {
+  e?.preventDefault()
+  e?.stopPropagation()
+  isShapesOpen ? closeShapes() : openShapes()
+}
+
+
 
 /** Yardımcılar */
 function qsa<T extends Element = Element>(root: ParentNode, sel: string): T[] {
@@ -307,19 +335,25 @@ onMounted(() => {
   // Başlık
   if (taskTitle.value) taskTitle.value.textContent = 'Image Annotation - Task 1'
 
-  // Dropdown (shapes) – Popper
+  // Shapes dropdown – click ile aç/kapa + dışarı tıklayınca/ESC’de kapat
   if (shapesToolBtn.value && shapesDropdown.value) {
-    createPopper(shapesToolBtn.value, shapesDropdown.value, { placement: 'bottom-start' })
-    const show = () => shapesDropdown.value!.classList.add('show')
-    const hide = () => shapesDropdown.value!.classList.remove('show')
-    ;['mouseenter', 'focus'].forEach((e) => {
-      shapesToolBtn.value!.addEventListener(e, show)
-      shapesDropdown.value!.addEventListener(e, show)
-    })
-    ;['mouseleave', 'blur'].forEach((e) => {
-      shapesToolBtn.value!.addEventListener(e, hide)
-      shapesDropdown.value!.addEventListener(e, hide)
-    })
+    // butona tıklayınca toggle
+    shapesToolBtn.value.addEventListener('click', toggleShapes)
+    // içeride tıklamalar kapanmayı tetiklemesin
+    shapesDropdown.value.addEventListener('click', (e) => e.stopPropagation())
+    // dışarı tıklanınca kapa
+    onDocClick = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (!shapesDropdown.value!.contains(t) && !shapesToolBtn.value!.contains(t)) {
+        closeShapes()
+      }
+    }
+    document.addEventListener('click', onDocClick)
+    // ESC ile kapa
+    onEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeShapes()
+    }
+    document.addEventListener('keydown', onEsc)
   }
 
   // Tema
@@ -333,6 +367,9 @@ onMounted(() => {
     if (!target) return
     if ((target as HTMLElement).tagName === 'A') (e as MouseEvent).preventDefault()
     setActiveTool(target)
+
+   if ((target as HTMLElement).closest('#shapes-dropdown')) closeShapes()
+
   })
 
   // Label seçimi
@@ -514,6 +551,9 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', fitToScreen)
   canvasContainer.value?.removeEventListener('wheel', onWheel as any)
   containerRO?.disconnect()
+  shapesToolBtn.value?.removeEventListener('click', toggleShapes)
+  if (onDocClick) document.removeEventListener('click', onDocClick)
+  if (onEsc) document.removeEventListener('keydown', onEsc)
 })
 </script>
 
@@ -692,16 +732,40 @@ onBeforeUnmount(() => {
                     class="flex items-center gap-3 px-4 py-2 text-sm hover:bg-gray-100 annotation-tool"
                     data-tool="bbox"
                   >
-                    <span class="material-symbols-outlined">crop_square</span
-                    ><span>Bounding Box</span>
+                    <CropSquareIcon class="ui-svg h-5 w-5 text-gray-600 dark:text-gray-300" />
+                    <span>Bounding Box</span>
                   </a>
                   <a
                     href="#"
                     class="flex items-center gap-3 px-4 py-2 text-sm hover:bg-gray-100 annotation-tool"
                     data-tool="polygon"
                   >
-                    <span class="material-symbols-outlined">pentagon</span><span>Polygon</span>
+                    <PentagonIcon class="ui-svg h-5 w-5 text-gray-600 dark:text-gray-300" /><span>Polygon</span>
                   </a>
+                   <a
+                    href="#"
+                    class="flex items-center gap-3 px-4 py-2 text-sm hover:bg-gray-100 annotation-tool"
+                    data-tool="polyline"
+                  >
+                    <PolyLineIcon class="ui-svg h-5 w-5 text-gray-600 dark:text-gray-300" /><span>Polyline</span>
+                  </a>
+                  <a
+                    href="#"
+                    class="flex items-center gap-3 px-4 py-2 text-sm hover:bg-gray-100 annotation-tool"
+                    data-tool="polyline"
+                  >
+                    <KeypointIcon class="ui-svg h-5 w-5 text-gray-600 dark:text-gray-300" /><span>Keypoint</span>
+                  </a>
+                  <a
+                    href="#"
+                    class="flex items-center gap-3 px-4 py-2 text-sm hover:bg-gray-100 annotation-tool"
+                    data-tool="polyline"
+                  >
+                    <CircleIcon class="ui-svg h-5 w-5 text-gray-600 dark:text-gray-300" /><span>Circle</span>
+                  </a>
+
+
+                  
                 </div>
               </div>
 
