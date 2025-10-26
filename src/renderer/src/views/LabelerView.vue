@@ -47,6 +47,8 @@ import CircleIcon    from '@renderer/assets/icons/custom/circle.svg?component'
 import road from '@renderer/assets/images/road.jpg';
 
 /** Basit tipler */
+type Point = { x: number; y: number }
+
 type BBox = {
   id: number
   type: 'bbox'
@@ -56,7 +58,40 @@ type BBox = {
   width: number
   height: number
 }
-type Annotation = BBox
+
+type PolygonAnn = {
+  id: number
+  type: 'polygon'
+  label: string | null
+  points: Point[]
+}
+
+type PolylineAnn = {
+  id: number
+  type: 'polyline'
+  label: string | null
+  points: Point[]
+}
+
+type KeypointAnn = {
+  id: number
+  type: 'keypoint'
+  label: string | null
+  x: number
+  y: number
+}
+
+type CircleAnn = {
+  id: number
+  type: 'circle'
+  label: string | null
+  cx: number
+  cy: number
+  r: number
+}
+
+type Annotation = BBox | PolygonAnn | PolylineAnn | KeypointAnn | CircleAnn
+
 
 type TaskStatus = 'in_progress' | 'completed' | 'queued'
 type Task = {
@@ -131,8 +166,13 @@ const state = {
   drawingStartY: 0,
 
   lastUsedTool: 'select' as 'select' | 'sam' | 'shapes',
-  lastUsedShape: 'bbox' as 'bbox' | 'polygon',
+  lastUsedShape: 'bbox' as 'bbox' | 'polygon' | 'polyline' | 'keypoint' | 'circle',
   activeLabel: null as string | null,
+
+  // çizim süreci için küçük ekler
+  drawingShape: null as ('bbox'|'polygon'|'polyline'|'circle'|null),
+  polyPoints: [] as Point[],
+
 
   img: new Image()
 }
@@ -220,19 +260,68 @@ function renderAnnotations() {
 
   state.annotations.forEach((ann) => {
     if (ann.type === 'bbox') {
-      const rect = document.createElementNS(SVG_NS, 'rect')
-      rect.setAttribute('x', String(ann.x))
-      rect.setAttribute('y', String(ann.y))
-      rect.setAttribute('width', String(ann.width))
-      rect.setAttribute('height', String(ann.height))
-      rect.setAttribute('fill', 'rgba(17,115,212,0.4)')
-      rect.setAttribute('stroke', '#1173d4')
-      rect.setAttribute('stroke-width', '2')
-      rect.dataset.id = String(ann.id)
-      rect.classList.add('annotation-shape')
-      if (ann.id === state.selectedAnnotationId) rect.classList.add('selected')
-      annotationsSvg.value!.appendChild(rect)
+      const el = document.createElementNS(SVG_NS, 'rect')
+      el.setAttribute('x', String(ann.x))
+      el.setAttribute('y', String(ann.y))
+      el.setAttribute('width', String(ann.width))
+      el.setAttribute('height', String(ann.height))
+      el.setAttribute('fill', 'rgba(17,115,212,0.4)')
+      el.setAttribute('stroke', '#1173d4')
+      el.setAttribute('stroke-width', '2')
+      el.dataset.id = String(ann.id)
+      el.classList.add('annotation-shape')
+      if (ann.id === state.selectedAnnotationId) el.classList.add('selected')
+      annotationsSvg.value!.appendChild(el)
     }
+    else if (ann.type === 'polygon') {
+      const el = document.createElementNS(SVG_NS, 'polygon')
+      el.setAttribute('points', ann.points.map(p => `${p.x},${p.y}`).join(' '))
+      el.setAttribute('fill', 'rgba(17,115,212,0.25)')
+      el.setAttribute('stroke', '#1173d4')
+      el.setAttribute('stroke-width', '2')
+      el.dataset.id = String(ann.id)
+      el.classList.add('annotation-shape')
+      if (ann.id === state.selectedAnnotationId) el.classList.add('selected')
+      annotationsSvg.value!.appendChild(el)
+    }
+    else if (ann.type === 'polyline') {
+      const el = document.createElementNS(SVG_NS, 'polyline')
+      el.setAttribute('points', ann.points.map(p => `${p.x},${p.y}`).join(' '))
+      el.setAttribute('fill', 'none')
+      el.setAttribute('stroke', '#1173d4')
+      el.setAttribute('stroke-width', '2')
+      el.dataset.id = String(ann.id)
+      el.classList.add('annotation-shape')
+      if (ann.id === state.selectedAnnotationId) el.classList.add('selected')
+      annotationsSvg.value!.appendChild(el)
+    }
+    else if (ann.type === 'keypoint') {
+      const el = document.createElementNS(SVG_NS, 'circle')
+      el.setAttribute('cx', String(ann.x))
+      el.setAttribute('cy', String(ann.y))
+      el.setAttribute('r', '4')
+      el.setAttribute('fill', '#1173d4')
+      el.setAttribute('stroke', '#ffffff')
+      el.setAttribute('stroke-width', '1.5')
+      el.dataset.id = String(ann.id)
+      el.classList.add('annotation-shape')
+      if (ann.id === state.selectedAnnotationId) el.classList.add('selected')
+      annotationsSvg.value!.appendChild(el)
+    }
+    else if (ann.type === 'circle') {
+      const el = document.createElementNS(SVG_NS, 'circle')
+      el.setAttribute('cx', String(ann.cx))
+      el.setAttribute('cy', String(ann.cy))
+      el.setAttribute('r', String(ann.r))
+      el.setAttribute('fill', 'rgba(17,115,212,0.25)')
+      el.setAttribute('stroke', '#1173d4')
+      el.setAttribute('stroke-width', '2')
+      el.dataset.id = String(ann.id)
+      el.classList.add('annotation-shape')
+      if (ann.id === state.selectedAnnotationId) el.classList.add('selected')
+      annotationsSvg.value!.appendChild(el)
+    }
+
 
     const item = document.createElement('div')
     item.className =
@@ -374,7 +463,16 @@ onMounted(() => {
     // butona tıklayınca toggle
     shapesToolBtn.value.addEventListener('click', toggleShapes)
     // içeride tıklamalar kapanmayı tetiklemesin
-    shapesDropdown.value.addEventListener('click', (e) => e.stopPropagation())
+    // dropdown içinden bir shape seçildiğinde aracı aktif et + dropdown'u kapat
+    shapesDropdown.value.addEventListener('click', (e) => {
+      const t = (e.target as HTMLElement).closest('.annotation-tool') as HTMLElement | null
+      if (t) {
+        e.preventDefault()            // <a href="#"> atlamasın
+        setActiveTool(t)              // lastUsedTool='shapes' ve lastUsedShape=... ayarlanır
+        closeShapes()                 // menüyü kapat
+      }
+      e.stopPropagation()             // dışarıya taşmasın
+    })
     // dışarı tıklanınca kapa
     onDocClick = (e: MouseEvent) => {
       const t = e.target as Node
@@ -472,32 +570,135 @@ submitBtn?.addEventListener('click', () => {
 
   // Çizim & Pan
   canvasContainer.value?.addEventListener('mousedown', (e: MouseEvent) => {
-    if (e.button !== 0) return
-    const isToolActive = canvasContainer.value!.classList.contains('tool-active')
-    if (isToolActive) {
+  if (e.button !== 0) return
+
+  const isToolActive = canvasContainer.value!.classList.contains('tool-active')
+  // SAM şimdilik pasif: tıklandığında çizim yapma
+  if (state.lastUsedTool === 'sam') { return }
+
+  if (isToolActive && state.lastUsedTool === 'shapes') {
+    const rect = canvasContainer.value!.getBoundingClientRect()
+    const mouseX = e.clientX - rect.left
+    const mouseY = e.clientY - rect.top
+    const imgX = (mouseX - state.translateX) / state.scale
+    const imgY = (mouseY - state.translateY) / state.scale
+
+    if (!Number.isFinite(imgX) || !Number.isFinite(imgY)) return
+
+    const shape = state.lastUsedShape
+
+    if (shape === 'bbox') {
       state.isDrawing = true
-      const rect = canvasContainer.value!.getBoundingClientRect()
-      const mouseX = e.clientX - rect.left
-      const mouseY = e.clientY - rect.top
-      state.drawingStartX = (mouseX - state.translateX) / state.scale
-      state.drawingStartY = (mouseY - state.translateY) / state.scale
+      state.drawingShape = 'bbox'
+      state.drawingStartX = imgX
+      state.drawingStartY = imgY
+      const temp = document.createElementNS(SVG_NS, 'rect')
+      temp.setAttribute('id', 'temp-shape')
+      temp.setAttribute('stroke', '#ffc107')
+      temp.setAttribute('stroke-width', '2')
+      temp.setAttribute('fill', 'none')
+      annotationsSvg.value!.appendChild(temp)
+    }
+    else if (shape === 'circle') {
+      state.isDrawing = true
+      state.drawingShape = 'circle'
+      state.drawingStartX = imgX
+      state.drawingStartY = imgY
+      const temp = document.createElementNS(SVG_NS, 'circle')
+      temp.setAttribute('id', 'temp-shape')
+      temp.setAttribute('stroke', '#ffc107')
+      temp.setAttribute('stroke-width', '2')
+      temp.setAttribute('fill', 'none')
+      temp.setAttribute('cx', String(imgX))
+      temp.setAttribute('cy', String(imgY))
+      temp.setAttribute('r', '0')
+      annotationsSvg.value!.appendChild(temp)
+    }
+    else if (shape === 'keypoint') {
+      const kp: KeypointAnn = {
+        id: Date.now(),
+        type: 'keypoint',
+        label: state.activeLabel,
+        x: imgX,
+        y: imgY
+      }
+      state.annotations.push(kp)
+      recordHistory()
+      renderAnnotations()
+    }
+    else if (shape === 'polygon' || shape === 'polyline') {
+      if (!state.isDrawing || state.drawingShape !== shape) {
+        // yeni başlat
+        state.isDrawing = true
+        state.drawingShape = shape
+        state.polyPoints = [{ x: imgX, y: imgY }]
+        const temp = document.createElementNS(SVG_NS, 'polyline')
+        temp.setAttribute('id', 'temp-shape')
+        temp.setAttribute('stroke', '#ffc107')
+        temp.setAttribute('stroke-width', '2')
+        temp.setAttribute('fill', shape === 'polygon' ? 'rgba(255,193,7,0.08)' : 'none')
+        temp.setAttribute('points', `${imgX},${imgY}`)
+        annotationsSvg.value!.appendChild(temp)
+      } else {
+        // noktaya devam
+        state.polyPoints.push({ x: imgX, y: imgY })
+        const temp = annotationsSvg.value!.querySelector('#temp-shape') as SVGPolylineElement | null
+        if (temp) temp.setAttribute('points', state.polyPoints.map(p => `${p.x},${p.y}`).join(' '))
+      }
+    }
+  } else {
+    state.isPanning = true
+    state.startPanX = e.clientX - state.translateX
+    state.startPanY = e.clientY - state.translateY
+    canvasContainer.value!.classList.add('panning')
+  }
+})
 
-      // temp rect
-      const tempRect = document.createElementNS(SVG_NS, 'rect')
-      tempRect.setAttribute('id', 'temp-shape')
-      tempRect.setAttribute('stroke', '#ffc107')
-      tempRect.setAttribute('stroke-width', '2')
-      tempRect.setAttribute('fill', 'none')
-      annotationsSvg.value!.appendChild(tempRect)
-    } else {
-      state.isPanning = true
+  // Polygon / Polyline bitir
+  const commitPoly = () => {
+    if (!state.isDrawing || !(state.drawingShape === 'polygon' || state.drawingShape === 'polyline')) return
+    const minPts = state.drawingShape === 'polygon' ? 3 : 2
+    if (state.polyPoints.length >= minPts) {
+      const ann = (state.drawingShape === 'polygon')
+        ? ({ id: Date.now(), type: 'polygon', label: state.activeLabel, points: [...state.polyPoints] } as PolygonAnn)
+        : ({ id: Date.now(), type: 'polyline', label: state.activeLabel, points: [...state.polyPoints] } as PolylineAnn)
+      state.annotations.push(ann)
+      recordHistory()
+      renderAnnotations()
+    }
+    // temp’i temizle
+    const temp = annotationsSvg.value!.querySelector('#temp-shape')
+    temp?.remove()
+    state.polyPoints = []
+    state.drawingShape = null
+    state.isDrawing = false
+  }
 
-      state.startPanX = e.clientX - state.translateX
+  const cancelPoly = () => {
+    if (!state.isDrawing) return
+    const temp = annotationsSvg.value!.querySelector('#temp-shape')
+    temp?.remove()
+    state.polyPoints = []
+    state.drawingShape = null
+    state.isDrawing = false
+  }
 
-      state.startPanY = e.clientY - state.translateY
-      canvasContainer.value!.classList.add('panning')
+  // Enter: bitir, Esc: iptal
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.key === 'z') { e.preventDefault(); undo(); return }
+    if (e.ctrlKey && e.key === 'y') { e.preventDefault(); redo(); return }
+
+    if (state.isDrawing && (state.drawingShape === 'polygon' || state.drawingShape === 'polyline')) {
+      if (e.key === 'Enter') { e.preventDefault(); commitPoly() }
+      if (e.key === 'Escape') { e.preventDefault(); cancelPoly() }
     }
   })
+
+  // Dblclick ile bitir
+  canvasContainer.value?.addEventListener('dblclick', () => {
+    commitPoly()
+  })
+
 
   canvasContainer.value?.addEventListener('mousemove', (e: MouseEvent) => {
     const rect = canvasContainer.value!.getBoundingClientRect()
@@ -523,49 +724,93 @@ submitBtn?.addEventListener('click', () => {
     if (coords.value) coords.value.textContent = `X: ${Math.round(imgX)}, Y: ${Math.round(imgY)}`
 
     if (state.isDrawing) {
-      const tempRect = annotationsSvg.value!.querySelector('#temp-shape') as SVGRectElement | null
-      if (!tempRect) return
-      const x = Math.min(imgX, state.drawingStartX)
-      const y = Math.min(imgY, state.drawingStartY)
-      const w = Math.abs(imgX - state.drawingStartX)
-      const h = Math.abs(imgY - state.drawingStartY)
-      tempRect.setAttribute('x', String(x))
-      tempRect.setAttribute('y', String(y))
-      tempRect.setAttribute('width', String(w))
-      tempRect.setAttribute('height', String(h))
+      if (state.drawingShape === 'bbox') {
+        const temp = annotationsSvg.value!.querySelector('#temp-shape') as SVGRectElement | null
+        if (!temp) return
+        const x = Math.min(imgX, state.drawingStartX)
+        const y = Math.min(imgY, state.drawingStartY)
+        const w = Math.abs(imgX - state.drawingStartX)
+        const h = Math.abs(imgY - state.drawingStartY)
+        temp.setAttribute('x', String(x))
+        temp.setAttribute('y', String(y))
+        temp.setAttribute('width', String(w))
+        temp.setAttribute('height', String(h))
+      }
+      else if (state.drawingShape === 'circle') {
+        const temp = annotationsSvg.value!.querySelector('#temp-shape') as SVGCircleElement | null
+        if (!temp) return
+        const dx = imgX - state.drawingStartX
+        const dy = imgY - state.drawingStartY
+        const r = Math.sqrt(dx*dx + dy*dy)
+        temp.setAttribute('r', String(r))
+      }
+      else if (state.drawingShape === 'polygon' || state.drawingShape === 'polyline') {
+        const temp = annotationsSvg.value!.querySelector('#temp-shape') as SVGPolylineElement | null
+        if (!temp) return
+        const pts = [...state.polyPoints, { x: imgX, y: imgY }]
+        temp.setAttribute('points', pts.map(p => `${p.x},${p.y}`).join(' '))
+      }
     } else if (state.isPanning) {
       state.translateX = e.clientX - state.startPanX
       state.translateY = e.clientY - state.startPanY
       updateTransform()
     }
+
   })
 
   const finishPointer = () => {
     if (state.isDrawing) {
-      const tempRect = annotationsSvg.value!.querySelector('#temp-shape') as SVGRectElement | null
-      if (tempRect) {
-        const w = parseFloat(tempRect.getAttribute('width') || '0')
-        const h = parseFloat(tempRect.getAttribute('height') || '0')
-        if (w > 5 && h > 5) {
-          const newAnn: Annotation = {
-            id: Date.now(),
-            type: 'bbox',
-            label: state.activeLabel,
-            x: parseFloat(tempRect.getAttribute('x') || '0'),
-            y: parseFloat(tempRect.getAttribute('y') || '0'),
-            width: w,
-            height: h
+      if (state.drawingShape === 'bbox') {
+        const temp = annotationsSvg.value!.querySelector('#temp-shape') as SVGRectElement | null
+        if (temp) {
+          const w = parseFloat(temp.getAttribute('width') || '0')
+          const h = parseFloat(temp.getAttribute('height') || '0')
+          if (w > 5 && h > 5) {
+            const newAnn: BBox = {
+              id: Date.now(),
+              type: 'bbox',
+              label: state.activeLabel,
+              x: parseFloat(temp.getAttribute('x') || '0'),
+              y: parseFloat(temp.getAttribute('y') || '0'),
+              width: w,
+              height: h
+            }
+            state.annotations.push(newAnn)
+            recordHistory()
+            renderAnnotations()
           }
-          state.annotations.push(newAnn)
-          recordHistory()
-          renderAnnotations()
+          temp.remove()
         }
-        tempRect.remove()
+        state.drawingShape = null
+        state.isDrawing = false
       }
+      else if (state.drawingShape === 'circle') {
+        const temp = annotationsSvg.value!.querySelector('#temp-shape') as SVGCircleElement | null
+        if (temp) {
+          const r = parseFloat(temp.getAttribute('r') || '0')
+          if (r > 3) {
+            const newAnn: CircleAnn = {
+              id: Date.now(),
+              type: 'circle',
+              label: state.activeLabel,
+              cx: parseFloat(temp.getAttribute('cx') || '0'),
+              cy: parseFloat(temp.getAttribute('cy') || '0'),
+              r
+            }
+            state.annotations.push(newAnn)
+            recordHistory()
+            renderAnnotations()
+          }
+          temp.remove()
+        }
+        state.drawingShape = null
+        state.isDrawing = false
+      }
+      // polygon/polyline mouseup ile bitmez (dblclick/Enter ile bitecek)
     }
-    state.isDrawing = false
     state.isPanning = false
     canvasContainer.value?.classList.remove('panning')
+
   }
   canvasContainer.value?.addEventListener('mouseup', finishPointer)
   canvasContainer.value?.addEventListener('mouseleave', finishPointer)
@@ -822,14 +1067,14 @@ function goNextTask() {
                   <a
                     href="#"
                     class="flex items-center gap-3 px-4 py-2 text-sm hover:bg-gray-100 annotation-tool"
-                    data-tool="polyline"
+                    data-tool="keypoint"
                   >
                     <KeypointIcon class="ui-svg h-5 w-5 text-gray-600 dark:text-gray-300" /><span>Keypoint</span>
                   </a>
                   <a
                     href="#"
                     class="flex items-center gap-3 px-4 py-2 text-sm hover:bg-gray-100 annotation-tool"
-                    data-tool="polyline"
+                    data-tool="circle"
                   >
                     <CircleIcon class="ui-svg h-5 w-5 text-gray-600 dark:text-gray-300" /><span>Circle</span>
                   </a>
