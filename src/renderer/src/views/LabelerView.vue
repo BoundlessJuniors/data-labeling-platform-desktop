@@ -1,25 +1,44 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref } from 'vue'
 import { createPopper } from '@popperjs/core'
-import undoIcon from '@renderer/assets/icons/custom/undo.svg'
-import redoIcon from '@renderer/assets/icons/custom/redo.svg'
-import selectIcon from '@renderer/assets/icons/custom/touch_app.svg'
-import samIcon from '@renderer/assets/icons/custom/wand_shine.svg'
-import shapesIcon from '@renderer/assets/icons/custom/category.svg'
-import chevronDownIcon from '@renderer/assets/icons/custom/arrow_drop_down.svg'
-import arrowBack from '@renderer/assets/icons/custom/arrow_back.svg'
-import arrowForward from '@renderer/assets/icons/custom/arrow_forward.svg'
-import sunIcon from '@renderer/assets/icons/custom/light_mode.svg'
-import moonIcon from '@renderer/assets/icons/custom/dark_mode.svg'
-import timerIcon from '@renderer/assets/icons/custom/timer.svg'
-import saveIcon from '@renderer/assets/icons/custom/cloud_done.svg'
-import approvalIcon from '@renderer/assets/icons/custom/approval_delegation.svg'
-import searchIcon from '@renderer/assets/icons/custom/search.svg'
-import zoomOutIcon from '@renderer/assets/icons/custom/zoom_out.svg'
-import zoomInIcon from '@renderer/assets/icons/custom/zoom_in.svg'
-import fitScreenIcon from '@renderer/assets/icons/custom/fit_screen.svg'
-import resetViewIcon from '@renderer/assets/icons/custom/restart_alt.svg'
-import filterIcon from '@renderer/assets/icons/custom/filter_list.svg'
+// import undoIcon from '@renderer/assets/icons/custom/undo.svg'
+// import redoIcon from '@renderer/assets/icons/custom/redo.svg'
+// import selectIcon from '@renderer/assets/icons/custom/touch_app.svg'
+// import samIcon from '@renderer/assets/icons/custom/wand_shine.svg'
+// import shapesIcon from '@renderer/assets/icons/custom/category.svg'
+// import chevronDownIcon from '@renderer/assets/icons/custom/arrow_drop_down.svg'
+// import arrowBack from '@renderer/assets/icons/custom/arrow_back.svg'
+// import arrowForward from '@renderer/assets/icons/custom/arrow_forward.svg'
+// import sunIcon from '@renderer/assets/icons/custom/light_mode.svg'
+// import moonIcon from '@renderer/assets/icons/custom/dark_mode.svg'
+// import timerIcon from '@renderer/assets/icons/custom/timer.svg'
+// import saveIcon from '@renderer/assets/icons/custom/cloud_done.svg'
+// import approvalIcon from '@renderer/assets/icons/custom/approval_delegation.svg'
+// import searchIcon from '@renderer/assets/icons/custom/search.svg'
+// import zoomOutIcon from '@renderer/assets/icons/custom/zoom_out.svg'
+// import zoomInIcon from '@renderer/assets/icons/custom/zoom_in.svg'
+// import fitScreenIcon from '@renderer/assets/icons/custom/fit_screen.svg'
+// import resetViewIcon from '@renderer/assets/icons/custom/restart_alt.svg'
+// import filterIcon from '@renderer/assets/icons/custom/filter_list.svg'
+import UndoIcon        from '@renderer/assets/icons/custom/undo.svg?component'
+import RedoIcon        from '@renderer/assets/icons/custom/redo.svg?component'
+import SelectIcon      from '@renderer/assets/icons/custom/touch_app.svg?component'
+import SamIcon         from '@renderer/assets/icons/custom/wand_shine.svg?component'
+import ShapesIcon      from '@renderer/assets/icons/custom/category.svg?component'
+import ChevronDownIcon from '@renderer/assets/icons/custom/arrow_drop_down.svg?component'
+import ArrowBackIcon   from '@renderer/assets/icons/custom/arrow_back.svg?component'
+import ArrowFwdIcon    from '@renderer/assets/icons/custom/arrow_forward.svg?component'
+import SunIcon         from '@renderer/assets/icons/custom/light_mode.svg?component'
+import MoonIcon        from '@renderer/assets/icons/custom/dark_mode.svg?component'
+import TimerIcon       from '@renderer/assets/icons/custom/timer.svg?component'
+import SaveIcon        from '@renderer/assets/icons/custom/cloud_done.svg?component'
+import ApproveIcon     from '@renderer/assets/icons/custom/approval_delegation.svg?component'
+import SearchIcon      from '@renderer/assets/icons/custom/search.svg?component'
+import ZoomOutIcon     from '@renderer/assets/icons/custom/zoom_out.svg?component'
+import ZoomInIcon      from '@renderer/assets/icons/custom/zoom_in.svg?component'
+import FitScreenIcon   from '@renderer/assets/icons/custom/fit_screen.svg?component'
+import ResetViewIcon   from '@renderer/assets/icons/custom/restart_alt.svg?component'
+import FilterIcon      from '@renderer/assets/icons/custom/filter_list.svg?component'
 
 
 /** Basit tipler */
@@ -567,7 +586,7 @@ onBeforeUnmount(() => {
           ref="filterBtn"
           class="w-full flex items-center justify-center gap-2 rounded bg-primary/10 dark:bg-primary/20 py-2 px-4 text-sm font-semibold text-primary hover:bg-primary/20"
         >
-          <img :src="filterIcon" alt="Filter" class="h-5 w-5 pointer-events-none select-none" />
+          <FilterIcon class="ui-svg h-5 w-5 text-primary dark:text-primary/80" />
           <span>Filter Tasks</span>
         </button>
         <div ref="filterDropdown" class="absolute bottom-full mb-2 w-full left-0 px-4">
@@ -585,10 +604,10 @@ onBeforeUnmount(() => {
           <h2 ref="taskTitle" class="text-xl font-bold">Image Annotation - Task 1</h2>
           <div class="flex items-center gap-2">
             <button class="p-1 rounded-md bg-gray-100 dark:bg-gray-800 hover:bg-gray-200">
-              <img :src="arrowBack" class="h-5 w-5" alt="Previous" />
+              <ArrowBackIcon class="ui-svg h-5 w-5 text-gray-700 dark:text-gray-200" />
             </button>
             <button class="p-1 rounded-md bg-gray-100 dark:bg-gray-800 hover:bg-gray-200">
-              <img :src="arrowForward" class="h-5 w-5" alt="Next" />
+              <ArrowFwdIcon class="ui-svg h-5 w-5 text-gray-700 dark:text-gray-200" />
             </button>
           </div>
         </div>
@@ -601,15 +620,13 @@ onBeforeUnmount(() => {
             <span
               class="absolute left-1.5 top-1.5 h-5 w-5 bg-white dark:bg-gray-800 rounded-full shadow-md transform transition-transform duration-300 dark:translate-x-6 flex items-center justify-center"
             >
-              <!-- Light icon (light mode'da görünür) -->
-              <img :src="sunIcon" alt="Light" class="h-4 w-4 opacity-100 dark:opacity-0" />
-              <!-- Dark icon (dark mode'da görünür) -->
-              <img :src="moonIcon" alt="Dark" class="h-4 w-4 absolute opacity-0 dark:opacity-100" />
+              <SunIcon  class="ui-svg h-4 w-4 text-gray-600  opacity-100 dark:opacity-0" />
+             <MoonIcon class="ui-svg h-4 w-4 text-yellow-400 absolute opacity-0 dark:opacity-100" />
             </span>
           </button>
 
           <div class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-            <img :src="timerIcon" class="h-5 w-5" alt="Timer" />
+            <TimerIcon class="ui-svg h-5 w-5" />
             <div class="font-mono bg-gray-100 dark:bg-gray-800 rounded px-2 py-1 text-lg font-bold">
               01:23:45
             </div>
@@ -619,12 +636,12 @@ onBeforeUnmount(() => {
             ref="saveBtn"
             class="flex items-center gap-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 py-2 px-4 text-sm font-semibold hover:bg-gray-50"
           >
-            <img :src="saveIcon" class="h-5 w-5" alt="Save" />
+            <SaveIcon class="ui-svg h-5 w-5 text-green-500" />
             <span>Save Draft</span>
           </button>
           <button
             class="flex items-center gap-2 rounded bg-primary py-2 px-4 text-sm font-semibold text-white hover:opacity-90">
-            <img :src="approvalIcon" class="h-5 w-5" alt="Submit" />
+            <ApproveIcon class="ui-svg h-5 w-5 text-white" />
             <span>Submit Work</span>
           </button>
         </div>
@@ -642,7 +659,7 @@ onBeforeUnmount(() => {
                 data-tool="select"
                 title="Select/Edit"
               >
-                <img :src="selectIcon" class="h-6 w-6" alt="Select" />
+                <SelectIcon class="ui-svg h-6 w-6 text-gray-600 dark:text-gray-300" />
               </button>
               
               <div class="h-6 w-px bg-gray-200 dark:bg-gray-700 mx-1"></div>
@@ -652,7 +669,7 @@ onBeforeUnmount(() => {
                 data-tool="sam"
                 title="SAM"
               >
-                <img :src="samIcon" class="h-6 w-6" alt="SAM" />
+                <SamIcon class="ui-svg h-6 w-6 text-gray-600 dark:text-gray-300" />
               </button>
 
               <div class="relative">
@@ -662,8 +679,8 @@ onBeforeUnmount(() => {
                   id="shapes-tool-btn"
                   title="Annotation Shapes"
                 >
-                   <img :src="shapesIcon" class="h-6 w-6" alt="Shapes" />
-                   <img :src="chevronDownIcon" class="h-4 w-4" alt="Open" />
+                   <ShapesIcon class="ui-svg h-6 w-6 text-gray-600 dark:text-gray-300" />
+                   <ChevronDownIcon class="ui-svg h-4 w-4 text-gray-600 dark:text-gray-300" />
                 </button>
                 <div
                   ref="shapesDropdown"
@@ -693,14 +710,14 @@ onBeforeUnmount(() => {
                 ref="undoBtn"
                 class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
                 title="Undo (Ctrl+Z)" >
-                <img :src="undoIcon" alt="Undo" class="h-5 w-5" draggable="false" />
+                <UndoIcon class="ui-svg h-5 w-5 text-gray-600 dark:text-gray-300" />
               </button>
 
               <button
                 ref="redoBtn"
                 class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
                 title="Redo (Ctrl+Y)">
-                <img :src="redoIcon" alt="Redo" class="h-5 w-5" draggable="false" />
+                <RedoIcon class="ui-svg h-5 w-5 text-gray-600 dark:text-gray-300" />
               </button>
 
             </div>
@@ -723,24 +740,24 @@ onBeforeUnmount(() => {
               class="absolute bottom-4 right-4 flex items-center gap-1 bg-black/50 p-1 rounded-lg text-white"
             >
               <button ref="zoomOutBtn" class="p-2 rounded-md hover:bg-white/20" title="Zoom Out">
-                <img :src="zoomOutIcon" alt="Zoom out" class="h-6 w-6 pointer-events-none select-none" />
+                <ZoomOutIcon class="ui-svg h-6 w-6 text-white" />
               </button>
               <button ref="zoomInBtn" class="p-2 rounded-md hover:bg-white/20" title="Zoom In">
-                <img :src="zoomInIcon" alt="Zoom in" class="h-6 w-6 pointer-events-none select-none" />
+                <ZoomInIcon class="ui-svg h-6 w-6 text-white" />
               </button>
               <button
                 ref="fitScreenBtn"
                 class="p-2 rounded-md hover:bg-white/20"
                 title="Fit to Screen"
               >
-                <img :src="fitScreenIcon" alt="Fit to screen" class="h-6 w-6 pointer-events-none select-none" />
+                <FitScreenIcon class="ui-svg h-6 w-6 text-white" />
               </button>
               <button
                 ref="resetViewBtn"
                 class="p-2 rounded-md hover:bg-white/20"
                 title="Reset View"
               >
-                <img :src="resetViewIcon" alt="Reset view" class="h-6 w-6 pointer-events-none select-none" />
+                <ResetViewIcon class="ui-svg h-6 w-6 text-white" />
               </button>
             </div>
 
@@ -767,7 +784,7 @@ onBeforeUnmount(() => {
           >
             <h3 class="text-lg font-semibold mb-3">Labels</h3>
             <div class="relative mb-3">
-              <img :src="searchIcon" alt="Search" class="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 pointer-events-none select-none"/>
+              <SearchIcon class="ui-svg h-5 w-5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="search"
                 placeholder="Search labels..."
@@ -883,4 +900,24 @@ html.dark .annotation-tool.active {
 #temp-shape {
   stroke-dasharray: 5, 5;
 }
+/* --- Icon system: tema rengiyle boyansın --- */
+.ui-svg {
+  display: inline-block;
+  width: 1.25rem;   /* h-5 */
+  height: 1.25rem;  /* w-5 */
+  vertical-align: middle;
+}
+
+/* Bileşen kökü genelde <svg> olduğu için boyut garanti */
+.ui-svg > svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* Asıl önemli kısım: tüm şekilleri currentColor ile boya */
+.ui-svg :where(path, circle, rect, polygon, polyline, line) {
+  fill: currentColor !important;
+  stroke: currentColor !important;
+}
+
 </style>
