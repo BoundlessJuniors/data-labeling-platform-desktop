@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref } from 'vue'
+import { onMounted, onBeforeUnmount, ref, computed } from 'vue'
 // import undoIcon from '@renderer/assets/icons/custom/undo.svg'
 // import redoIcon from '@renderer/assets/icons/custom/redo.svg'
 // import selectIcon from '@renderer/assets/icons/custom/touch_app.svg'
@@ -44,6 +44,7 @@ import PolyLineIcon    from '@renderer/assets/icons/custom/polyline.svg?componen
 import KeypointIcon    from '@renderer/assets/icons/custom/adjust.svg?component'
 import CircleIcon    from '@renderer/assets/icons/custom/circle.svg?component'
 
+import road from '@renderer/assets/images/road.jpg';
 
 /** Basit tipler */
 type BBox = {
@@ -56,6 +57,25 @@ type BBox = {
   height: number
 }
 type Annotation = BBox
+
+type TaskStatus = 'in_progress' | 'completed' | 'queued'
+type Task = {
+  id: number
+  title: string
+  image: string
+  status: TaskStatus
+}
+
+/** Demo görevler */
+const tasks = ref<Task[]>([
+  { id: 1, title: 'Task 1', image: road, status: 'in_progress' },
+  { id: 2, title: 'Task 2', image: road, status: 'completed' }
+]);
+
+
+const currentTaskIndex = ref(0)
+const currentTask = computed(() => tasks.value[currentTaskIndex.value])
+
 
 /** Refs (DOM erişimi) */
 const canvasContainer = ref<HTMLDivElement | null>(null)
@@ -87,6 +107,10 @@ const saveBtn = ref<HTMLButtonElement | null>(null)
 const themeToggle = ref<HTMLButtonElement | null>(null)
 
 const taskTitle = ref<HTMLHeadingElement | null>(null)
+
+const prevBtn = ref<HTMLButtonElement | null>(null)
+const nextBtn = ref<HTMLButtonElement | null>(null)
+
 
 /** İç durum */
 const state = {
@@ -138,6 +162,16 @@ function toggleShapes(e?: Event) {
   isShapesOpen ? closeShapes() : openShapes()
 }
 
+function loadImage(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => resolve(img);
+    img.onerror = (e) => reject(e);
+    // cache-bust: uzak sunucu cache'inde takılmasın
+    img.src = url.startsWith('http') ? `${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}` : url;
+  });
+}
 
 
 /** Yardımcılar */
@@ -388,6 +422,13 @@ onMounted(() => {
     if (t) selectAnnotation(parseInt(t.dataset.id!))
   })
 
+  const submitBtn = document.querySelector('button:has(> .ui-svg.text-white)') as HTMLButtonElement | null
+submitBtn?.addEventListener('click', () => {
+  tasks.value[currentTaskIndex.value].status = 'completed'
+  alert('Submitted ✔️')
+})
+
+
   // Undo/Redo/Save
   undoBtn.value?.addEventListener('click', () => undo())
   redoBtn.value?.addEventListener('click', () => redo())
@@ -529,22 +570,10 @@ onMounted(() => {
   canvasContainer.value?.addEventListener('mouseup', finishPointer)
   canvasContainer.value?.addEventListener('mouseleave', finishPointer)
 
-  // Başlangıç resmi
-  state.img.crossOrigin = 'anonymous'
-  state.img.src = 'https://i.imgur.com/g88T35b.jpeg' // istersen assets içine yerel resim koyabiliriz
-  const onReady = () => {
-    fitToScreen()
-    // varsayılan label + tool
-    const firstLabel = labelList.value?.querySelector('.label-item') as HTMLElement | null
-    setActiveLabel(firstLabel)
-    const selectTool = toolGroup.value?.querySelector(
-      '.annotation-tool[data-tool="select"]'
-    ) as HTMLElement | null
-    setActiveTool(selectTool)
-    recordHistory()
-  }
-  if (state.img.complete) onReady()
-  else state.img.onload = onReady
+  prevBtn.value?.addEventListener('click', goPrevTask)
+  nextBtn.value?.addEventListener('click', goNextTask)
+
+  loadTaskByIndex(0)
 })
 
 onBeforeUnmount(() => {
@@ -555,6 +584,54 @@ onBeforeUnmount(() => {
   if (onDocClick) document.removeEventListener('click', onDocClick)
   if (onEsc) document.removeEventListener('keydown', onEsc)
 })
+
+
+
+async function loadTaskByIndex(i: number) {
+  if (tasks.value.length === 0) return;
+  const clamped = Math.max(0, Math.min(tasks.value.length - 1, i));
+  currentTaskIndex.value = clamped;
+  const t = tasks.value[clamped];
+
+  if (taskTitle.value) {
+    taskTitle.value.textContent = `Image Annotation - ${t.title}`;
+  }
+
+  // görev değişince state sıfırla
+  state.annotations = [];
+  state.history = [];
+  state.historyIndex = -1;
+
+  try {
+    // ⬇️ Görseli preload et, sonra state.img olarak ata
+    const img = await loadImage(t.image);
+    state.img = img;
+
+    // çiz ve sığdır
+    fitToScreen();
+
+    // varsayılan label + tool
+    const firstLabel = labelList.value?.querySelector('.label-item') as HTMLElement | null;
+    setActiveLabel(firstLabel);
+    const selectTool = toolGroup.value?.querySelector(
+      '.annotation-tool[data-tool="select"]'
+    ) as HTMLElement | null;
+    setActiveTool(selectTool);
+    recordHistory();
+  } catch (err) {
+    console.error('Image load failed:', err);
+    // istersek burada kullanıcıya mesaj gösterebiliriz
+  }
+}
+
+
+function goPrevTask() {
+  loadTaskByIndex((currentTaskIndex.value - 1 + tasks.value.length) % tasks.value.length)
+}
+function goNextTask() {
+  loadTaskByIndex((currentTaskIndex.value + 1) % tasks.value.length)
+}
+
 </script>
 
 <template>
@@ -575,50 +652,43 @@ onBeforeUnmount(() => {
         >
           Tasks
         </h2>
-        <ul class="space-y-3">
-          <li>
-            <a
-              class="block rounded-lg overflow-hidden border-2 border-primary dark:border-primary/80 bg-primary/5"
-              href="#"
-            >
-              <div class="h-24 bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
-                <span class="material-symbols-outlined text-4xl text-gray-400 dark:text-gray-500"
-                  >image</span
-                >
+       <ul class="space-y-3">
+        <li v-for="(t, idx) in tasks" :key="t.id">
+          <a
+            href="#"
+            @click.prevent="loadTaskByIndex(idx)"
+            :class="[
+              'block rounded-lg overflow-hidden border-2',
+              idx === currentTaskIndex ? 'border-primary dark:border-primary/80 bg-primary/5' : 'border-transparent hover:border-primary/50'
+            ]"
+          >
+            <div class="h-24 bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
+              <span class="text-gray-400 dark:text-gray-500">image</span>
+            </div>
+            <div class="p-3">
+              <div class="flex justify-between items-start">
+                <span class="text-sm font-medium">{{ t.title }}</span>
+
+                <span
+                  v-if="t.status === 'in_progress'"
+                  class="text-xs font-semibold px-2 py-1 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300"
+                >In Progress</span>
+
+                <span
+                  v-else-if="t.status === 'completed'"
+                  class="text-xs font-semibold px-2 py-1 rounded-full bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300"
+                >Completed</span>
+
+                <span
+                  v-else
+                  class="text-xs font-semibold px-2 py-1 rounded-full bg-gray-100 text-gray-800 dark:bg-gray-700/60 dark:text-gray-300"
+                >Queued</span>
               </div>
-              <div class="p-3">
-                <div class="flex justify-between items-start">
-                  <span class="text-sm font-medium">Task 1</span>
-                  <span
-                    class="text-xs font-semibold px-2 py-1 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300"
-                    >In Progress</span
-                  >
-                </div>
-              </div>
-            </a>
-          </li>
-          <li>
-            <a
-              class="block rounded-lg overflow-hidden border-2 border-transparent hover:border-primary/50"
-              href="#"
-            >
-              <div class="h-24 bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
-                <span class="material-symbols-outlined text-4xl text-gray-400 dark:text-gray-500"
-                  >image</span
-                >
-              </div>
-              <div class="p-3">
-                <div class="flex justify-between items-start">
-                  <span class="text-sm font-medium">Task 2</span>
-                  <span
-                    class="text-xs font-semibold px-2 py-1 rounded-full bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300"
-                    >Completed</span
-                  >
-                </div>
-              </div>
-            </a>
-          </li>
-        </ul>
+            </div>
+          </a>
+        </li>
+      </ul>
+
       </nav>
 
       <div class="p-4 border-t border-gray-200 dark:border-gray-800 relative">
@@ -643,10 +713,10 @@ onBeforeUnmount(() => {
         <div class="flex items-center gap-4">
           <h2 ref="taskTitle" class="text-xl font-bold">Image Annotation - Task 1</h2>
           <div class="flex items-center gap-2">
-            <button class="p-1 rounded-md bg-gray-100 dark:bg-gray-800 hover:bg-gray-200">
+            <button ref="prevBtn" class="p-1 rounded-md bg-gray-100 dark:bg-gray-800 hover:bg-gray-200">
               <ArrowBackIcon class="ui-svg h-5 w-5 text-gray-700 dark:text-gray-200" />
             </button>
-            <button class="p-1 rounded-md bg-gray-100 dark:bg-gray-800 hover:bg-gray-200">
+            <button ref="nextBtn" class="p-1 rounded-md bg-gray-100 dark:bg-gray-800 hover:bg-gray-200">
               <ArrowFwdIcon class="ui-svg h-5 w-5 text-gray-700 dark:text-gray-200" />
             </button>
           </div>
