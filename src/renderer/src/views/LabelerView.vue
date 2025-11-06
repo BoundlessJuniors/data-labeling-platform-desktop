@@ -213,11 +213,32 @@ function loadImage(url: string): Promise<HTMLImageElement> {
   });
 }
 
+function enterPanMode() {
+  // temp şekli varsa temizle
+  const temp = annotationsSvg.value?.querySelector('#temp-shape')
+  temp?.remove()
+
+  // çizim durumlarını sıfırla
+  state.isDrawing = false
+  state.drawingShape = null
+  state.polyPoints = []
+
+  // aracı "select"e al (UI highlight düzelsin)
+  const selectTool = toolGroup.value?.querySelector(
+    '.annotation-tool[data-tool="select"]'
+  ) as HTMLElement | null
+  setActiveTool(selectTool)
+
+  // cursor & tool-active class güncelle
+  updateCursor()
+}
+
 
 /** Yardımcılar */
 function qsa<T extends Element = Element>(root: ParentNode, sel: string): T[] {
   return Array.from(root.querySelectorAll(sel)) as T[]
 }
+
 function setActiveTool(el: HTMLElement | null) {
   if (!toolGroup.value) return
   qsa<HTMLElement>(toolGroup.value, '.annotation-tool').forEach((e) => e.classList.remove('active'))
@@ -233,6 +254,51 @@ function setActiveTool(el: HTMLElement | null) {
   }
   updateCursor()
 }
+
+// --- Theme helpers (persist + system follow) ---
+const THEME_KEY = 'labelgun_theme' as const;
+type ThemeMode = 'light' | 'dark';
+
+function applyTheme(mode: ThemeMode) {
+  document.documentElement.classList.toggle('dark', mode === 'dark');
+}
+
+function getStoredTheme(): ThemeMode | null {
+  const v = localStorage.getItem(THEME_KEY);
+  return v === 'dark' || v === 'light' ? v : null;
+}
+
+function setStoredTheme(mode: ThemeMode) {
+  localStorage.setItem(THEME_KEY, mode);
+}
+
+function getSystemTheme(): ThemeMode {
+  return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+    ? 'dark'
+    : 'light';
+}
+
+function initTheme() {
+  const stored = getStoredTheme();
+  if (stored) {
+    applyTheme(stored);              // kullanıcı tercihi varsa onu uygula
+    return;
+  }
+  // kullanıcı tercihi yoksa sistemi taklit et
+  applyTheme(getSystemTheme());
+
+  // Kullanıcı tercihi oluşana kadar sistem değişikliğini izle
+  const mql = window.matchMedia('(prefers-color-scheme: dark)');
+  const onChange = (e: MediaQueryListEvent) => {
+    if (!getStoredTheme()) applyTheme(e.matches ? 'dark' : 'light');
+  };
+  // modern tarayıcılar:
+  if ('addEventListener' in mql) mql.addEventListener('change', onChange);
+  // eski fallback (gerekirse):
+  else (mql as any).addListener?.(onChange);
+}
+
+
 function setActiveLabel(el: HTMLElement | null) {
   if (!labelList.value) return
   qsa<HTMLElement>(labelList.value, '.label-item').forEach((e) => e.classList.remove('active'))
@@ -470,6 +536,9 @@ const onWheel = (e: WheelEvent) => {
 
 /** Mount */
 onMounted(() => {
+  
+  initTheme(); // (YENİ) Tema: önce kalıcı tercih, yoksa sistem temasını uygula
+
   // Başlık
   if (taskTitle.value) taskTitle.value.textContent = 'Image Annotation - Task 1'
 
@@ -503,10 +572,14 @@ onMounted(() => {
     document.addEventListener('keydown', onEsc)
   }
 
-  // Tema
-  themeToggle.value?.addEventListener('click', () => {
-    document.documentElement.classList.toggle('dark')
-  })
+  // Tema – kullanıcı tıklarsa tercihi KALICI yap
+themeToggle.value?.addEventListener('click', () => {
+  const current: ThemeMode = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
+  const next: ThemeMode = current === 'dark' ? 'light' : 'dark';
+  applyTheme(next);
+  setStoredTheme(next); // kalıcılaştır: yeniden açsa da bu kalsın
+});
+
 
   // Araç tıklamaları
   toolGroup.value?.addEventListener('click', (e) => {
@@ -731,16 +804,29 @@ const commitPoly = () => {
   updateCursor()
 }
 
-  // Enter: bitir, Esc: iptal
-  document.addEventListener('keydown', (e) => {
-    if (e.ctrlKey && e.key === 'z') { e.preventDefault(); undo(); return }
-    if (e.ctrlKey && e.key === 'y') { e.preventDefault(); redo(); return }
+ document.addEventListener('keydown', (e) => {
+  if (e.ctrlKey && e.key === 'z') { e.preventDefault(); undo(); return }
+  if (e.ctrlKey && e.key === 'y') { e.preventDefault(); redo(); return }
 
-    if (state.isDrawing && (state.drawingShape === 'polygon' || state.drawingShape === 'polyline')) {
-      if (e.key === 'Enter') { e.preventDefault(); commitPoly() }
-      if (e.key === 'Escape') { e.preventDefault(); cancelPoly() }
+  // Polygon/Polyline çizimini yönet
+  if (state.isDrawing && (state.drawingShape === 'polygon' || state.drawingShape === 'polyline')) {
+    if (e.key === 'Enter') { e.preventDefault(); commitPoly(); return }
+    if (e.key === 'Escape') { e.preventDefault(); cancelPoly(); return }
+  }
+
+  // GENEL: ESC = Pan moduna dön
+  if (e.key === 'Escape') {
+    const isToolActive =
+      !!state.activeLabel && (state.lastUsedTool === 'shapes' || state.lastUsedTool === 'sam')
+
+    // Seçili bir etiket/arac varken ESC'ye basıldıysa pan moduna dön
+    if (isToolActive || state.lastUsedTool !== 'select' || state.isDrawing) {
+      e.preventDefault()
+      enterPanMode()
     }
-  })
+  }
+})
+
 
   // Dblclick ile bitir
   canvasContainer.value?.addEventListener('dblclick', () => {
@@ -1032,7 +1118,7 @@ function goNextTask() {
         <div class="flex items-center gap-4">
           <button
             ref="themeToggle"
-            class="relative inline-flex items-center h-8 w-14 rounded-full bg-gray-200 dark:bg-gray-700"
+            class="relative inline-flex items-center h-8 w-14 shrink-0 rounded-full bg-gray-200 dark:bg-gray-700 ml-2"
           >
             <span
               class="absolute left-1.5 top-1.5 h-5 w-5 bg-white dark:bg-gray-800 rounded-full shadow-md transform transition-transform duration-300 dark:translate-x-6 flex items-center justify-center"
