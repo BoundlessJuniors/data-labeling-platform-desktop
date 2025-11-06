@@ -43,6 +43,7 @@ import CropSquareIcon    from '@renderer/assets/icons/custom/crop_square.svg?com
 import PolyLineIcon    from '@renderer/assets/icons/custom/polyline.svg?component'
 import KeypointIcon    from '@renderer/assets/icons/custom/adjust.svg?component'
 import CircleIcon    from '@renderer/assets/icons/custom/circle.svg?component'
+import DeleteIcon    from '@renderer/assets/icons/custom/delete.svg?component'
 
 import road from '@renderer/assets/images/road.jpg';
 
@@ -145,6 +146,9 @@ const taskTitle = ref<HTMLHeadingElement | null>(null)
 
 const prevBtn = ref<HTMLButtonElement | null>(null)
 const nextBtn = ref<HTMLButtonElement | null>(null)
+
+const deleteBtn = ref<HTMLButtonElement | null>(null)
+
 
 
 /** İç durum */
@@ -296,6 +300,22 @@ function initTheme() {
   if ('addEventListener' in mql) mql.addEventListener('change', onChange);
   // eski fallback (gerekirse):
   else (mql as any).addListener?.(onChange);
+}
+
+function clearSelection() {
+  state.selectedAnnotationId = null
+  renderAnnotations()
+}
+
+function deleteSelected() {
+  if (state.selectedAnnotationId == null) return
+  const i = state.annotations.findIndex(a => a.id === state.selectedAnnotationId)
+  if (i !== -1) {
+    state.annotations.splice(i, 1)
+    recordHistory()
+  }
+  state.selectedAnnotationId = null
+  renderAnnotations()
 }
 
 
@@ -570,16 +590,29 @@ onMounted(() => {
       if (e.key === 'Escape') closeShapes()
     }
     document.addEventListener('keydown', onEsc)
+    deleteBtn.value?.addEventListener('click', deleteSelected)
   }
 
   // Tema – kullanıcı tıklarsa tercihi KALICI yap
-themeToggle.value?.addEventListener('click', () => {
-  const current: ThemeMode = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
-  const next: ThemeMode = current === 'dark' ? 'light' : 'dark';
-  applyTheme(next);
-  setStoredTheme(next); // kalıcılaştır: yeniden açsa da bu kalsın
-});
+  themeToggle.value?.addEventListener('click', () => {
+    const current: ThemeMode = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
+    const next: ThemeMode = current === 'dark' ? 'light' : 'dark';
+    applyTheme(next);
+    setStoredTheme(next); // kalıcılaştır: yeniden açsa da bu kalsın
+  });
 
+  annotationList.value?.addEventListener('click', (e) => {
+    const t = (e.target as HTMLElement).closest('.annotation-item') as HTMLElement | null
+    if (t) selectAnnotation(parseInt(t.dataset.id!))
+    else clearSelection()
+  })
+
+  canvasEl.value?.addEventListener('click', () => {
+    // çizim/pan yoksa ve select modundaysak boş tık seçim temizlesin
+    if (!state.isDrawing && !state.isPanning && state.lastUsedTool === 'select') {
+      clearSelection()
+    }
+  })
 
   // Araç tıklamaları
   toolGroup.value?.addEventListener('click', (e) => {
@@ -623,16 +656,7 @@ submitBtn?.addEventListener('click', () => {
     console.log('--- ANNOTATION DATA (JSON) ---\n', JSON.stringify(state.annotations, null, 2))
     alert('Annotation JSON verisi konsola yazıldı (F12).')
   })
-  document.addEventListener('keydown', (e) => {
-    if (e.ctrlKey && e.key === 'z') {
-      e.preventDefault()
-      undo()
-    }
-    if (e.ctrlKey && e.key === 'y') {
-      e.preventDefault()
-      redo()
-    }
-  })
+  
   canvasContainer.value?.addEventListener('wheel', onWheel, { passive: false })
 
   // Zoom toolbar
@@ -808,6 +832,13 @@ const commitPoly = () => {
   if (e.ctrlKey && e.key === 'z') { e.preventDefault(); undo(); return }
   if (e.ctrlKey && e.key === 'y') { e.preventDefault(); redo(); return }
 
+  // Silme kısayolu
+    if ((e.key === 'Delete' || e.key === 'Backspace') && state.selectedAnnotationId != null) {
+      e.preventDefault()
+      deleteSelected()
+      return
+    }
+
   // Polygon/Polyline çizimini yönet
   if (state.isDrawing && (state.drawingShape === 'polygon' || state.drawingShape === 'polyline')) {
     if (e.key === 'Enter') { e.preventDefault(); commitPoly(); return }
@@ -816,6 +847,11 @@ const commitPoly = () => {
 
   // GENEL: ESC = Pan moduna dön
   if (e.key === 'Escape') {
+    if (state.selectedAnnotationId != null) {
+      e.preventDefault()
+      clearSelection()
+      return
+    }
     const isToolActive =
       !!state.activeLabel && (state.lastUsedTool === 'shapes' || state.lastUsedTool === 'sam')
 
@@ -1246,6 +1282,15 @@ function goNextTask() {
                 title="Redo (Ctrl+Y)">
                 <RedoIcon class="ui-svg h-5 w-5 text-gray-600 dark:text-gray-300" />
               </button>
+              
+              <button
+                ref="deleteBtn"
+                class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
+                title="Delete (Del)"
+              >
+                <DeleteIcon class="ui-svg h-5 w-5 text-gray-600 dark:text-gray-300" />
+              </button>
+
 
             </div>
           </div>
