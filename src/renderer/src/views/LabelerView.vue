@@ -46,67 +46,27 @@ import CircleIcon from '@renderer/assets/icons/custom/circle.svg?component'
 import DeleteIcon from '@renderer/assets/icons/custom/delete.svg?component'
 
 import road from '@renderer/assets/images/road.jpg'
+// Tipler
+import type {
+  Point,
+  BBox,
+  PolygonAnn,
+  PolylineAnn,
+  KeypointAnn,
+  CircleAnn,
+  Annotation,
+  Task,
+  TaskStatus
+} from '@renderer/types/annotation'
 
-/* =============================
-   Tipler
-   ============================= */
-type Point = { x: number; y: number }
+// Util
+import { loadImage } from '@renderer/utils/image'
 
-type BBox = {
-  id: number
-  type: 'bbox'
-  label: string | null
-  x: number
-  y: number
-  width: number
-  height: number
-}
-
-type PolygonAnn = {
-  id: number
-  type: 'polygon'
-  label: string | null
-  points: Point[]
-}
-
-type PolylineAnn = {
-  id: number
-  type: 'polyline'
-  label: string | null
-  points: Point[]
-}
-
-type KeypointAnn = {
-  id: number
-  type: 'keypoint'
-  label: string | null
-  x: number
-  y: number
-}
-
-type CircleAnn = {
-  id: number
-  type: 'circle'
-  label: string | null
-  cx: number
-  cy: number
-  r: number
-}
-
-type Annotation = BBox | PolygonAnn | PolylineAnn | KeypointAnn | CircleAnn
-
-type TaskStatus = 'in_progress' | 'completed' | 'queued'
-type Task = { id: number; title: string; image: string; status: TaskStatus }
-
-/* =============================
-   Demo Görevler & Computed
-   ============================= */
-const tasks = ref<Task[]>([
-  { id: 1, title: 'Task 1', image: road, status: 'in_progress' },
-  { id: 2, title: 'Task 2', image: road, status: 'completed' }
-])
-const currentTaskIndex = ref(0)
-const currentTask = computed(() => tasks.value[currentTaskIndex.value])
+// Composable’lar
+import { useLabelerState } from '@renderer/composables/useLabelerState'
+import { useHistory } from '@renderer/composables/useHistory'
+import { useCanvasTransform } from '@renderer/composables/useCanvasTransform'
+import { useTasks } from '@renderer/composables/useTasks'
 
 /* =============================
    Refs (DOM erişimi)
@@ -149,35 +109,19 @@ const deleteBtn = ref<HTMLButtonElement | null>(null)
 /* =============================
    İç durum
    ============================= */
-const state = {
-  annotations: [] as Annotation[],
-  selectedAnnotationId: null as number | null,
-  history: [] as Annotation[][],
-  historyIndex: -1,
 
-  scale: 1,
-  translateX: 0,
-  translateY: 0,
-  startPanX: 0,
-  startPanY: 0,
+// Reactif state
+const { state } = useLabelerState()
 
-  isPanning: false,
-  isDrawing: false,
-  drawingStartX: 0,
-  drawingStartY: 0,
+// Undo/Redo vb. geçmiş yönetimi
+const { recordHistory, undo, redo } = useHistory(state)
 
-  lastUsedTool: 'select' as 'select' | 'sam' | 'shapes',
-  lastUsedShape: 'bbox' as 'bbox' | 'polygon' | 'polyline' | 'keypoint' | 'circle',
-  activeLabel: null as string | null,
+// Canvas transform & zoom yönetimi
+const { updateTransform, fitToScreen, zoom } = useCanvasTransform(state, canvasEl, annotationsSvg)
 
-  // çizim süreci için küçük ekler
-  drawingShape: null as 'bbox' | 'polygon' | 'polyline' | 'circle' | null,
-  polyPoints: [] as Point[],
+// Görevler (task listesi) ve aktif indeks
+const { tasks, currentTaskIndex, currentTask } = useTasks()
 
-  img: new Image()
-}
-
-const SVG_NS = 'http://www.w3.org/2000/svg'
 let containerRO: ResizeObserver | null = null
 
 /* =============================
@@ -209,21 +153,19 @@ function toggleShapes(e?: Event): void {
 /* =============================
    Yardımcılar
    ============================= */
+// SVG element üretimi için namespace
+const SVG_NS = 'http://www.w3.org/2000/svg'
+
+// querySelectorAll için küçük yardımcı (type-safe)
+function qsa<T extends Element = Element>(root: ParentNode, sel: string): T[] {
+  return Array.from(root.querySelectorAll(sel)) as T[]
+}
+
 function updateDeleteButton(): void {
   if (!deleteBtn.value) return
   const noSelection = state.selectedAnnotationId == null
   const noAnns = state.annotations.length === 0
   deleteBtn.value.disabled = noSelection || noAnns
-}
-
-function loadImage(url: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image()
-    img.crossOrigin = 'anonymous'
-    img.onload = () => resolve(img)
-    img.onerror = (e) => reject(e)
-    img.src = url.startsWith('http') ? `${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}` : url
-  })
 }
 
 function enterPanMode(): void {
@@ -241,10 +183,6 @@ function enterPanMode(): void {
   updateCursor()
 }
 
-function qsa<T extends Element = Element>(root: ParentNode, sel: string): T[] {
-  return Array.from(root.querySelectorAll(sel)) as T[]
-}
-
 function setActiveTool(el: HTMLElement | null): void {
   if (!toolGroup.value) return
   qsa<HTMLElement>(toolGroup.value, '.annotation-tool').forEach((e) => e.classList.remove('active'))
@@ -259,47 +197,6 @@ function setActiveTool(el: HTMLElement | null): void {
     }
   }
   updateCursor()
-}
-
-/* =============================
-   Tema Yardımcıları (persist + system)
-   ============================= */
-const THEME_KEY = 'labelgun_theme' as const
-type ThemeMode = 'light' | 'dark'
-
-function applyTheme(mode: ThemeMode): void {
-  document.documentElement.classList.toggle('dark', mode === 'dark')
-}
-
-function getStoredTheme(): ThemeMode | null {
-  const v = localStorage.getItem(THEME_KEY)
-  return v === 'dark' || v === 'light' ? (v as ThemeMode) : null
-}
-
-function setStoredTheme(mode: ThemeMode): void {
-  localStorage.setItem(THEME_KEY, mode)
-}
-
-function getSystemTheme(): ThemeMode {
-  return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
-    ? 'dark'
-    : 'light'
-}
-
-function initTheme(): void {
-  const stored = getStoredTheme()
-  if (stored) {
-    applyTheme(stored)
-    return
-  }
-  applyTheme(getSystemTheme())
-
-  const mql = window.matchMedia('(prefers-color-scheme: dark)')
-  const onChange = (e: MediaQueryListEvent): void => {
-    if (!getStoredTheme()) applyTheme(e.matches ? 'dark' : 'light')
-  }
-  if ('addEventListener' in mql) mql.addEventListener('change', onChange)
-  else (mql as any).addListener?.(onChange)
 }
 
 /* =============================
@@ -436,39 +333,6 @@ function renderAnnotations(): void {
   updateDeleteButton()
 }
 
-/* =============================
-   History
-   ============================= */
-function recordHistory(): void {
-  state.history = state.history.slice(0, state.historyIndex + 1)
-  state.history.push(JSON.parse(JSON.stringify(state.annotations)))
-  state.historyIndex++
-  updateUndoRedoButtons()
-}
-
-function undo(): void {
-  if (state.historyIndex > 0) {
-    state.historyIndex--
-    state.annotations = JSON.parse(JSON.stringify(state.history[state.historyIndex]))
-    renderAnnotations()
-    updateUndoRedoButtons()
-  }
-}
-
-function redo(): void {
-  if (state.historyIndex < state.history.length - 1) {
-    state.historyIndex++
-    state.annotations = JSON.parse(JSON.stringify(state.history[state.historyIndex]))
-    renderAnnotations()
-    updateUndoRedoButtons()
-  }
-}
-
-function updateUndoRedoButtons(): void {
-  if (undoBtn.value) undoBtn.value.disabled = state.historyIndex <= 0
-  if (redoBtn.value) redoBtn.value.disabled = state.historyIndex >= state.history.length - 1
-}
-
 function selectAnnotation(id: number): void {
   state.selectedAnnotationId = id
   const selectTool = toolGroup.value?.querySelector(
@@ -476,82 +340,6 @@ function selectAnnotation(id: number): void {
   ) as HTMLElement | null
   setActiveTool(selectTool)
   renderAnnotations()
-}
-
-/* =============================
-   Görüntüleme / Transform & Zoom
-   ============================= */
-function updateTransform(): void {
-  if (!canvasEl.value || !annotationsSvg.value) return
-  const transformValue = `translate(${state.translateX}px, ${state.translateY}px) scale(${state.scale})`
-  canvasEl.value.style.transform = transformValue
-  annotationsSvg.value.style.transform = transformValue
-}
-
-function fitToScreen(): void {
-  if (!canvasContainer.value || !canvasEl.value || !annotationsSvg.value) return
-
-  const cw = canvasContainer.value.clientWidth
-  const ch = canvasContainer.value.clientHeight
-  if (!cw || !ch) {
-    requestAnimationFrame(fitToScreen)
-    return
-  }
-
-  const iw = state.img.naturalWidth || canvasEl.value.width
-  const ih = state.img.naturalHeight || canvasEl.value.height
-  if (!iw || !ih) {
-    requestAnimationFrame(fitToScreen)
-    return
-  }
-
-  canvasEl.value.width = iw
-  canvasEl.value.height = ih
-  annotationsSvg.value.setAttribute('viewBox', `0 0 ${iw} ${ih}`)
-  annotationsSvg.value.setAttribute('width', String(iw))
-  annotationsSvg.value.setAttribute('height', String(ih))
-
-  const s = Math.min(cw / iw, ch / ih) * 0.98
-  state.scale = Number.isFinite(s) && s > 0 ? s : 1
-
-  const tx = (cw - iw * state.scale) / 2
-  const ty = (ch - ih * state.scale) / 2
-  state.translateX = Number.isFinite(tx) ? tx : 0
-  state.translateY = Number.isFinite(ty) ? ty : 0
-
-  const ctx = canvasEl.value.getContext('2d')!
-  ctx.clearRect(0, 0, iw, ih)
-  ctx.drawImage(state.img, 0, 0)
-
-  updateTransform()
-}
-
-function zoom(delta: number, clientX: number, clientY: number): void {
-  if (!canvasContainer.value) return
-  const rect = canvasContainer.value.getBoundingClientRect()
-
-  if (!Number.isFinite(state.scale) || state.scale <= 0) {
-    fitToScreen()
-  }
-
-  const mouseX = clientX - rect.left
-  const mouseY = clientY - rect.top
-  const worldX = (mouseX - state.translateX) / state.scale
-  const worldY = (mouseY - state.translateY) / state.scale
-
-  const newScale = Math.max(0.05, Math.min(state.scale * (1 + delta), 10))
-
-  state.translateX = mouseX - worldX * newScale
-  state.translateY = mouseY - worldY * newScale
-  state.scale = newScale
-
-  updateTransform()
-}
-
-const onWheel = (e: WheelEvent): void => {
-  e.preventDefault()
-  const delta = e.deltaY > 0 ? -0.05 : 0.05
-  zoom(delta, e.clientX, e.clientY)
 }
 
 /* =============================
@@ -666,8 +454,6 @@ const finishPointer = (): void => {
    Lifecycle: onMounted / onBeforeUnmount
    ============================= */
 onMounted((): void => {
-  initTheme()
-
   if (taskTitle.value) taskTitle.value.textContent = 'Image Annotation - Task 1'
 
   if (shapesToolBtn.value && shapesDropdown.value) {
@@ -771,11 +557,6 @@ onMounted((): void => {
     if (target) setActiveLabel(target)
   })
 
-  annotationList.value?.addEventListener('click', (e): void => {
-    const t = (e.target as HTMLElement).closest('.annotation-item') as HTMLElement | null
-    if (t) selectAnnotation(parseInt(t.dataset.id!))
-  })
-
   annotationsSvg.value?.addEventListener('click', (e): void => {
     const t = (e.target as HTMLElement).closest('.annotation-shape') as HTMLElement | null
     if (t) selectAnnotation(parseInt(t.dataset.id!))
@@ -796,8 +577,6 @@ onMounted((): void => {
     console.log('--- ANNOTATION DATA (JSON) ---\n', JSON.stringify(state.annotations, null, 2))
     alert('Annotation JSON verisi konsola yazıldı (F12).')
   })
-
-  canvasContainer.value?.addEventListener('wheel', onWheel, { passive: false })
 
   zoomInBtn.value?.addEventListener('click', (): void => {
     if (!canvasContainer.value) return
@@ -996,7 +775,6 @@ onMounted((): void => {
 
 onBeforeUnmount((): void => {
   window.removeEventListener('resize', fitToScreen)
-  canvasContainer.value?.removeEventListener('wheel', onWheel as EventListener)
   containerRO?.disconnect()
   shapesToolBtn.value?.removeEventListener('click', toggleShapes)
   if (onDocClick) document.removeEventListener('click', onDocClick)
@@ -1277,7 +1055,7 @@ function goNextTask(): void {
 
               <button
                 ref="redoBtn"
-                class="p-2 rounded-lg hover:bg-gray-100 dark:hoverbg-gray-800 disabled:opacity-50"
+                class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
                 title="Redo (Ctrl+Y)"
               >
                 <RedoIcon class="ui-svg h-5 w-5 text-gray-600 dark:text-gray-300" />
