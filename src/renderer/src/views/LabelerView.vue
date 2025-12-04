@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref, computed } from 'vue'
+import { onMounted, onBeforeUnmount, ref } from 'vue'
 // import undoIcon from '@renderer/assets/icons/custom/undo.svg'
 // import redoIcon from '@renderer/assets/icons/custom/redo.svg'
 // import selectIcon from '@renderer/assets/icons/custom/touch_app.svg'
@@ -118,9 +118,17 @@ const { recordHistory, undo, redo } = useHistory(state)
 
 // Canvas transform & zoom yönetimi
 const { updateTransform, fitToScreen, zoom } = useCanvasTransform(state, canvasEl, annotationsSvg)
-
+// Demo için başlangıç görev listesi: road.jpg
+const initialTasks: Task[] = [
+  {
+    id: 1,
+    title: 'Road demo',
+    image: road,
+    status: 'in_progress'
+  }
+]
 // Görevler (task listesi) ve aktif indeks
-const { tasks, currentTaskIndex, currentTask } = useTasks()
+const { tasks, currentTaskIndex, currentTask } = useTasks(initialTasks)
 
 let containerRO: ResizeObserver | null = null
 
@@ -188,12 +196,30 @@ function setActiveTool(el: HTMLElement | null): void {
   qsa<HTMLElement>(toolGroup.value, '.annotation-tool').forEach((e) => e.classList.remove('active'))
   if (el) {
     el.classList.add('active')
+    const tool = el.dataset.tool
+
     if (el.closest('#shapes-dropdown')) {
       shapesToolBtn.value?.classList.add('active')
-      state.lastUsedShape = (el.dataset.tool as any) ?? 'bbox'
+
+      if (
+        tool === 'bbox' ||
+        tool === 'polygon' ||
+        tool === 'polyline' ||
+        tool === 'keypoint' ||
+        tool === 'circle'
+      ) {
+        state.lastUsedShape = tool
+      } else {
+        state.lastUsedShape = 'bbox'
+      }
+
       state.lastUsedTool = 'shapes'
     } else {
-      state.lastUsedTool = (el.dataset.tool as any) ?? 'select'
+      if (tool === 'select' || tool === 'sam' || tool === 'shapes') {
+        state.lastUsedTool = tool
+      } else {
+        state.lastUsedTool = 'select'
+      }
     }
   }
   updateCursor()
@@ -331,6 +357,63 @@ function renderAnnotations(): void {
     annotationList.value!.appendChild(item)
   })
   updateDeleteButton()
+}
+// EKLENECEK: Ekran koordinatlarını orijinal görüntü çözünürlüğüne taşıyan helper
+function exportAnnotationsToImageSpace(): Annotation[] {
+  if (!annotationsSvg.value) return state.annotations
+
+  const imgW = state.img?.naturalWidth || state.img?.width
+  const imgH = state.img?.naturalHeight || state.img?.height
+  if (!imgW || !imgH) return state.annotations
+
+  const rect = annotationsSvg.value.getBoundingClientRect()
+  if (!rect.width || !rect.height) return state.annotations
+
+  const scaleX = imgW / rect.width
+  const scaleY = imgH / rect.height
+
+  return state.annotations.map((ann) => {
+    if (ann.type === 'bbox') {
+      return {
+        ...ann,
+        x: ann.x * scaleX,
+        y: ann.y * scaleY,
+        width: ann.width * scaleX,
+        height: ann.height * scaleY
+      }
+    }
+
+    if (ann.type === 'keypoint') {
+      return {
+        ...ann,
+        x: ann.x * scaleX,
+        y: ann.y * scaleY
+      }
+    }
+
+    if (ann.type === 'circle') {
+      const rScale = (scaleX + scaleY) / 2
+      return {
+        ...ann,
+        cx: ann.cx * scaleX,
+        cy: ann.cy * scaleY,
+        r: ann.r * rScale
+      }
+    }
+
+    if (ann.type === 'polygon' || ann.type === 'polyline') {
+      return {
+        ...ann,
+        points: ann.points.map((p) => ({
+          x: p.x * scaleX,
+          y: p.y * scaleY
+        }))
+      }
+    }
+
+    // Güvenlik için fallback
+    return ann
+  })
 }
 
 function selectAnnotation(id: number): void {
@@ -573,9 +656,10 @@ onMounted((): void => {
   undoBtn.value?.addEventListener('click', (): void => undo())
   redoBtn.value?.addEventListener('click', (): void => redo())
   saveBtn.value?.addEventListener('click', (): void => {
+    const exported = exportAnnotationsToImageSpace()
     // eslint-disable-next-line no-console
-    console.log('--- ANNOTATION DATA (JSON) ---\n', JSON.stringify(state.annotations, null, 2))
-    alert('Annotation JSON verisi konsola yazıldı (F12).')
+    console.log('--- ANNOTATION DATA (IMAGE SPACE JSON) ---\n', JSON.stringify(exported, null, 2))
+    alert('Annotation JSON verisi (orijinal çözünürlükte) konsola yazıldı (F12).')
   })
 
   zoomInBtn.value?.addEventListener('click', (): void => {

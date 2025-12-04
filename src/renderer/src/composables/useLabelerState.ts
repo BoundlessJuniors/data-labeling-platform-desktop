@@ -1,8 +1,34 @@
 import { reactive } from 'vue'
 import type { Annotation, Point } from '@renderer/types/annotation'
+interface LabelerState {
+  annotations: Annotation[]
+  selectedAnnotationId: number | null
+  history: Annotation[][]
+  historyIndex: number
 
-export function useLabelerState() {
-  const state = reactive({
+  scale: number
+  translateX: number
+  translateY: number
+  startPanX: number
+  startPanY: number
+
+  isPanning: boolean
+  isDrawing: boolean
+  drawingStartX: number
+  drawingStartY: number
+
+  lastUsedTool: 'select' | 'sam' | 'shapes'
+  lastUsedShape: 'bbox' | 'polygon' | 'polyline' | 'keypoint' | 'circle'
+  activeLabel: string | null
+
+  drawingShape: 'bbox' | 'polygon' | 'polyline' | 'circle' | null
+  polyPoints: Point[]
+
+  img: HTMLImageElement
+}
+
+export function useLabelerState(): { state: LabelerState } {
+  const state = reactive<LabelerState>({
     annotations: [] as Annotation[],
     selectedAnnotationId: null as number | null,
     history: [] as Annotation[][],
