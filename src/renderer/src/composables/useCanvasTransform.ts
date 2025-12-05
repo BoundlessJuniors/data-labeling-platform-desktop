@@ -33,9 +33,6 @@ export function useCanvasTransform(
     canvasEl.value.width = iw
     canvasEl.value.height = ih
     annotationsSvg.value.setAttribute('viewBox', `0 0 ${iw} ${ih}`)
-    annotationsSvg.value.setAttribute('width', String(iw))
-    annotationsSvg.value.setAttribute('height', String(ih))
-
     const s = Math.min(cw / iw, ch / ih) * 0.98
     state.scale = Number.isFinite(s) && s > 0 ? s : 1
     state.translateX = (cw - iw * state.scale) / 2

@@ -175,6 +175,46 @@ function updateDeleteButton(): void {
   const noAnns = state.annotations.length === 0
   deleteBtn.value.disabled = noSelection || noAnns
 }
+// Canvas üzerindeki (tıklanan) noktayı, orijinal görüntü
+// koordinat sistemine (3000x2000) çevirir.
+function getImageCoordsFromEvent(e: MouseEvent): { imgX: number; imgY: number } | null {
+  if (!canvasEl.value || !state.img) return null
+
+  // 1) Canvas'ın ekranda görünen rect'i
+  const rect = canvasEl.value.getBoundingClientRect()
+
+  // Fare, bu rect içinde nereye denk geliyor? (ekran pikseli)
+  const mouseX = e.clientX - rect.left
+  const mouseY = e.clientY - rect.top
+
+  // 2) Canvas'ın iç koordinat boyutu (her zaman 3000x2000 olacak)
+  const internalW = canvasEl.value.width
+  const internalH = canvasEl.value.height
+  if (!internalW || !internalH) return null
+
+  // 3) Ekrandaki boyut / iç boyut oranı => ölçek
+  //    (CSS transform + translate ne olursa olsun rect bunu içerir)
+  const scaleX = rect.width / internalW
+  const scaleY = rect.height / internalH
+
+  if (!Number.isFinite(scaleX) || !Number.isFinite(scaleY) || scaleX <= 0 || scaleY <= 0) {
+    return null
+  }
+
+  // 4) Ekran pikselini tekrar iç koordinat sistemine geri çevir
+  const imgX = mouseX / scaleX
+  const imgY = mouseY / scaleY
+
+  // 5) Güvenlik: gerçek görüntü boyutu sınırlarının dışına taşma kontrolü
+  const imgW = state.img.naturalWidth || internalW
+  const imgH = state.img.naturalHeight || internalH
+
+  if (imgX < 0 || imgY < 0 || imgX > imgW || imgY > imgH) {
+    return null
+  }
+
+  return { imgX, imgY }
+}
 
 function enterPanMode(): void {
   const temp = annotationsSvg.value?.querySelector('#temp-shape')
@@ -282,9 +322,10 @@ function renderAnnotations(): void {
   if (!annotationsSvg.value || !annotationList.value) return
   annotationsSvg.value.innerHTML = ''
   annotationList.value.innerHTML = ''
-
+  console.log('RENDER ANNS, count =', state.annotations.length)
   state.annotations.forEach((ann) => {
     if (ann.type === 'bbox') {
+      console.log('ANN:', ann)
       const el = document.createElementNS(SVG_NS, 'rect')
       el.setAttribute('x', String(ann.x))
       el.setAttribute('y', String(ann.y))
@@ -358,46 +399,35 @@ function renderAnnotations(): void {
   })
   updateDeleteButton()
 }
-// EKLENECEK: Ekran koordinatlarını orijinal görüntü çözünürlüğüne taşıyan helper
 function exportAnnotationsToImageSpace(): Annotation[] {
-  if (!annotationsSvg.value) return state.annotations
-
-  const imgW = state.img?.naturalWidth || state.img?.width
-  const imgH = state.img?.naturalHeight || state.img?.height
-  if (!imgW || !imgH) return state.annotations
-
-  const rect = annotationsSvg.value.getBoundingClientRect()
-  if (!rect.width || !rect.height) return state.annotations
-
-  const scaleX = imgW / rect.width
-  const scaleY = imgH / rect.height
+  // Şu andaki tüm koordinatlar zaten img.naturalWidth x img.naturalHeight
+  // uzayında olduğu için, sadece (istersen) yuvarlayarak geri döndürüyoruz.
 
   return state.annotations.map((ann) => {
     if (ann.type === 'bbox') {
       return {
         ...ann,
-        x: ann.x * scaleX,
-        y: ann.y * scaleY,
-        width: ann.width * scaleX,
-        height: ann.height * scaleY
+        x: Math.round(ann.x),
+        y: Math.round(ann.y),
+        width: Math.round(ann.width),
+        height: Math.round(ann.height)
       }
     }
 
     if (ann.type === 'keypoint') {
       return {
         ...ann,
-        x: ann.x * scaleX,
-        y: ann.y * scaleY
+        x: Math.round(ann.x),
+        y: Math.round(ann.y)
       }
     }
 
     if (ann.type === 'circle') {
-      const rScale = (scaleX + scaleY) / 2
       return {
         ...ann,
-        cx: ann.cx * scaleX,
-        cy: ann.cy * scaleY,
-        r: ann.r * rScale
+        cx: Math.round(ann.cx),
+        cy: Math.round(ann.cy),
+        r: Math.round(ann.r)
       }
     }
 
@@ -405,13 +435,12 @@ function exportAnnotationsToImageSpace(): Annotation[] {
       return {
         ...ann,
         points: ann.points.map((p) => ({
-          x: p.x * scaleX,
-          y: p.y * scaleY
+          x: Math.round(p.x),
+          y: Math.round(p.y)
         }))
       }
     }
 
-    // Güvenlik için fallback
     return ann
   })
 }
@@ -482,8 +511,11 @@ const finishPointer = (): void => {
     if (state.drawingShape === 'bbox') {
       const temp = annotationsSvg.value!.querySelector('#temp-shape') as SVGRectElement | null
       if (temp) {
+        const x = parseFloat(temp.getAttribute('x') || '0')
+        const y = parseFloat(temp.getAttribute('y') || '0')
         const w = parseFloat(temp.getAttribute('width') || '0')
         const h = parseFloat(temp.getAttribute('height') || '0')
+        console.log('TEMP RECT:', { x, y, w, h })
         if (w > 5 && h > 5) {
           const newAnn: BBox = {
             id: Date.now(),
@@ -657,8 +689,18 @@ onMounted((): void => {
   redoBtn.value?.addEventListener('click', (): void => redo())
   saveBtn.value?.addEventListener('click', (): void => {
     const exported = exportAnnotationsToImageSpace()
-    // eslint-disable-next-line no-console
+    console.log('coordW/H (canvas):', canvasEl.value?.width, canvasEl.value?.height)
+    console.log(
+      'origW/H (Task):',
+      currentTask.value?.originalWidth,
+      currentTask.value?.originalHeight
+    )
+    console.log('raw annotations:', JSON.stringify(state.annotations, null, 2))
+    console.log('exported annotations:', JSON.stringify(exported, null, 2))
     console.log('--- ANNOTATION DATA (IMAGE SPACE JSON) ---\n', JSON.stringify(exported, null, 2))
+
+    console.log('--- ANNOTATION DATA (IMAGE SPACE JSON) ---\n', JSON.stringify(exported, null, 2))
+
     alert('Annotation JSON verisi (orijinal çözünürlükte) konsola yazıldı (F12).')
   })
 
@@ -703,11 +745,9 @@ onMounted((): void => {
     }
 
     if (isToolActive && state.lastUsedTool === 'shapes') {
-      const rect = canvasContainer.value!.getBoundingClientRect()
-      const mouseX = e.clientX - rect.left
-      const mouseY = e.clientY - rect.top
-      const imgX = (mouseX - state.translateX) / state.scale
-      const imgY = (mouseY - state.translateY) / state.scale
+      const imgCoords = getImageCoordsFromEvent(e)
+      if (!imgCoords) return
+      const { imgX, imgY } = imgCoords
 
       if (!Number.isFinite(imgX) || !Number.isFinite(imgY)) return
 
@@ -791,25 +831,21 @@ onMounted((): void => {
   })
 
   canvasContainer.value?.addEventListener('mousemove', (e: MouseEvent): void => {
-    const rect = canvasContainer.value!.getBoundingClientRect()
-    const mouseX = e.clientX - rect.left
-    const mouseY = e.clientY - rect.top
+    // Çarpı işareti için container koordinatları
+    const containerRect = canvasContainer.value!.getBoundingClientRect()
+    const mouseXContainer = e.clientX - containerRect.left
+    const mouseYContainer = e.clientY - containerRect.top
 
-    if (crosshairH.value) crosshairH.value.style.top = `${mouseY}px`
-    if (crosshairV.value) crosshairV.value.style.left = `${mouseX}px`
+    if (crosshairH.value) crosshairH.value.style.top = `${mouseYContainer}px`
+    if (crosshairV.value) crosshairV.value.style.left = `${mouseXContainer}px`
 
-    const imgX = (mouseX - state.translateX) / state.scale
-    const imgY = (mouseY - state.translateY) / state.scale
-
-    if (
-      !Number.isFinite(imgX) ||
-      !Number.isFinite(imgY) ||
-      !Number.isFinite(state.scale) ||
-      state.scale <= 0
-    ) {
+    // Gerçek görüntü koordinatları için canvas üzerinden hesapla
+    const imgCoords = getImageCoordsFromEvent(e)
+    if (!imgCoords) {
       if (coords.value) coords.value.textContent = 'X: -, Y: -'
       return
     }
+    const { imgX, imgY } = imgCoords
 
     if (coords.value) coords.value.textContent = `X: ${Math.round(imgX)}, Y: ${Math.round(imgY)}`
 
@@ -886,6 +922,15 @@ async function loadTaskByIndex(i: number): Promise<void> {
   try {
     const img = await loadImage(t.image)
     state.img = img
+
+    // Eğer görev zaten orijinal çözünürlüğü biliyorsa, dokunma.
+    // Bilmiyorsa fallback olarak naturalWidth/naturalHeight kullan.
+    if (!t.originalWidth) {
+      t.originalWidth = img.naturalWidth
+    }
+    if (!t.originalHeight) {
+      t.originalHeight = img.naturalHeight
+    }
     fitToScreen()
 
     const firstLabel = labelList.value?.querySelector('.label-item') as HTMLElement | null

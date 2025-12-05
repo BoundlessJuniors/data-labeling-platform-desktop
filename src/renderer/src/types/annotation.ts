@@ -45,4 +45,11 @@ export type CircleAnn = {
 export type Annotation = BBox | PolygonAnn | PolylineAnn | KeypointAnn | CircleAnn
 
 export type TaskStatus = 'in_progress' | 'completed' | 'queued'
-export type Task = { id: number; title: string; image: string; status: TaskStatus }
+export type Task = {
+  id: number
+  title: string
+  image: string
+  status: TaskStatus
+  originalWidth?: number
+  originalHeight?: number
+}
