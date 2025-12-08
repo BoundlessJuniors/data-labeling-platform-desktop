@@ -1,24 +1,5 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref } from 'vue'
-// import undoIcon from '@renderer/assets/icons/custom/undo.svg'
-// import redoIcon from '@renderer/assets/icons/custom/redo.svg'
-// import selectIcon from '@renderer/assets/icons/custom/touch_app.svg'
-// import samIcon from '@renderer/assets/icons/custom/wand_shine.svg'
-// import shapesIcon from '@renderer/assets/icons/custom/category.svg'
-// import chevronDownIcon from '@renderer/assets/icons/custom/arrow_drop_down.svg'
-// import arrowBack from '@renderer/assets/icons/custom/arrow_back.svg'
-// import arrowForward from '@renderer/assets/icons/custom/arrow_forward.svg'
-// import sunIcon from '@renderer/assets/icons/custom/light_mode.svg'
-// import moonIcon from '@renderer/assets/icons/custom/dark_mode.svg'
-// import timerIcon from '@renderer/assets/icons/custom/timer.svg'
-// import saveIcon from '@renderer/assets/icons/custom/cloud_done.svg'
-// import approvalIcon from '@renderer/assets/icons/custom/approval_delegation.svg'
-// import searchIcon from '@renderer/assets/icons/custom/search.svg'
-// import zoomOutIcon from '@renderer/assets/icons/custom/zoom_out.svg'
-// import zoomInIcon from '@renderer/assets/icons/custom/zoom_in.svg'
-// import fitScreenIcon from '@renderer/assets/icons/custom/fit_screen.svg'
-// import resetViewIcon from '@renderer/assets/icons/custom/restart_alt.svg'
-// import filterIcon from '@renderer/assets/icons/custom/filter_list.svg'
 import UndoIcon from '@renderer/assets/icons/custom/undo.svg?component'
 import RedoIcon from '@renderer/assets/icons/custom/redo.svg?component'
 import SelectIcon from '@renderer/assets/icons/custom/touch_app.svg?component'
@@ -47,26 +28,20 @@ import DeleteIcon from '@renderer/assets/icons/custom/delete.svg?component'
 
 import road from '@renderer/assets/images/road.jpg'
 // Tipler
-import type {
-  Point,
-  BBox,
-  PolygonAnn,
-  PolylineAnn,
-  KeypointAnn,
-  CircleAnn,
-  Annotation,
-  Task,
-  TaskStatus
-} from '@renderer/types/annotation'
+import type { PolygonAnn, PolylineAnn, Task } from '@renderer/types/annotation'
 
 // Util
 import { loadImage } from '@renderer/utils/image'
+import { qsa } from '@renderer/utils/dom'
 
 // Composable’lar
+import { useCanvasInteractions } from '@renderer/composables/useCanvasInteractions'
 import { useLabelerState } from '@renderer/composables/useLabelerState'
 import { useHistory } from '@renderer/composables/useHistory'
 import { useCanvasTransform } from '@renderer/composables/useCanvasTransform'
 import { useTasks } from '@renderer/composables/useTasks'
+import { useAnnotationsRenderer } from '@renderer/composables/useAnnotationsRenderer'
+import { useKeyboardShortcuts } from '@renderer/composables/useKeyboardShortcuts'
 
 /* =============================
    Refs (DOM erişimi)
@@ -118,6 +93,25 @@ const { recordHistory, undo, redo } = useHistory(state)
 
 // Canvas transform & zoom yönetimi
 const { updateTransform, fitToScreen, zoom } = useCanvasTransform(state, canvasEl, annotationsSvg)
+
+const {
+  renderAnnotations,
+  exportAnnotationsToImageSpace,
+  clearSelection,
+  deleteSelected,
+  getImageCoordsFromEvent,
+  updateDeleteButton
+} = useAnnotationsRenderer(
+  state,
+  {
+    annotationsSvg,
+    annotationList,
+    deleteBtn,
+    canvasEl
+  },
+  recordHistory
+)
+
 // Demo için başlangıç görev listesi: road.jpg
 const initialTasks: Task[] = [
   {
@@ -138,7 +132,6 @@ let containerRO: ResizeObserver | null = null
 let isShapesOpen = false
 let onDocClick: ((e: MouseEvent) => void) | null = null
 let onEsc: ((e: KeyboardEvent) => void) | null = null
-let onGlobalKeydown: ((e: KeyboardEvent) => void) | null = null
 
 function openShapes(): void {
   if (!shapesDropdown.value) return
@@ -161,60 +154,6 @@ function toggleShapes(e?: Event): void {
 /* =============================
    Yardımcılar
    ============================= */
-// SVG element üretimi için namespace
-const SVG_NS = 'http://www.w3.org/2000/svg'
-
-// querySelectorAll için küçük yardımcı (type-safe)
-function qsa<T extends Element = Element>(root: ParentNode, sel: string): T[] {
-  return Array.from(root.querySelectorAll(sel)) as T[]
-}
-
-function updateDeleteButton(): void {
-  if (!deleteBtn.value) return
-  const noSelection = state.selectedAnnotationId == null
-  const noAnns = state.annotations.length === 0
-  deleteBtn.value.disabled = noSelection || noAnns
-}
-// Canvas üzerindeki (tıklanan) noktayı, orijinal görüntü
-// koordinat sistemine (3000x2000) çevirir.
-function getImageCoordsFromEvent(e: MouseEvent): { imgX: number; imgY: number } | null {
-  if (!canvasEl.value || !state.img) return null
-
-  // 1) Canvas'ın ekranda görünen rect'i
-  const rect = canvasEl.value.getBoundingClientRect()
-
-  // Fare, bu rect içinde nereye denk geliyor? (ekran pikseli)
-  const mouseX = e.clientX - rect.left
-  const mouseY = e.clientY - rect.top
-
-  // 2) Canvas'ın iç koordinat boyutu (her zaman 3000x2000 olacak)
-  const internalW = canvasEl.value.width
-  const internalH = canvasEl.value.height
-  if (!internalW || !internalH) return null
-
-  // 3) Ekrandaki boyut / iç boyut oranı => ölçek
-  //    (CSS transform + translate ne olursa olsun rect bunu içerir)
-  const scaleX = rect.width / internalW
-  const scaleY = rect.height / internalH
-
-  if (!Number.isFinite(scaleX) || !Number.isFinite(scaleY) || scaleX <= 0 || scaleY <= 0) {
-    return null
-  }
-
-  // 4) Ekran pikselini tekrar iç koordinat sistemine geri çevir
-  const imgX = mouseX / scaleX
-  const imgY = mouseY / scaleY
-
-  // 5) Güvenlik: gerçek görüntü boyutu sınırlarının dışına taşma kontrolü
-  const imgW = state.img.naturalWidth || internalW
-  const imgH = state.img.naturalHeight || internalH
-
-  if (imgX < 0 || imgY < 0 || imgX > imgW || imgY > imgH) {
-    return null
-  }
-
-  return { imgX, imgY }
-}
 
 function enterPanMode(): void {
   const temp = annotationsSvg.value?.querySelector('#temp-shape')
@@ -268,21 +207,6 @@ function setActiveTool(el: HTMLElement | null): void {
 /* =============================
    Seçim & Cursor
    ============================= */
-function clearSelection(): void {
-  state.selectedAnnotationId = null
-  renderAnnotations()
-}
-
-function deleteSelected(): void {
-  if (state.selectedAnnotationId == null) return
-  const i = state.annotations.findIndex((a) => a.id === state.selectedAnnotationId)
-  if (i !== -1) {
-    state.annotations.splice(i, 1)
-    recordHistory()
-  }
-  state.selectedAnnotationId = null
-  renderAnnotations()
-}
 
 function setActiveLabel(el: HTMLElement | null): void {
   if (!labelList.value) return
@@ -318,133 +242,6 @@ function updateCursor(): void {
 /* =============================
    Render
    ============================= */
-function renderAnnotations(): void {
-  if (!annotationsSvg.value || !annotationList.value) return
-  annotationsSvg.value.innerHTML = ''
-  annotationList.value.innerHTML = ''
-  console.log('RENDER ANNS, count =', state.annotations.length)
-  state.annotations.forEach((ann) => {
-    if (ann.type === 'bbox') {
-      console.log('ANN:', ann)
-      const el = document.createElementNS(SVG_NS, 'rect')
-      el.setAttribute('x', String(ann.x))
-      el.setAttribute('y', String(ann.y))
-      el.setAttribute('width', String(ann.width))
-      el.setAttribute('height', String(ann.height))
-      el.setAttribute('fill', 'rgba(17,115,212,0.4)')
-      el.setAttribute('stroke', '#1173d4')
-      el.setAttribute('stroke-width', '2')
-      el.dataset.id = String(ann.id)
-      el.classList.add('annotation-shape')
-      if (ann.id === state.selectedAnnotationId) el.classList.add('selected')
-      annotationsSvg.value!.appendChild(el)
-    } else if (ann.type === 'polygon') {
-      const el = document.createElementNS(SVG_NS, 'polygon')
-      el.setAttribute('points', ann.points.map((p) => `${p.x},${p.y}`).join(' '))
-      el.setAttribute('fill', 'rgba(17,115,212,0.25)')
-      el.setAttribute('stroke', '#1173d4')
-      el.setAttribute('stroke-width', '2')
-      el.dataset.id = String(ann.id)
-      el.classList.add('annotation-shape')
-      if (ann.id === state.selectedAnnotationId) el.classList.add('selected')
-      annotationsSvg.value!.appendChild(el)
-    } else if (ann.type === 'polyline') {
-      const el = document.createElementNS(SVG_NS, 'polyline')
-      el.setAttribute('points', ann.points.map((p) => `${p.x},${p.y}`).join(' '))
-      el.setAttribute('fill', 'none')
-      el.setAttribute('stroke', '#1173d4')
-      el.setAttribute('stroke-width', '2')
-      el.dataset.id = String(ann.id)
-      el.classList.add('annotation-shape')
-      if (ann.id === state.selectedAnnotationId) el.classList.add('selected')
-      annotationsSvg.value!.appendChild(el)
-    } else if (ann.type === 'keypoint') {
-      const el = document.createElementNS(SVG_NS, 'circle')
-      el.setAttribute('cx', String(ann.x))
-      el.setAttribute('cy', String(ann.y))
-      el.setAttribute('r', '4')
-      el.setAttribute('fill', '#1173d4')
-      el.setAttribute('stroke', '#ffffff')
-      el.setAttribute('stroke-width', '1.5')
-      el.dataset.id = String(ann.id)
-      el.classList.add('annotation-shape')
-      if (ann.id === state.selectedAnnotationId) el.classList.add('selected')
-      annotationsSvg.value!.appendChild(el)
-    } else if (ann.type === 'circle') {
-      const el = document.createElementNS(SVG_NS, 'circle')
-      el.setAttribute('cx', String(ann.cx))
-      el.setAttribute('cy', String(ann.cy))
-      el.setAttribute('r', String(ann.r))
-      el.setAttribute('fill', 'rgba(17,115,212,0.25)')
-      el.setAttribute('stroke', '#1173d4')
-      el.setAttribute('stroke-width', '2')
-      el.dataset.id = String(ann.id)
-      el.classList.add('annotation-shape')
-      if (ann.id === state.selectedAnnotationId) el.classList.add('selected')
-      annotationsSvg.value!.appendChild(el)
-    }
-
-    const item = document.createElement('div')
-    item.className =
-      'p-3 rounded-lg bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 cursor-pointer annotation-item'
-    if (ann.id === state.selectedAnnotationId) item.classList.add('selected')
-    item.dataset.id = String(ann.id)
-    item.innerHTML = `
-      <div class="flex justify-between items-center pointer-events-none">
-        <p class="text-sm font-medium">${ann.label ?? 'Unlabeled'} ${String(ann.id).slice(-4)}</p>
-      </div>
-      <p class="text-xs text-gray-600 dark:text-gray-400 mt-1 pointer-events-none">${ann.type}</p>
-    `
-    annotationList.value!.appendChild(item)
-  })
-  updateDeleteButton()
-}
-function exportAnnotationsToImageSpace(): Annotation[] {
-  // Şu andaki tüm koordinatlar zaten img.naturalWidth x img.naturalHeight
-  // uzayında olduğu için, sadece (istersen) yuvarlayarak geri döndürüyoruz.
-
-  return state.annotations.map((ann) => {
-    if (ann.type === 'bbox') {
-      return {
-        ...ann,
-        x: Math.round(ann.x),
-        y: Math.round(ann.y),
-        width: Math.round(ann.width),
-        height: Math.round(ann.height)
-      }
-    }
-
-    if (ann.type === 'keypoint') {
-      return {
-        ...ann,
-        x: Math.round(ann.x),
-        y: Math.round(ann.y)
-      }
-    }
-
-    if (ann.type === 'circle') {
-      return {
-        ...ann,
-        cx: Math.round(ann.cx),
-        cy: Math.round(ann.cy),
-        r: Math.round(ann.r)
-      }
-    }
-
-    if (ann.type === 'polygon' || ann.type === 'polyline') {
-      return {
-        ...ann,
-        points: ann.points.map((p) => ({
-          x: Math.round(p.x),
-          y: Math.round(p.y)
-        }))
-      }
-    }
-
-    return ann
-  })
-}
-
 function selectAnnotation(id: number): void {
   state.selectedAnnotationId = id
   const selectTool = toolGroup.value?.querySelector(
@@ -498,72 +295,32 @@ const commitPoly = (): void => {
   updateCursor()
 }
 
-/* =============================
-   Klavye Kısayolları (Undo/Redo dahil)
-   ============================= */
-// Global keydown dinleyicisini tanımlayıp lifecycle içinde bağlayacağız
+const { attachKeyboardShortcuts, detachKeyboardShortcuts } = useKeyboardShortcuts({
+  state,
+  undo,
+  redo,
+  deleteSelected,
+  commitPoly,
+  cancelPoly,
+  clearSelection,
+  enterPanMode
+})
 
-/* =============================
-   Pointer / Mouse Eventleri
-   ============================= */
-const finishPointer = (): void => {
-  if (state.isDrawing && !state.isPanning) {
-    if (state.drawingShape === 'bbox') {
-      const temp = annotationsSvg.value!.querySelector('#temp-shape') as SVGRectElement | null
-      if (temp) {
-        const x = parseFloat(temp.getAttribute('x') || '0')
-        const y = parseFloat(temp.getAttribute('y') || '0')
-        const w = parseFloat(temp.getAttribute('width') || '0')
-        const h = parseFloat(temp.getAttribute('height') || '0')
-        console.log('TEMP RECT:', { x, y, w, h })
-        if (w > 5 && h > 5) {
-          const newAnn: BBox = {
-            id: Date.now(),
-            type: 'bbox',
-            label: state.activeLabel,
-            x: parseFloat(temp.getAttribute('x') || '0'),
-            y: parseFloat(temp.getAttribute('y') || '0'),
-            width: w,
-            height: h
-          }
-          state.annotations.push(newAnn)
-          recordHistory()
-          renderAnnotations()
-        }
-        temp.remove()
-      }
-      state.drawingShape = null
-      state.isDrawing = false
-    } else if (state.drawingShape === 'circle') {
-      const temp = annotationsSvg.value!.querySelector('#temp-shape') as SVGCircleElement | null
-      if (temp) {
-        const r = parseFloat(temp.getAttribute('r') || '0')
-        if (r > 3) {
-          const newAnn: CircleAnn = {
-            id: Date.now(),
-            type: 'circle',
-            label: state.activeLabel,
-            cx: parseFloat(temp.getAttribute('cx') || '0'),
-            cy: parseFloat(temp.getAttribute('cy') || '0'),
-            r
-          }
-          state.annotations.push(newAnn)
-          recordHistory()
-          renderAnnotations()
-        }
-        temp.remove()
-      }
-      state.drawingShape = null
-      state.isDrawing = false
-    } else if (state.drawingShape === 'polygon' || state.drawingShape === 'polyline') {
-      canvasContainer.value!.style.cursor = 'crosshair'
-    }
-  }
-
-  state.isPanning = false
-  canvasContainer.value?.classList.remove('panning')
-  updateCursor()
-}
+const { attachCanvasInteractions, detachCanvasInteractions } = useCanvasInteractions({
+  state,
+  canvasContainer,
+  canvasEl,
+  annotationsSvg,
+  crosshairH,
+  crosshairV,
+  coords,
+  getImageCoordsFromEvent,
+  recordHistory,
+  renderAnnotations,
+  updateTransform,
+  updateCursor,
+  commitPoly
+})
 
 /* =============================
    Lifecycle: onMounted / onBeforeUnmount
@@ -595,57 +352,8 @@ onMounted((): void => {
     document.addEventListener('keydown', onEsc)
     deleteBtn.value?.addEventListener('click', deleteSelected)
   }
-
-  // Global keydown (undo/redo/delete vb.)
-  onGlobalKeydown = (e: KeyboardEvent): void => {
-    if (e.ctrlKey && e.key === 'z') {
-      e.preventDefault()
-      undo()
-      return
-    }
-    if (e.ctrlKey && e.key === 'y') {
-      e.preventDefault()
-      redo()
-      return
-    }
-
-    if ((e.key === 'Delete' || e.key === 'Backspace') && state.selectedAnnotationId != null) {
-      e.preventDefault()
-      deleteSelected()
-      return
-    }
-
-    if (
-      state.isDrawing &&
-      (state.drawingShape === 'polygon' || state.drawingShape === 'polyline')
-    ) {
-      if (e.key === 'Enter') {
-        e.preventDefault()
-        commitPoly()
-        return
-      }
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        cancelPoly()
-        return
-      }
-    }
-
-    if (e.key === 'Escape') {
-      if (state.selectedAnnotationId != null) {
-        e.preventDefault()
-        clearSelection()
-        return
-      }
-      const isToolActive =
-        !!state.activeLabel && (state.lastUsedTool === 'shapes' || state.lastUsedTool === 'sam')
-      if (isToolActive || state.lastUsedTool !== 'select' || state.isDrawing) {
-        e.preventDefault()
-        enterPanMode()
-      }
-    }
-  }
-  document.addEventListener('keydown', onGlobalKeydown)
+  // Global klavye kısayolları
+  attachKeyboardShortcuts()
 
   annotationList.value?.addEventListener('click', (e): void => {
     const t = (e.target as HTMLElement).closest('.annotation-item') as HTMLElement | null
@@ -725,166 +433,8 @@ onMounted((): void => {
     requestAnimationFrame(fitToScreen)
   })
   if (canvasContainer.value) containerRO.observe(canvasContainer.value)
-
-  canvasContainer.value?.addEventListener('mousedown', (e: MouseEvent): void => {
-    const isToolActive = canvasContainer.value!.classList.contains('tool-active')
-
-    if (e.button === 2) {
-      e.preventDefault()
-      state.isPanning = true
-      state.startPanX = e.clientX - state.translateX
-      state.startPanY = e.clientY - state.translateY
-      canvasContainer.value!.classList.add('panning')
-      canvasContainer.value!.style.cursor = 'grabbing'
-      return
-    }
-
-    if (e.button !== 0) return
-    if (state.lastUsedTool === 'sam') {
-      return
-    }
-
-    if (isToolActive && state.lastUsedTool === 'shapes') {
-      const imgCoords = getImageCoordsFromEvent(e)
-      if (!imgCoords) return
-      const { imgX, imgY } = imgCoords
-
-      if (!Number.isFinite(imgX) || !Number.isFinite(imgY)) return
-
-      const shape = state.lastUsedShape
-
-      if (shape === 'bbox') {
-        state.isDrawing = true
-        state.drawingShape = 'bbox'
-        state.drawingStartX = imgX
-        state.drawingStartY = imgY
-        const temp = document.createElementNS(SVG_NS, 'rect')
-        temp.setAttribute('id', 'temp-shape')
-        temp.setAttribute('stroke', '#ffc107')
-        temp.setAttribute('stroke-width', '2')
-        temp.setAttribute('fill', 'none')
-        annotationsSvg.value!.appendChild(temp)
-      } else if (shape === 'circle') {
-        state.isDrawing = true
-        state.drawingShape = 'circle'
-        state.drawingStartX = imgX
-        state.drawingStartY = imgY
-        const temp = document.createElementNS(SVG_NS, 'circle')
-        temp.setAttribute('id', 'temp-shape')
-        temp.setAttribute('stroke', '#ffc107')
-        temp.setAttribute('stroke-width', '2')
-        temp.setAttribute('fill', 'none')
-        temp.setAttribute('cx', String(imgX))
-        temp.setAttribute('cy', String(imgY))
-        temp.setAttribute('r', '0')
-        annotationsSvg.value!.appendChild(temp)
-      } else if (shape === 'keypoint') {
-        const kp: KeypointAnn = {
-          id: Date.now(),
-          type: 'keypoint',
-          label: state.activeLabel,
-          x: imgX,
-          y: imgY
-        }
-        state.annotations.push(kp)
-        recordHistory()
-        renderAnnotations()
-      } else if (shape === 'polygon' || shape === 'polyline') {
-        if (!state.isDrawing || state.drawingShape !== shape) {
-          state.isDrawing = true
-          state.drawingShape = shape
-          state.polyPoints = [{ x: imgX, y: imgY }]
-          const temp = document.createElementNS(SVG_NS, 'polyline')
-          temp.setAttribute('id', 'temp-shape')
-          temp.setAttribute('stroke', '#ffc107')
-          temp.setAttribute('stroke-width', '2')
-          temp.setAttribute('fill', shape === 'polygon' ? 'rgba(255,193,7,0.08)' : 'none')
-          temp.setAttribute('points', `${imgX},${imgY}`)
-          annotationsSvg.value!.appendChild(temp)
-          canvasContainer.value!.style.cursor = 'crosshair'
-        } else {
-          state.polyPoints.push({ x: imgX, y: imgY })
-          const temp = annotationsSvg.value!.querySelector(
-            '#temp-shape'
-          ) as SVGPolylineElement | null
-          if (temp)
-            temp.setAttribute('points', state.polyPoints.map((p) => `${p.x},${p.y}`).join(' '))
-        }
-      }
-    } else {
-      state.isPanning = true
-      state.startPanX = e.clientX - state.translateX
-      state.startPanY = e.clientY - state.translateY
-      canvasContainer.value!.classList.add('panning')
-    }
-  })
-
-  canvasContainer.value?.addEventListener('contextmenu', (e: Event): void => {
-    const isToolActive = canvasContainer.value!.classList.contains('tool-active')
-    if (isToolActive) {
-      e.preventDefault()
-    }
-  })
-
-  canvasContainer.value?.addEventListener('dblclick', (): void => {
-    commitPoly()
-  })
-
-  canvasContainer.value?.addEventListener('mousemove', (e: MouseEvent): void => {
-    // Çarpı işareti için container koordinatları
-    const containerRect = canvasContainer.value!.getBoundingClientRect()
-    const mouseXContainer = e.clientX - containerRect.left
-    const mouseYContainer = e.clientY - containerRect.top
-
-    if (crosshairH.value) crosshairH.value.style.top = `${mouseYContainer}px`
-    if (crosshairV.value) crosshairV.value.style.left = `${mouseXContainer}px`
-
-    // Gerçek görüntü koordinatları için canvas üzerinden hesapla
-    const imgCoords = getImageCoordsFromEvent(e)
-    if (!imgCoords) {
-      if (coords.value) coords.value.textContent = 'X: -, Y: -'
-      return
-    }
-    const { imgX, imgY } = imgCoords
-
-    if (coords.value) coords.value.textContent = `X: ${Math.round(imgX)}, Y: ${Math.round(imgY)}`
-
-    if (state.isPanning) {
-      state.translateX = e.clientX - state.startPanX
-      state.translateY = e.clientY - state.startPanY
-      updateTransform()
-    } else if (state.isDrawing) {
-      if (state.drawingShape === 'bbox') {
-        const temp = annotationsSvg.value!.querySelector('#temp-shape') as SVGRectElement | null
-        if (!temp) return
-        const x = Math.min(imgX, state.drawingStartX)
-        const y = Math.min(imgY, state.drawingStartY)
-        const w = Math.abs(imgX - state.drawingStartX)
-        const h = Math.abs(imgY - state.drawingStartY)
-        temp.setAttribute('x', String(x))
-        temp.setAttribute('y', String(y))
-        temp.setAttribute('width', String(w))
-        temp.setAttribute('height', String(h))
-      } else if (state.drawingShape === 'circle') {
-        const temp = annotationsSvg.value!.querySelector('#temp-shape') as SVGCircleElement | null
-        if (!temp) return
-        const dx = imgX - state.drawingStartX
-        const dy = imgY - state.drawingStartY
-        const r = Math.sqrt(dx * dx + dy * dy)
-        temp.setAttribute('r', String(r))
-      } else if (state.drawingShape === 'polygon' || state.drawingShape === 'polyline') {
-        const temp = annotationsSvg.value!.querySelector('#temp-shape') as SVGPolylineElement | null
-        if (!temp) return
-        const pts = [...state.polyPoints, { x: imgX, y: imgY }]
-        temp.setAttribute('points', pts.map((p) => `${p.x},${p.y}`).join(' '))
-      }
-    }
-
-    updateCursor()
-  })
-
-  canvasContainer.value?.addEventListener('mouseup', finishPointer)
-  canvasContainer.value?.addEventListener('mouseleave', finishPointer)
+  // Canvas mouse/pointer etkileşimleri
+  attachCanvasInteractions()
 
   prevBtn.value?.addEventListener('click', (): void => goPrevTask())
   nextBtn.value?.addEventListener('click', (): void => goNextTask())
@@ -899,7 +449,8 @@ onBeforeUnmount((): void => {
   shapesToolBtn.value?.removeEventListener('click', toggleShapes)
   if (onDocClick) document.removeEventListener('click', onDocClick)
   if (onEsc) document.removeEventListener('keydown', onEsc)
-  if (onGlobalKeydown) document.removeEventListener('keydown', onGlobalKeydown)
+  detachKeyboardShortcuts()
+  detachCanvasInteractions()
 })
 
 /* =============================
@@ -1288,117 +839,4 @@ function goNextTask(): void {
     </main>
   </div>
 </template>
-
-<style>
-.material-symbols-outlined {
-  font-variation-settings:
-    'FILL' 0,
-    'wght' 400,
-    'GRAD' 0,
-    'opsz' 24;
-}
-
-.canvas-container {
-  user-select: none;
-  cursor: grab;
-}
-.canvas-container.panning {
-  cursor: grabbing;
-}
-.canvas-container.tool-active {
-  cursor: crosshair;
-}
-
-.crosshair-lines {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.2s;
-}
-.canvas-container.tool-active:hover .crosshair-lines {
-  opacity: 1;
-}
-.crosshair-line {
-  position: absolute;
-  background-color: rgba(229, 231, 235, 0.7);
-  box-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
-}
-.crosshair-horizontal {
-  width: 100%;
-  height: 1px;
-  left: 0;
-}
-.crosshair-vertical {
-  width: 1px;
-  height: 100%;
-  top: 0;
-}
-
-#canvas,
-#annotations-svg {
-  will-change: transform;
-  position: absolute;
-  top: 0;
-  left: 0;
-  transform-origin: 0 0;
-}
-#annotations-svg {
-  pointer-events: none;
-}
-#annotations-svg > * {
-  pointer-events: auto;
-  cursor: pointer;
-}
-
-#shapes-dropdown {
-  display: none;
-}
-#shapes-dropdown.show {
-  display: block;
-}
-
-.annotation-tool.active {
-  background-color: #1173d41a;
-  color: #1173d4;
-}
-html.dark .annotation-tool.active {
-  background-color: #1173d433;
-}
-
-.label-item.active {
-  background-color: #1173d4;
-  color: #fff;
-  border-color: #1173d4;
-}
-.annotation-item.selected {
-  background-color: #1173d41a;
-  border-color: #1173d480;
-}
-#annotations-svg .annotation-shape.selected {
-  stroke-width: 4;
-  stroke: #ffc107;
-}
-#temp-shape {
-  stroke-dasharray: 5, 5;
-}
-
-/* --- Icon system: tema rengiyle boyansın --- */
-.ui-svg {
-  display: inline-block;
-  width: 1.25rem; /* h-5 */
-  height: 1.25rem; /* w-5 */
-  vertical-align: middle;
-}
-.ui-svg > svg {
-  width: 100%;
-  height: 100%;
-}
-.ui-svg :where(path, circle, rect, polygon, polyline, line) {
-  fill: currentColor !important;
-  stroke: currentColor !important;
-}
-</style>
+<style src="@renderer/styles/labeler-view.css"></style>

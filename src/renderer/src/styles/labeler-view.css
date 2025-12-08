@@ -1,0 +1,111 @@
+.material-symbols-outlined {
+  font-variation-settings:
+    'FILL' 0,
+    'wght' 400,
+    'GRAD' 0,
+    'opsz' 24;
+}
+
+.canvas-container {
+  user-select: none;
+  cursor: grab;
+}
+.canvas-container.panning {
+  cursor: grabbing;
+}
+.canvas-container.tool-active {
+  cursor: crosshair;
+}
+
+.crosshair-lines {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.canvas-container.tool-active:hover .crosshair-lines {
+  opacity: 1;
+}
+.crosshair-line {
+  position: absolute;
+  background-color: rgba(229, 231, 235, 0.7);
+  box-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
+}
+.crosshair-horizontal {
+  width: 100%;
+  height: 1px;
+  left: 0;
+}
+.crosshair-vertical {
+  width: 1px;
+  height: 100%;
+  top: 0;
+}
+
+#canvas,
+#annotations-svg {
+  will-change: transform;
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+}
+#annotations-svg {
+  pointer-events: none;
+}
+#annotations-svg > * {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+#shapes-dropdown {
+  display: none;
+}
+#shapes-dropdown.show {
+  display: block;
+}
+
+.annotation-tool.active {
+  background-color: #1173d41a;
+  color: #1173d4;
+}
+html.dark .annotation-tool.active {
+  background-color: #1173d433;
+}
+
+.label-item.active {
+  background-color: #1173d4;
+  color: #fff;
+  border-color: #1173d4;
+}
+.annotation-item.selected {
+  background-color: #1173d41a;
+  border-color: #1173d480;
+}
+#annotations-svg .annotation-shape.selected {
+  stroke-width: 4;
+  stroke: #ffc107;
+}
+#temp-shape {
+  stroke-dasharray: 5, 5;
+}
+
+/* --- Icon system: tema rengiyle boyansın --- */
+.ui-svg {
+  display: inline-block;
+  width: 1.25rem; /* h-5 */
+  height: 1.25rem; /* w-5 */
+  vertical-align: middle;
+}
+.ui-svg > svg {
+  width: 100%;
+  height: 100%;
+}
+.ui-svg :where(path, circle, rect, polygon, polyline, line) {
+  fill: currentColor !important;
+  stroke: currentColor !important;
+}
