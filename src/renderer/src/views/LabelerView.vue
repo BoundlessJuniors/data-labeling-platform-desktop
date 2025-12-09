@@ -527,13 +527,13 @@ function goNextTask(): void {
           <li v-for="(t, idx) in tasks" :key="t.id">
             <a
               href="#"
-              @click.prevent="loadTaskByIndex(idx)"
               :class="[
                 'block rounded-lg overflow-hidden border-2',
                 idx === currentTaskIndex
                   ? 'border-primary dark:border-primary/80 bg-primary/5'
                   : 'border-transparent hover:border-primary/50'
               ]"
+              @click.prevent="loadTaskByIndex(idx)"
             >
               <div class="h-24 bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
                 <span class="text-gray-400 dark:text-gray-500">image</span>
@@ -645,7 +645,7 @@ function goNextTask(): void {
           <div
             class="flex items-center justify-between gap-1 p-2 bg-white dark:bg-background-dark rounded-lg border border-gray-200 dark:border-gray-800"
           >
-            <div ref="toolGroup" class="flex items-center gap-1" id="tool-group">
+            <div id="tool-group" ref="toolGroup" class="flex items-center gap-1">
               <button
                 class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 annotation-tool"
                 data-tool="select"
@@ -666,9 +666,9 @@ function goNextTask(): void {
 
               <div class="relative">
                 <button
+                  id="shapes-tool-btn"
                   ref="shapesToolBtn"
                   class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center gap-1"
-                  id="shapes-tool-btn"
                   title="Annotation Shapes"
                 >
                   <ShapesIcon class="ui-svg h-6 w-6 text-gray-600 dark:text-gray-300" />
@@ -676,9 +676,9 @@ function goNextTask(): void {
                 </button>
 
                 <div
+                  id="shapes-dropdown"
                   ref="shapesDropdown"
                   class="absolute top-full mt-2 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-xl z-20"
-                  id="shapes-dropdown"
                 >
                   <a
                     href="#"
@@ -756,8 +756,8 @@ function goNextTask(): void {
             ref="canvasContainer"
             class="relative w-full flex-1 rounded-lg bg-gray-200 dark:bg-gray-800 overflow-hidden canvas-container"
           >
-            <canvas ref="canvasEl" id="canvas"></canvas>
-            <svg ref="annotationsSvg" id="annotations-svg"></svg>
+            <canvas id="canvas" ref="canvasEl"></canvas>
+            <svg id="annotations-svg" ref="annotationsSvg"></svg>
 
             <div class="crosshair-lines">
               <div ref="crosshairH" class="crosshair-line crosshair-horizontal"></div>
