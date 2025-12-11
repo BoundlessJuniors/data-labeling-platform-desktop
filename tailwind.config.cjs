@@ -5,8 +5,17 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        primary: '#1173d4',
-        'background-light': '#f6f7f8',
+        // Fresh Mint UI paleti
+        primary: {
+          DEFAULT: '#12D3CF', // teal – ana accent
+          light: '#B0F4E6', // aqua
+          medium: '#67EACA' // mint
+        },
+        secondary: '#67EACA', // mint (örn. Filter Tasks butonu)
+        accent: '#12D3CF', // ek vurgu
+        muted: '#f5f3ebff', // cream – genel arka plan
+
+        'background-light': '#FCF9EC',
         'background-dark': '#101922'
       },
       fontFamily: {

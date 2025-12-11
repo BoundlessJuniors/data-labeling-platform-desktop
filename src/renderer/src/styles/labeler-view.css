@@ -32,7 +32,7 @@
 }
 .crosshair-line {
   position: absolute;
-  background-color: rgba(229, 231, 235, 0.7);
+  background-color: rgba(103, 234, 202, 0.7); /* #67EACA (mint) */
   box-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
 }
 .crosshair-horizontal {
@@ -70,25 +70,25 @@
 }
 
 .annotation-tool.active {
-  background-color: #1173d41a;
-  color: #1173d4;
+  background-color: #12d3cf1a; /* teal tint */
+  color: #12d3cf;
 }
 html.dark .annotation-tool.active {
-  background-color: #1173d433;
+  background-color: #12d3cf33;
 }
 
 .label-item.active {
-  background-color: #1173d4;
+  background-color: #12d3cf; /* teal */
   color: #fff;
-  border-color: #1173d4;
+  border-color: #12d3cf;
 }
 .annotation-item.selected {
-  background-color: #1173d41a;
-  border-color: #1173d480;
+  background-color: #12d3cf1a; /* teal tint */
+  border-color: #12d3cf80;
 }
 #annotations-svg .annotation-shape.selected {
   stroke-width: 4;
-  stroke: #ffc107;
+  stroke: #12d3cf; /* teal accent */
 }
 #temp-shape {
   stroke-dasharray: 5, 5;
