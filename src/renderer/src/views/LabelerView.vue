@@ -507,19 +507,19 @@ function goNextTask(): void {
 
 <template>
   <div
-    class="flex h-screen bg-background-light dark:bg-background-dark font-display text-gray-800 dark:text-gray-200"
+    class="flex h-screen bg-slate-100 dark:bg-gray-950 font-display text-slate-800 dark:text-gray-200"
   >
     <!-- Sidebar (kısa) -->
     <aside
-      class="flex flex-col w-72 bg-white dark:bg-background-dark border-r border-gray-200 dark:border-gray-800"
+      class="flex flex-col w-72 bg-slate-50 dark:bg-background-dark border-r border-slate-200 dark:border-gray-800"
     >
       <div class="p-6">
-        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">LabelGun</h1>
+        <h1 class="text-2xl font-bold text-slate-900 dark:text-white">LabelGun</h1>
       </div>
 
       <nav class="flex-1 px-4 space-y-2 overflow-y-auto">
         <h2
-          class="px-2 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2"
+          class="px-2 text-xs font-semibold text-slate-500 dark:text-gray-400 uppercase tracking-wider mb-2"
         >
           Tasks
         </h2>
@@ -535,8 +535,8 @@ function goNextTask(): void {
               ]"
               @click.prevent="loadTaskByIndex(idx)"
             >
-              <div class="h-24 bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
-                <span class="text-gray-400 dark:text-gray-500">image</span>
+              <div class="h-24 bg-slate-200 dark:bg-gray-700 flex items-center justify-center">
+                <span class="text-slate-400 dark:text-gray-500">image</span>
               </div>
               <div class="p-3">
                 <div class="flex justify-between items-start">
@@ -544,7 +544,7 @@ function goNextTask(): void {
 
                   <span
                     v-if="t.status === 'in_progress'"
-                    class="text-xs font-semibold px-2 py-1 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300"
+                    class="text-xs font-semibold px-2 py-1 rounded-full bg-slate-100 text-slate-800 dark:bg-gray-700/60 dark:text-gray-300"
                     >In Progress</span
                   >
 
@@ -566,7 +566,7 @@ function goNextTask(): void {
         </ul>
       </nav>
 
-      <div class="p-4 border-t border-gray-200 dark:border-gray-800 relative">
+      <div class="p-4 border-t border-slate-200 dark:border-gray-800 relative">
         <button
           ref="filterBtn"
           class="w-full flex items-center justify-center gap-2 rounded bg-primary/10 dark:bg-primary/20 py-2 px-4 text-sm font-semibold text-primary hover:bg-primary/20"
@@ -583,20 +583,20 @@ function goNextTask(): void {
     <!-- Main -->
     <main class="flex-1 flex flex-col overflow-hidden">
       <header
-        class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-background-dark"
+        class="flex items-center justify-between p-4 border-b border-slate-200 dark:border-gray-800 bg-slate-50 dark:bg-background-dark"
       >
         <div class="flex items-center gap-4">
           <h2 ref="taskTitle" class="text-xl font-bold">Image Annotation - Task 1</h2>
           <div class="flex items-center gap-2">
             <button
               ref="prevBtn"
-              class="p-1 rounded-md bg-gray-100 dark:bg-gray-800 hover:bg-gray-200"
+              class="p-1 rounded-md bg-slate-100 dark:bg-gray-800 hover:bg-slate-200"
             >
               <ArrowBackIcon class="ui-svg h-5 w-5 text-gray-700 dark:text-gray-200" />
             </button>
             <button
               ref="nextBtn"
-              class="p-1 rounded-md bg-gray-100 dark:bg-gray-800 hover:bg-gray-200"
+              class="p-1 rounded-md bg-slate-100 dark:bg-gray-800 hover:bg-slate-200"
             >
               <ArrowFwdIcon class="ui-svg h-5 w-5 text-gray-700 dark:text-gray-200" />
             </button>
@@ -606,26 +606,28 @@ function goNextTask(): void {
         <div class="flex items-center gap-4">
           <button
             ref="themeToggle"
-            class="relative inline-flex items-center h-8 w-14 shrink-0 rounded-full bg-gray-200 dark:bg-gray-700 ml-2"
+            class="relative inline-flex items-center h-8 w-14 shrink-0 rounded-full bg-slate-200 dark:bg-gray-700 ml-2"
           >
             <span
               class="absolute left-1.5 top-1.5 h-5 w-5 bg-white dark:bg-gray-800 rounded-full shadow-md transform transition-transform duration-300 dark:translate-x-6 flex items-center justify-center"
             >
-              <SunIcon class="ui-svg h-4 w-4 text-gray-600 opacity-100 dark:opacity-0" />
+              <SunIcon class="ui-svg h-4 w-4 text-slate-600 opacity-100 dark:opacity-0" />
               <MoonIcon class="ui-svg h-4 w-4 text-primary absolute opacity-0 dark:opacity-100" />
             </span>
           </button>
 
-          <div class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+          <div class="flex items-center gap-2 text-sm text-slate-600 dark:text-gray-400">
             <TimerIcon class="ui-svg h-5 w-5" />
-            <div class="font-mono bg-gray-100 dark:bg-gray-800 rounded px-2 py-1 text-lg font-bold">
+            <div
+              class="font-mono bg-slate-100 dark:bg-gray-800 rounded px-2 py-1 text-lg font-bold"
+            >
               01:23:45
             </div>
           </div>
 
           <button
             ref="saveBtn"
-            class="flex items-center gap-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 py-2 px-4 text-sm font-semibold hover:bg-gray-50"
+            class="flex items-center gap-2 rounded border border-slate-200 dark:border-gray-700 bg-slate-50 dark:bg-gray-800 py-2 px-4 text-sm font-semibold hover:bg-slate-100"
           >
             <SaveIcon class="ui-svg h-5 w-5 text-green-500" />
             <span>Save Draft</span>
@@ -639,19 +641,19 @@ function goNextTask(): void {
         </div>
       </header>
 
-      <div class="flex-1 flex p-2 gap-2 overflow-y-auto">
+      <div class="flex-1 flex p-4 gap-4 overflow-y-auto">
         <div class="flex-1 flex flex-col gap-2">
           <!-- Toolbar -->
           <div
-            class="flex items-center justify-between gap-1 p-2 bg-white dark:bg-background-dark rounded-lg border border-gray-200 dark:border-gray-800"
+            class="flex items-center justify-between gap-1 p-2 bg-slate-50 dark:bg-background-dark rounded-lg border border-slate-200 dark:border-gray-800"
           >
             <div id="tool-group" ref="toolGroup" class="flex items-center gap-1">
               <button
-                class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 annotation-tool"
+                class="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-gray-800 annotation-tool"
                 data-tool="select"
                 title="Select/Edit"
               >
-                <SelectIcon class="ui-svg h-6 w-6 text-gray-600 dark:text-gray-300" />
+                <SelectIcon class="ui-svg h-6 w-6 text-slate-600 dark:text-gray-300" />
               </button>
 
               <div class="h-6 w-px bg-gray-200 dark:bg-gray-700 mx-1"></div>
@@ -661,7 +663,7 @@ function goNextTask(): void {
                 data-tool="sam"
                 title="SAM"
               >
-                <SamIcon class="ui-svg h-6 w-6 text-gray-600 dark:text-gray-300" />
+                <SamIcon class="ui-svg h-6 w-6 text-slate-600 dark:text-gray-300" />
               </button>
 
               <div class="relative">
@@ -671,129 +673,133 @@ function goNextTask(): void {
                   class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center gap-1"
                   title="Annotation Shapes"
                 >
-                  <ShapesIcon class="ui-svg h-6 w-6 text-gray-600 dark:text-gray-300" />
-                  <ChevronDownIcon class="ui-svg h-4 w-4 text-gray-600 dark:text-gray-300" />
+                  <ShapesIcon class="ui-svg h-6 w-6 text-slate-600 dark:text-gray-300" />
+                  <ChevronDownIcon class="ui-svg h-4 w-4 text-slate-600 dark:text-gray-300" />
                 </button>
 
                 <div
                   id="shapes-dropdown"
                   ref="shapesDropdown"
-                  class="absolute top-full mt-2 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-xl z-20"
+                  class="absolute top-full mt-2 w-48 bg-slate-50 dark:bg-gray-800 rounded-lg shadow-xl z-20"
                 >
                   <a
                     href="#"
-                    class="flex items-center gap-3 px-4 py-2 text-sm hover:bg-gray-100 annotation-tool"
+                    class="flex items-center gap-3 px-4 py-2 text-sm hover:bg-slate-100 annotation-tool"
                     data-tool="bbox"
                   >
-                    <CropSquareIcon class="ui-svg h-5 w-5 text-gray-600 dark:text-gray-300" />
+                    <CropSquareIcon class="ui-svg h-5 w-5 text-slate-600 dark:text-gray-300" />
                     <span>Bounding Box</span>
                   </a>
                   <a
                     href="#"
-                    class="flex items-center gap-3 px-4 py-2 text-sm hover:bg-gray-100 annotation-tool"
+                    class="flex items-center gap-3 px-4 py-2 text-sm hover:bg-slate-100 annotation-tool"
                     data-tool="polygon"
                   >
-                    <PentagonIcon class="ui-svg h-5 w-5 text-gray-600 dark:text-gray-300" />
+                    <PentagonIcon class="ui-svg h-5 w-5 text-slate-600 dark:text-gray-300" />
                     <span>Polygon</span>
                   </a>
                   <a
                     href="#"
-                    class="flex items-center gap-3 px-4 py-2 text-sm hover:bg-gray-100 annotation-tool"
+                    class="flex items-center gap-3 px-4 py-2 text-sm hover:bg-slate-100 annotation-tool"
                     data-tool="polyline"
                   >
-                    <PolyLineIcon class="ui-svg h-5 w-5 text-gray-600 dark:text-gray-300" />
+                    <PolyLineIcon class="ui-svg h-5 w-5 text-slate-600 dark:text-gray-300" />
                     <span>Polyline</span>
                   </a>
                   <a
                     href="#"
-                    class="flex items-center gap-3 px-4 py-2 text-sm hover:bg-gray-100 annotation-tool"
+                    class="flex items-center gap-3 px-4 py-2 text-sm hover:bg-slate-100 annotation-tool"
                     data-tool="keypoint"
                   >
-                    <KeypointIcon class="ui-svg h-5 w-5 text-gray-600 dark:text-gray-300" />
+                    <KeypointIcon class="ui-svg h-5 w-5 text-slate-600 dark:text-gray-300" />
                     <span>Keypoint</span>
                   </a>
                   <a
                     href="#"
-                    class="flex items-center gap-3 px-4 py-2 text-sm hover:bg-gray-100 annotation-tool"
+                    class="flex items-center gap-3 px-4 py-2 text-sm hover:bg-slate-100 annotation-tool"
                     data-tool="circle"
                   >
-                    <CircleIcon class="ui-svg h-5 w-5 text-gray-600 dark:text-gray-300" />
+                    <CircleIcon class="ui-svg h-5 w-5 text-slate-600 dark:text-gray-300" />
                     <span>Circle</span>
                   </a>
                 </div>
               </div>
 
-              <div class="h-6 w-px bg-gray-200 dark:bg-gray-700 mx-1"></div>
+              <div class="h-6 w-px bg-slate-200 dark:bg-gray-700 mx-1"></div>
 
               <button
                 ref="undoBtn"
-                class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
+                class="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-gray-800 disabled:opacity-50"
                 title="Undo (Ctrl+Z)"
               >
-                <UndoIcon class="ui-svg h-5 w-5 text-gray-600 dark:text-gray-300" />
+                <UndoIcon class="ui-svg h-5 w-5 text-slate-600 dark:text-gray-300" />
               </button>
 
               <button
                 ref="redoBtn"
-                class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
+                class="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-gray-800 disabled:opacity-50"
                 title="Redo (Ctrl+Y)"
               >
-                <RedoIcon class="ui-svg h-5 w-5 text-gray-600 dark:text-gray-300" />
+                <RedoIcon class="ui-svg h-5 w-5 text-slate-600 dark:text-gray-300" />
               </button>
 
               <button
                 ref="deleteBtn"
-                class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
+                class="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-gray-800 disabled:opacity-50"
                 title="Delete (Del)"
               >
-                <DeleteIcon class="ui-svg h-5 w-5 text-gray-600 dark:text-gray-300" />
+                <DeleteIcon class="ui-svg h-5 w-5 text-slate-600 dark:text-gray-300" />
               </button>
             </div>
           </div>
 
-          <!-- Canvas alanı -->
+          <!-- Canvas alanı (kart içinde) -->
           <div
-            ref="canvasContainer"
-            class="relative w-full flex-1 rounded-lg bg-gray-200 dark:bg-gray-800 overflow-hidden canvas-container"
+            class="flex-1 rounded-lg bg-slate-50 dark:bg-background-dark border border-slate-200 dark:border-gray-800 shadow-sm p-2"
           >
-            <canvas id="canvas" ref="canvasEl"></canvas>
-            <svg id="annotations-svg" ref="annotationsSvg"></svg>
-
-            <div class="crosshair-lines">
-              <div ref="crosshairH" class="crosshair-line crosshair-horizontal"></div>
-              <div ref="crosshairV" class="crosshair-line crosshair-vertical"></div>
-            </div>
-
             <div
-              class="absolute bottom-4 right-4 flex items-center gap-1 bg-black/50 p-1 rounded-lg text-white"
+              ref="canvasContainer"
+              class="relative w-full h-full rounded-md bg-slate-200 dark:bg-gray-800 overflow-hidden canvas-container"
             >
-              <button ref="zoomOutBtn" class="p-2 rounded-md hover:bg-white/20" title="Zoom Out">
-                <ZoomOutIcon class="ui-svg h-6 w-6 text-white" />
-              </button>
-              <button ref="zoomInBtn" class="p-2 rounded-md hover:bg-white/20" title="Zoom In">
-                <ZoomInIcon class="ui-svg h-6 w-6 text-white" />
-              </button>
-              <button
-                ref="fitScreenBtn"
-                class="p-2 rounded-md hover:bg-white/20"
-                title="Fit to Screen"
-              >
-                <FitScreenIcon class="ui-svg h-6 w-6 text-white" />
-              </button>
-              <button
-                ref="resetViewBtn"
-                class="p-2 rounded-md hover:bg-white/20"
-                title="Reset View"
-              >
-                <ResetViewIcon class="ui-svg h-6 w-6 text-white" />
-              </button>
-            </div>
+              <canvas id="canvas" ref="canvasEl"></canvas>
+              <svg id="annotations-svg" ref="annotationsSvg"></svg>
 
-            <div
-              ref="coords"
-              class="absolute bottom-4 left-4 bg-black/50 text-white text-xs font-mono rounded px-2 py-1"
-            >
-              X: 0, Y: 0
+              <div class="crosshair-lines">
+                <div ref="crosshairH" class="crosshair-line crosshair-horizontal"></div>
+                <div ref="crosshairV" class="crosshair-line crosshair-vertical"></div>
+              </div>
+
+              <div
+                class="absolute bottom-4 right-4 flex items-center gap-1 bg-black/50 p-1 rounded-lg text-white"
+              >
+                <button ref="zoomOutBtn" class="p-2 rounded-md hover:bg-white/20" title="Zoom Out">
+                  <ZoomOutIcon class="ui-svg h-6 w-6 text-white" />
+                </button>
+                <button ref="zoomInBtn" class="p-2 rounded-md hover:bg-white/20" title="Zoom In">
+                  <ZoomInIcon class="ui-svg h-6 w-6 text-white" />
+                </button>
+                <button
+                  ref="fitScreenBtn"
+                  class="p-2 rounded-md hover:bg-white/20"
+                  title="Fit to Screen"
+                >
+                  <FitScreenIcon class="ui-svg h-6 w-6 text-white" />
+                </button>
+                <button
+                  ref="resetViewBtn"
+                  class="p-2 rounded-md hover:bg-white/20"
+                  title="Reset View"
+                >
+                  <ResetViewIcon class="ui-svg h-6 w-6 text-white" />
+                </button>
+              </div>
+
+              <div
+                ref="coords"
+                class="absolute bottom-4 left-4 bg-black/50 text-white text-xs font-mono rounded px-2 py-1"
+              >
+                X: 0, Y: 0
+              </div>
             </div>
           </div>
         </div>
@@ -801,24 +807,24 @@ function goNextTask(): void {
         <!-- Sağ paneller -->
         <div class="w-full lg:w-96 flex flex-col gap-4 pt-0">
           <div
-            class="bg-white dark:bg-background-dark p-4 rounded-lg border border-gray-200 dark:border-gray-800"
+            class="bg-slate-50 dark:bg-background-dark p-4 rounded-lg border border-slate-200 dark:border-gray-800"
           >
             <h3 class="text-lg font-semibold mb-3">Annotations</h3>
             <div ref="annotationList" class="space-y-3"></div>
           </div>
 
           <div
-            class="bg-white dark:bg-background-dark p-4 rounded-lg border border-gray-200 dark:border-gray-800 flex flex-col flex-1"
+            class="bg-slate-50 dark:bg-background-dark p-4 rounded-lg border border-slate-200 dark:border-gray-800 flex flex-col flex-1"
           >
             <h3 class="text-lg font-semibold mb-3">Labels</h3>
             <div class="relative mb-3">
               <SearchIcon
-                class="ui-svg h-5 w-5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2"
+                class="ui-svg h-5 w-5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2"
               />
               <input
                 type="search"
                 placeholder="Search labels..."
-                class="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800"
+                class="w-full pl-10 pr-4 py-2 rounded-lg border border-slate-200 dark:border-gray-700 bg-slate-50 dark:bg-gray-800"
               />
             </div>
             <div ref="labelList" class="flex flex-wrap gap-2">

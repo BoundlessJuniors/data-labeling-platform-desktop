@@ -109,14 +109,18 @@ Basitleştirilmiş klasör yapısı:
 │     └─ src/
 │        ├─ main.ts        # Vue uygulaması giriş noktası
 │        ├─ App.vue        # Kök Vue bileşeni
+│        ├─ env.d.ts
 │        ├─ views/
 │        │  └─ LabelerView.vue
 │        ├─ components/
 │        │  └─ Versions.vue
 │        ├─ composables/
-│        │  ├─ useLabelerState.ts
-│        │  ├─ useHistory.ts
+│        │  ├─ useAnnotationsRenderer.ts
+│        │  ├─ useCanvasInteractions.ts
 │        │  ├─ useCanvasTransform.ts
+│        │  ├─ useHistory.ts
+│        │  ├─ useKeyboardShortcuts.ts
+│        │  ├─ useLabelerState.ts
 │        │  ├─ useTasks.ts
 │        │  └─ useTheme.ts
 │        ├─ types/
@@ -125,11 +129,13 @@ Basitleştirilmiş klasör yapısı:
 │        │  ├─ image.ts
 │        │  └─ dom.ts
 │        ├─ styles/
-│        │  ├─ tailwind.css
 │        │  ├─ icons.css
-│        │  ├─ base.css
-│        │  └─ main.css
+│        │  ├─ labeler-view.css
+│        │  └─ tailwind.css
 │        └─ assets/
+│           ├─ base.css
+│           ├─ main.css
+│           ├─ wavy-lines.svg
 │           ├─ icons/custom/*.svg
 │           ├─ icons/material/...
 │           ├─ images/road.jpg
