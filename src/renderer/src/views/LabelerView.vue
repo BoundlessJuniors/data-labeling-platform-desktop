@@ -42,6 +42,7 @@ import { useCanvasTransform } from '@renderer/composables/useCanvasTransform'
 import { useTasks } from '@renderer/composables/useTasks'
 import { useAnnotationsRenderer } from '@renderer/composables/useAnnotationsRenderer'
 import { useKeyboardShortcuts } from '@renderer/composables/useKeyboardShortcuts'
+import { useLabelerActions } from '@renderer/composables/useLabelerActions'
 
 /* =============================
    Refs (DOM erişimi)
@@ -73,6 +74,7 @@ const undoBtn = ref<HTMLButtonElement | null>(null)
 const redoBtn = ref<HTMLButtonElement | null>(null)
 const saveBtn = ref<HTMLButtonElement | null>(null)
 const themeToggle = ref<HTMLButtonElement | null>(null)
+const submitBtn = ref<HTMLButtonElement | null>(null)
 
 const taskTitle = ref<HTMLHeadingElement | null>(null)
 
@@ -122,7 +124,20 @@ const initialTasks: Task[] = [
   }
 ]
 // Görevler (task listesi) ve aktif indeks
-const { tasks, currentTaskIndex, currentTask } = useTasks(initialTasks)
+const { tasks, currentTaskIndex } = useTasks(initialTasks)
+
+const { onUndo, onRedo, onDelete, onSaveDraft, onSubmit, onZoomIn, onZoomOut, onFitScreen } =
+  useLabelerActions({
+    tasks,
+    currentTaskIndex,
+    canvasEl,
+    undo,
+    redo,
+    deleteSelected,
+    exportAnnotationsToImageSpace,
+    zoom,
+    fitToScreen
+  })
 
 let containerRO: ResizeObserver | null = null
 let onThemeToggleClick: (() => void) | null = null
@@ -365,7 +380,6 @@ onMounted((): void => {
       if (e.key === 'Escape') closeShapes()
     }
     document.addEventListener('keydown', onEsc)
-    deleteBtn.value?.addEventListener('click', deleteSelected)
   }
   // Global klavye kısayolları
   attachKeyboardShortcuts()
@@ -400,47 +414,16 @@ onMounted((): void => {
     if (t) selectAnnotation(parseInt(t.dataset.id!))
   })
 
-  const submitBtn = document.querySelector(
-    'button:has(> .ui-svg.text-white)'
-  ) as HTMLButtonElement | null
-  submitBtn?.addEventListener('click', (): void => {
-    tasks.value[currentTaskIndex.value].status = 'completed'
-    alert('Submitted ✔️')
-  })
+  undoBtn.value?.addEventListener('click', onUndo)
+  redoBtn.value?.addEventListener('click', onRedo)
+  deleteBtn.value?.addEventListener('click', onDelete)
+  saveBtn.value?.addEventListener('click', onSaveDraft)
+  submitBtn.value?.addEventListener('click', onSubmit)
 
-  undoBtn.value?.addEventListener('click', (): void => undo())
-  redoBtn.value?.addEventListener('click', (): void => redo())
-  saveBtn.value?.addEventListener('click', (): void => {
-    const exported = exportAnnotationsToImageSpace()
-    console.log('coordW/H (canvas):', canvasEl.value?.width, canvasEl.value?.height)
-    console.log(
-      'origW/H (Task):',
-      currentTask.value?.originalWidth,
-      currentTask.value?.originalHeight
-    )
-    console.log('raw annotations:', JSON.stringify(state.annotations, null, 2))
-    console.log('exported annotations:', JSON.stringify(exported, null, 2))
-    console.log('--- ANNOTATION DATA (IMAGE SPACE JSON) ---\n', JSON.stringify(exported, null, 2))
-
-    console.log('--- ANNOTATION DATA (IMAGE SPACE JSON) ---\n', JSON.stringify(exported, null, 2))
-
-    alert('Annotation JSON verisi (orijinal çözünürlükte) konsola yazıldı (F12).')
-  })
-
-  zoomInBtn.value?.addEventListener('click', (): void => {
-    if (!canvasContainer.value) return
-    const r = canvasContainer.value.getBoundingClientRect()
-    zoom(0.1, r.left + r.width / 2, r.top + r.height / 2)
-  })
-
-  zoomOutBtn.value?.addEventListener('click', (): void => {
-    if (!canvasContainer.value) return
-    const r = canvasContainer.value.getBoundingClientRect()
-    zoom(-0.1, r.left + r.width / 2, r.top + r.height / 2)
-  })
-
-  fitScreenBtn.value?.addEventListener('click', (): void => fitToScreen())
-  resetViewBtn.value?.addEventListener('click', (): void => fitToScreen())
+  zoomInBtn.value?.addEventListener('click', onZoomIn)
+  zoomOutBtn.value?.addEventListener('click', onZoomOut)
+  fitScreenBtn.value?.addEventListener('click', onFitScreen)
+  resetViewBtn.value?.addEventListener('click', onFitScreen)
 
   window.addEventListener('resize', fitToScreen)
 
@@ -467,6 +450,17 @@ onBeforeUnmount((): void => {
   if (onEsc) document.removeEventListener('keydown', onEsc)
   detachKeyboardShortcuts()
   detachCanvasInteractions()
+
+  undoBtn.value?.removeEventListener('click', onUndo)
+  redoBtn.value?.removeEventListener('click', onRedo)
+  deleteBtn.value?.removeEventListener('click', onDelete)
+  saveBtn.value?.removeEventListener('click', onSaveDraft)
+  submitBtn.value?.removeEventListener('click', onSubmit)
+
+  zoomInBtn.value?.removeEventListener('click', onZoomIn)
+  zoomOutBtn.value?.removeEventListener('click', onZoomOut)
+  fitScreenBtn.value?.removeEventListener('click', onFitScreen)
+  resetViewBtn.value?.removeEventListener('click', onFitScreen)
 })
 
 /* =============================
@@ -656,6 +650,7 @@ function goNextTask(): void {
           </button>
 
           <button
+            ref="submitBtn"
             class="flex items-center gap-2 rounded bg-primary py-2 px-4 text-sm font-semibold text-white hover:bg-primary-light"
           >
             <ApproveIcon class="ui-svg h-5 w-5 text-white" />
