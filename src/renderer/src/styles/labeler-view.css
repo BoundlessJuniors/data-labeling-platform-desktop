@@ -32,18 +32,32 @@
 }
 .crosshair-line {
   position: absolute;
-  background-color: rgba(103, 234, 202, 0.7); /* #67EACA (mint) */
-  box-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
+  background-color: transparent;
+  box-shadow: none;
 }
 .crosshair-horizontal {
   width: 100%;
   height: 1px;
   left: 0;
+  background-image: repeating-linear-gradient(
+    to right,
+    rgba(37, 99, 235, 0.9) 0px,
+    rgba(37, 99, 235, 0.9) 6px,
+    transparent 4px,
+    transparent 10px
+  );
 }
 .crosshair-vertical {
   width: 1px;
   height: 100%;
   top: 0;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    rgba(37, 99, 235, 0.9) 0px,
+    rgba(37, 99, 235, 0.9) 6px,
+    transparent 4px,
+    transparent 10px
+  );
 }
 
 #canvas,
@@ -70,25 +84,25 @@
 }
 
 .annotation-tool.active {
-  background-color: #12d3cf1a; /* teal tint */
-  color: #12d3cf;
+  background-color: rgba(37, 99, 235, 0.1); /* primary tint */
+  color: #2563eb;
 }
 html.dark .annotation-tool.active {
-  background-color: #12d3cf33;
+  background-color: rgba(37, 99, 235, 0.2);
 }
 
 .label-item.active {
-  background-color: #12d3cf; /* teal */
+  background-color: #2563eb; /* primary */
   color: #fff;
-  border-color: #12d3cf;
+  border-color: #2563eb;
 }
 .annotation-item.selected {
-  background-color: #12d3cf1a; /* teal tint */
-  border-color: #12d3cf80;
+  background-color: rgba(37, 99, 235, 0.1);
+  border-color: rgba(37, 99, 235, 0.55);
 }
 #annotations-svg .annotation-shape.selected {
   stroke-width: 4;
-  stroke: #12d3cf; /* teal accent */
+  stroke: #2563eb; /* primary accent */
 }
 #temp-shape {
   stroke-dasharray: 5, 5;

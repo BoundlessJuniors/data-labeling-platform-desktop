@@ -5,31 +5,44 @@
   --ev-c-white-soft: #f8f8f8;
   --ev-c-white-mute: #f2f2f2;
 
-  --ev-c-black: #1b1b1f;
-  --ev-c-black-soft: #222222;
-  --ev-c-black-mute: #282828;
+  --ev-c-black: #0f172a;
+  --ev-c-black-soft: #111827;
+  --ev-c-black-mute: #1f2937;
 
-  --ev-c-gray-1: #515c67;
-  --ev-c-gray-2: #414853;
-  --ev-c-gray-3: #32363f;
+  --ev-c-gray-1: #94a3b8;
+  --ev-c-gray-2: #64748b;
+  --ev-c-gray-3: #475569;
 
+  --ev-c-text-1: #0f172a; /* text-primary */
+  --ev-c-text-2: #475569; /* text-secondary */
+  --ev-c-text-3: #64748b;
+
+  --ev-button-alt-border: transparent;
+  --ev-button-alt-text: var(--ev-c-text-1);
+  --ev-button-alt-bg: #e2e8f0; /* light muted surface */
+  --ev-button-alt-hover-border: transparent;
+  --ev-button-alt-hover-text: var(--ev-c-text-1);
+  --ev-button-alt-hover-bg: #cbd5e1;
+}
+:root {
+  --color-background: #f8fafc; /* background-light */
+  --color-background-soft: #ffffff; /* surface */
+  --color-background-mute: #e2e8f0; /* muted surface */
+  --color-text: var(--ev-c-text-1);
+}
+
+/* DARK (Tailwind darkMode: 'class' ile uyumlu) */
+.dark {
   --ev-c-text-1: rgba(255, 255, 245, 0.86);
   --ev-c-text-2: rgba(235, 235, 245, 0.6);
   --ev-c-text-3: rgba(235, 235, 245, 0.38);
 
-  --ev-button-alt-border: transparent;
-  --ev-button-alt-text: var(--ev-c-text-1);
   --ev-button-alt-bg: var(--ev-c-gray-3);
-  --ev-button-alt-hover-border: transparent;
-  --ev-button-alt-hover-text: var(--ev-c-text-1);
   --ev-button-alt-hover-bg: var(--ev-c-gray-2);
-}
 
-:root {
-  --color-background: var(--ev-c-black);
-  --color-background-soft: var(--ev-c-black-soft);
-  --color-background-mute: var(--ev-c-black-mute);
-
+  --color-background: #0f172a; /* background-dark */
+  --color-background-soft: #111827; /* dark surface */
+  --color-background-mute: #1f2937; /* dark muted */
   --color-text: var(--ev-c-text-1);
 }
 

@@ -8,6 +8,7 @@ import type {
   PolylineAnn
 } from '@renderer/types/annotation'
 import { SVG_NS } from '@renderer/utils/dom'
+import { getAnnotationSvgStyle } from '@renderer/theme/annotationPalette'
 
 export type CanvasState = {
   isDrawing: boolean
@@ -175,9 +176,12 @@ export function useCanvasInteractions(deps: CanvasDeps): {
           state.drawingStartY = imgY
           const temp = document.createElementNS(SVG_NS, 'rect')
           temp.setAttribute('id', 'temp-shape')
-          temp.setAttribute('stroke', '#ffc107')
-          temp.setAttribute('stroke-width', '2')
-          temp.setAttribute('fill', 'none')
+          const style = getAnnotationSvgStyle('bbox')
+          temp.setAttribute('stroke', style.stroke)
+          temp.setAttribute('stroke-width', String(style.strokeWidth))
+          temp.setAttribute('fill', style.fill)
+          temp.setAttribute('fill-opacity', String(style.fillOpacity))
+          temp.setAttribute('stroke-dasharray', '6 4')
           annotationsSvg.value?.appendChild(temp)
         } else if (shape === 'circle') {
           state.isDrawing = true
@@ -186,9 +190,12 @@ export function useCanvasInteractions(deps: CanvasDeps): {
           state.drawingStartY = imgY
           const temp = document.createElementNS(SVG_NS, 'circle')
           temp.setAttribute('id', 'temp-shape')
-          temp.setAttribute('stroke', '#ffc107')
-          temp.setAttribute('stroke-width', '2')
-          temp.setAttribute('fill', 'none')
+          const style = getAnnotationSvgStyle('circle')
+          temp.setAttribute('stroke', style.stroke)
+          temp.setAttribute('stroke-width', String(style.strokeWidth))
+          temp.setAttribute('fill', style.fill)
+          temp.setAttribute('fill-opacity', String(style.fillOpacity))
+          temp.setAttribute('stroke-dasharray', '6 4')
           temp.setAttribute('cx', String(imgX))
           temp.setAttribute('cy', String(imgY))
           temp.setAttribute('r', '0')
@@ -211,9 +218,12 @@ export function useCanvasInteractions(deps: CanvasDeps): {
             state.polyPoints = [{ x: imgX, y: imgY }]
             const temp = document.createElementNS(SVG_NS, 'polyline')
             temp.setAttribute('id', 'temp-shape')
-            temp.setAttribute('stroke', '#ffc107')
-            temp.setAttribute('stroke-width', '2')
-            temp.setAttribute('fill', shape === 'polygon' ? 'rgba(255,193,7,0.08)' : 'none')
+            const style = getAnnotationSvgStyle(shape)
+            temp.setAttribute('stroke', style.stroke)
+            temp.setAttribute('stroke-width', String(style.strokeWidth))
+            temp.setAttribute('fill', style.fill)
+            temp.setAttribute('fill-opacity', String(style.fillOpacity))
+            temp.setAttribute('stroke-dasharray', '6 4')
             temp.setAttribute('points', `${imgX},${imgY}`)
             annotationsSvg.value?.appendChild(temp)
             el.style.cursor = 'crosshair'

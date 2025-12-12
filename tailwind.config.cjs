@@ -5,18 +5,22 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        // Fresh Mint UI paleti
+        // Labeling UI paleti (Slate/Blue tabanlı)
         primary: {
-          DEFAULT: '#12D3CF', // teal – ana accent
-          light: '#B0F4E6', // aqua
-          medium: '#67EACA' // mint
+          DEFAULT: '#2563EB', // aksiyon rengi
+          light: '#3B82F6', // hover/secondary accent
+          medium: '#1E40AF' // pressed/active
         },
-        secondary: '#67EACA', // mint (örn. Filter Tasks butonu)
-        accent: '#12D3CF', // ek vurgu
-        muted: '#f5f3ebff', // cream – genel arka plan
+        secondary: '#475569', // ikincil metin/ikon/soft button
+        accent: '#2563EB',
+        muted: '#CBD5E1', // disabled / subtle fill
 
-        'background-light': '#FCF9EC',
-        'background-dark': '#101922'
+        'background-light': '#F8FAFC', // ana arka plan
+        'background-dark': '#0F172A', // dark mode arka plan
+        surface: '#FFFFFF', // panel/card zemini
+        border: '#E5E7EB', // ayraç/çizgi
+        'text-primary': '#0F172A',
+        'text-secondary': '#475569'
       },
       fontFamily: {
         sans: ['Exo', 'ui-sans-serif', 'system-ui', 'sans-serif'],

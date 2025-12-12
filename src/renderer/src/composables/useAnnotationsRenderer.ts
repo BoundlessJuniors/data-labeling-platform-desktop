@@ -7,6 +7,7 @@ import type {
   KeypointAnn,
   CircleAnn
 } from '@renderer/types/annotation'
+import { getAnnotationSvgStyle } from '@renderer/theme/annotationPalette'
 
 type LabelerState = {
   selectedAnnotationId: number | null
@@ -56,6 +57,8 @@ export function useAnnotationsRenderer(
     console.log('RENDER ANNS, count =', state.annotations.length)
 
     state.annotations.forEach((ann) => {
+      const style = getAnnotationSvgStyle(ann.type)
+
       // === SVG Şekilleri ===
       if (ann.type === 'bbox') {
         console.log('ANN:', ann)
@@ -64,29 +67,33 @@ export function useAnnotationsRenderer(
         el.setAttribute('y', String(ann.y))
         el.setAttribute('width', String(ann.width))
         el.setAttribute('height', String(ann.height))
-        el.setAttribute('fill', 'rgba(17,115,212,0.4)')
-        el.setAttribute('stroke', '#1173d4')
-        el.setAttribute('stroke-width', '2')
+        el.setAttribute('fill', style.fill)
+        el.setAttribute('fill-opacity', String(style.fillOpacity))
+        el.setAttribute('stroke', style.stroke)
+        el.setAttribute('stroke-width', String(style.strokeWidth))
         el.dataset.id = String(ann.id)
         el.classList.add('annotation-shape')
+
         if (ann.id === state.selectedAnnotationId) el.classList.add('selected')
         svgEl.appendChild(el)
       } else if (ann.type === 'polygon') {
         const el = document.createElementNS(SVG_NS, 'polygon')
         el.setAttribute('points', ann.points.map((p) => `${p.x},${p.y}`).join(' '))
-        el.setAttribute('fill', 'rgba(17,115,212,0.25)')
-        el.setAttribute('stroke', '#1173d4')
-        el.setAttribute('stroke-width', '2')
+        el.setAttribute('fill', style.fill)
+        el.setAttribute('fill-opacity', String(style.fillOpacity))
+        el.setAttribute('stroke', style.stroke)
+        el.setAttribute('stroke-width', String(style.strokeWidth))
         el.dataset.id = String(ann.id)
         el.classList.add('annotation-shape')
+
         if (ann.id === state.selectedAnnotationId) el.classList.add('selected')
         svgEl.appendChild(el)
       } else if (ann.type === 'polyline') {
         const el = document.createElementNS(SVG_NS, 'polyline')
         el.setAttribute('points', ann.points.map((p) => `${p.x},${p.y}`).join(' '))
         el.setAttribute('fill', 'none')
-        el.setAttribute('stroke', '#1173d4')
-        el.setAttribute('stroke-width', '2')
+        el.setAttribute('stroke', style.stroke)
+        el.setAttribute('stroke-width', String(style.strokeWidth))
         el.dataset.id = String(ann.id)
         el.classList.add('annotation-shape')
         if (ann.id === state.selectedAnnotationId) el.classList.add('selected')
@@ -96,9 +103,10 @@ export function useAnnotationsRenderer(
         el.setAttribute('cx', String(ann.x))
         el.setAttribute('cy', String(ann.y))
         el.setAttribute('r', '4')
-        el.setAttribute('fill', '#1173d4')
-        el.setAttribute('stroke', '#ffffff')
-        el.setAttribute('stroke-width', '1.5')
+        el.setAttribute('fill', style.fill)
+        el.setAttribute('fill-opacity', String(style.fillOpacity))
+        el.setAttribute('stroke', style.stroke)
+        el.setAttribute('stroke-width', String(style.strokeWidth))
         el.dataset.id = String(ann.id)
         el.classList.add('annotation-shape')
         if (ann.id === state.selectedAnnotationId) el.classList.add('selected')
@@ -108,9 +116,10 @@ export function useAnnotationsRenderer(
         el.setAttribute('cx', String(ann.cx))
         el.setAttribute('cy', String(ann.cy))
         el.setAttribute('r', String(ann.r))
-        el.setAttribute('fill', 'rgba(17,115,212,0.25)')
-        el.setAttribute('stroke', '#1173d4')
-        el.setAttribute('stroke-width', '2')
+        el.setAttribute('fill', style.fill)
+        el.setAttribute('fill-opacity', String(style.fillOpacity))
+        el.setAttribute('stroke', style.stroke)
+        el.setAttribute('stroke-width', String(style.strokeWidth))
         el.dataset.id = String(ann.id)
         el.classList.add('annotation-shape')
         if (ann.id === state.selectedAnnotationId) el.classList.add('selected')
