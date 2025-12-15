@@ -44,17 +44,36 @@ export function useLabelerActions(opts: UseLabelerActionsOptions): UseLabelerAct
   }
 
   const onSaveDraft = (): void => {
-    const exported = opts.exportAnnotationsToImageSpace()
-    console.log('--- ANNOTATION DATA (IMAGE SPACE JSON) ---\n', JSON.stringify(exported, null, 2))
-    alert('Annotation JSON verisi (orijinal çözünürlükte) konsola yazıldı (F12).')
+    void (async () => {
+      const idx = opts.currentTaskIndex.value
+      const t = opts.tasks.value[idx]
+      if (!t) return
+
+      // Şu an Task.title = media_id olarak kullanıyoruz (road_demo gibi)
+      const mediaId = t.title ?? String(t.id)
+
+      const exported = opts.exportAnnotationsToImageSpace()
+      const dataJson = JSON.stringify(exported, null, 2)
+
+      await window.api.db.annotations.saveExport({ media_id: mediaId, data_json: dataJson })
+
+      console.log('--- ANNOTATION DATA (IMAGE SPACE JSON) ---\n', dataJson)
+      alert('Taslak kaydedildi: Annotation JSON hem DB’ye yazıldı hem konsola basıldı (F12).')
+    })()
   }
 
   const onSubmit = (): void => {
-    const idx = opts.currentTaskIndex.value
-    const t = opts.tasks.value[idx]
-    if (!t) return
-    t.status = 'completed'
-    alert('Submitted ✔️')
+    void (async () => {
+      const idx = opts.currentTaskIndex.value
+      const t = opts.tasks.value[idx]
+      if (!t) return
+
+      const mediaId = t.title ?? String(t.id)
+      await window.api.db.media.setStatus({ media_id: mediaId, status: 'completed' })
+
+      t.status = 'completed'
+      alert('Submitted ✔️')
+    })()
   }
 
   const onZoomIn = (): void => {

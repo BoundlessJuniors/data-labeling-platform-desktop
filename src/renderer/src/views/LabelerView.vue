@@ -124,7 +124,7 @@ const initialTasks: Task[] = [
   }
 ]
 // Görevler (task listesi) ve aktif indeks
-const { tasks, currentTaskIndex } = useTasks(initialTasks)
+const { tasks, currentTaskIndex, initFromDb } = useTasks(initialTasks)
 
 const { onUndo, onRedo, onDelete, onSaveDraft, onSubmit, onZoomIn, onZoomOut, onFitScreen } =
   useLabelerActions({
@@ -341,7 +341,23 @@ const { attachCanvasInteractions, detachCanvasInteractions } = useCanvasInteract
 /* =============================
    Lifecycle: onMounted / onBeforeUnmount
    ============================= */
-onMounted((): void => {
+onMounted(async (): Promise<void> => {
+  // === DB IPC TEST (geçici) ===
+  try {
+    console.log('[DB] ping:', await window.api.db.ping())
+    console.log('[DB] datasets.list:', await window.api.db.datasets.list())
+    await window.api.db.datasets.create({ id: 'demo', name: 'Demo Dataset' })
+    await window.api.db.media.upsert({
+      id: 'road_demo',
+      dataset_id: 'demo',
+      local_path: road
+    })
+    await initFromDb('demo')
+    console.log('[DB] datasets.list:', await window.api.db.datasets.list())
+  } catch (e) {
+    console.error('[DB] IPC/SQLite test failed:', e)
+  }
+
   // === THEME INIT (light/dark) ===
   const saved = localStorage.getItem('theme')
   const prefersDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false
@@ -479,6 +495,7 @@ async function loadTaskByIndex(i: number): Promise<void> {
   state.annotations = []
   state.history = []
   state.historyIndex = -1
+  state.selectedAnnotationId = null
 
   try {
     const img = await loadImage(t.image)
@@ -494,12 +511,34 @@ async function loadTaskByIndex(i: number): Promise<void> {
     }
     fitToScreen()
 
+    // === RESTORE SAVED ANNOTATIONS (DB) ===
+    try {
+      const mediaId = t.title ?? String(t.id) // şu an Task.title = media_id (road_demo)
+      const saved = await window.api.db.annotations.getExport(mediaId)
+      if (saved?.data_json) {
+        const parsed = JSON.parse(saved.data_json)
+        if (Array.isArray(parsed)) {
+          // parsed beklenen format: Annotation[]
+          state.annotations = parsed
+        } else {
+          state.annotations = []
+        }
+      } else {
+        state.annotations = []
+      }
+    } catch (e) {
+      console.error('[DB] restore annotations failed:', e)
+      state.annotations = []
+    }
+
     const firstLabel = labelList.value?.querySelector('.label-item') as HTMLElement | null
     setActiveLabel(firstLabel)
     const selectTool = toolGroup.value?.querySelector(
       '.annotation-tool[data-tool="select"]'
     ) as HTMLElement | null
     setActiveTool(selectTool)
+    // Restore sonrası UI güncelle
+    renderAnnotations()
     recordHistory()
   } catch (err) {
     console.error('Image load failed:', err)

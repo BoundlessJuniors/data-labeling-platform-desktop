@@ -6,6 +6,7 @@ export function useTasks(initial: Task[]): {
   tasks: Ref<Task[]>
   currentTaskIndex: Ref<number>
   currentTask: ComputedRef<Task | undefined>
+  initFromDb: (datasetId: string) => Promise<void>
   loadTaskImage: (i: number, assign: (img: HTMLImageElement) => void) => Promise<void>
   goPrevTask: () => void
   goNextTask: () => void
@@ -13,6 +14,17 @@ export function useTasks(initial: Task[]): {
   const tasks = ref<Task[]>(initial)
   const currentTaskIndex = ref(0)
   const currentTask = computed(() => tasks.value[currentTaskIndex.value])
+
+  const initFromDb = async (datasetId: string): Promise<void> => {
+    const rows = await window.api.db.media.listByDataset(datasetId)
+    tasks.value = rows.map((r, idx) => ({
+      id: idx + 1,
+      title: r.id,
+      image: r.local_path,
+      status: r.status === 'completed' ? 'completed' : 'in_progress'
+    }))
+    currentTaskIndex.value = 0
+  }
 
   const loadTaskImage = async (
     i: number,
@@ -32,5 +44,5 @@ export function useTasks(initial: Task[]): {
     currentTaskIndex.value = (currentTaskIndex.value + 1) % tasks.value.length
   }
 
-  return { tasks, currentTaskIndex, currentTask, loadTaskImage, goPrevTask, goNextTask }
+  return { tasks, currentTaskIndex, currentTask, initFromDb, loadTaskImage, goPrevTask, goNextTask }
 }
