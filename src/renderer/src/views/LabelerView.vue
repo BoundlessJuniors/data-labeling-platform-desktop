@@ -26,7 +26,8 @@ import KeypointIcon from '@renderer/assets/icons/custom/adjust.svg?component'
 import CircleIcon from '@renderer/assets/icons/custom/circle.svg?component'
 import DeleteIcon from '@renderer/assets/icons/custom/delete.svg?component'
 
-import road from '@renderer/assets/images/road.jpg'
+import { v4 as uuidv4 } from 'uuid'
+
 // Tipler
 import type { PolygonAnn, PolylineAnn, Task } from '@renderer/types/annotation'
 
@@ -114,15 +115,10 @@ const {
   recordHistory
 )
 
-// Demo için başlangıç görev listesi: road.jpg
-const initialTasks: Task[] = [
-  {
-    id: 1,
-    title: 'Road demo',
-    image: road,
-    status: 'in_progress'
-  }
-]
+const props = defineProps<{ datasetId: string }>()
+const emit = defineEmits<{ (e: 'back-to-datasets'): void }>()
+// Başlangıçta boş; dataset seçilince DB’den doldurulacak
+const initialTasks: Task[] = []
 // Görevler (task listesi) ve aktif indeks
 const { tasks, currentTaskIndex, initFromDb } = useTasks(initialTasks)
 
@@ -218,6 +214,26 @@ function setActiveTool(el: HTMLElement | null): void {
     }
   }
   updateCursor()
+}
+
+function toLocalUrlMaybe(p: string): string {
+  if (p.startsWith('http://') || p.startsWith('https://') || p.startsWith('local://')) return p
+
+  const isWinAbs = /^[a-zA-Z]:[\\/]/.test(p) || p.startsWith('\\\\')
+  const isPosixAbs = p.startsWith('/')
+
+  if (isWinAbs) {
+    const normalized = p.replace(/\\/g, '/')
+    // local:///C:/Users/... (3 slash) + boşlukları güvenli taşı
+    return `local:///${encodeURI(normalized)}`
+  }
+
+  if (isPosixAbs) {
+    // local:///home/... formatını garanti et
+    return `local:///${encodeURI(p.replace(/^\/+/, ''))}`
+  }
+
+  return p
 }
 
 /* =============================
@@ -342,20 +358,11 @@ const { attachCanvasInteractions, detachCanvasInteractions } = useCanvasInteract
    Lifecycle: onMounted / onBeforeUnmount
    ============================= */
 onMounted(async (): Promise<void> => {
-  // === DB IPC TEST (geçici) ===
+  // Seçilen dataset’ten görevleri yükle
   try {
-    console.log('[DB] ping:', await window.api.db.ping())
-    console.log('[DB] datasets.list:', await window.api.db.datasets.list())
-    await window.api.db.datasets.create({ id: 'demo', name: 'Demo Dataset' })
-    await window.api.db.media.upsert({
-      id: 'road_demo',
-      dataset_id: 'demo',
-      local_path: road
-    })
-    await initFromDb('demo')
-    console.log('[DB] datasets.list:', await window.api.db.datasets.list())
+    await initFromDb(props.datasetId)
   } catch (e) {
-    console.error('[DB] IPC/SQLite test failed:', e)
+    console.error('[DB] initFromDb failed:', e)
   }
 
   // === THEME INIT (light/dark) ===
@@ -439,7 +446,7 @@ onMounted(async (): Promise<void> => {
   zoomInBtn.value?.addEventListener('click', onZoomIn)
   zoomOutBtn.value?.addEventListener('click', onZoomOut)
   fitScreenBtn.value?.addEventListener('click', onFitScreen)
-  resetViewBtn.value?.addEventListener('click', onFitScreen)
+  resetViewBtn.value?.addEventListener('click', onFitScreen) // geçici: reset ayrı yapılacak
 
   window.addEventListener('resize', fitToScreen)
 
@@ -453,7 +460,9 @@ onMounted(async (): Promise<void> => {
   prevBtn.value?.addEventListener('click', (): void => goPrevTask())
   nextBtn.value?.addEventListener('click', (): void => goNextTask())
 
-  loadTaskByIndex(0)
+  if (tasks.value.length > 0) {
+    await loadTaskByIndex(0)
+  }
   updateDeleteButton()
 })
 
@@ -498,7 +507,9 @@ async function loadTaskByIndex(i: number): Promise<void> {
   state.selectedAnnotationId = null
 
   try {
-    const img = await loadImage(t.image)
+    const imgSrc = toLocalUrlMaybe(t.image)
+    console.log('IMG SRC =>', imgSrc)
+    const img = await loadImage(imgSrc)
     state.img = img
 
     // Eğer görev zaten orijinal çözünürlüğü biliyorsa, dokunma.
@@ -513,7 +524,7 @@ async function loadTaskByIndex(i: number): Promise<void> {
 
     // === RESTORE SAVED ANNOTATIONS (DB) ===
     try {
-      const mediaId = t.title ?? String(t.id) // şu an Task.title = media_id (road_demo)
+      const mediaId = t.mediaId ?? t.title ?? String(t.id)
       const saved = await window.api.db.annotations.getExport(mediaId)
       if (saved?.data_json) {
         const parsed = JSON.parse(saved.data_json)
@@ -641,6 +652,13 @@ function goNextTask(): void {
         class="flex items-center justify-between p-5 border-b border-border dark:border-gray-800 bg-surface/70 dark:bg-background-dark"
       >
         <div class="flex items-center gap-4">
+          <button
+            class="rounded bg-slate-200 dark:bg-gray-700 px-3 py-2 text-sm"
+            @click="emit('back-to-datasets')"
+          >
+            Datasets
+          </button>
+
           <h2 ref="taskTitle" class="text-xl font-bold">Image Annotation - Task 1</h2>
           <div class="flex items-center gap-2">
             <button

@@ -1,10 +1,27 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, protocol, net } from 'electron'
 import { join } from 'path'
+import { pathToFileURL } from 'url'
+import { dialog } from 'electron'
+import { readdirSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { initDb } from './db/sqlite'
 import { registerDbIpc } from './ipc/dbIpc'
 
+const IMAGE_EXTS = ['.jpg', '.jpeg', '.png', '.bmp', '.webp']
+// local:// protokolünü renderer'da "güvenli/standard" gibi kullanabilmek için
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'local',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      stream: true
+    }
+  }
+])
 function createWindow(): void {
   // Create the browser window.
   const mainWindow = new BrowserWindow({
@@ -52,11 +69,53 @@ app.whenReady().then(() => {
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
   })
+  protocol.handle('local', async (request) => {
+    try {
+      const u = new URL(request.url)
+
+      // u.pathname örn:
+      // Windows: "/C:/Users/.../20211218_145115.jpg"
+      // POSIX  : "/home/user/.../img.jpg"
+      let p = decodeURIComponent(u.pathname)
+
+      // Windows'ta baştaki "/" kaldırılmalı ("/C:/..." -> "C:/...")
+      if (/^\/[a-zA-Z]:\//.test(p)) {
+        p = p.slice(1)
+      }
+
+      const fileUrl = pathToFileURL(p).toString()
+      return net.fetch(fileUrl)
+    } catch (e) {
+      console.error('[local-protocol] failed:', e, 'url=', request.url)
+      return new Response('Not found', { status: 404 })
+    }
+  })
 
   // IPC test
   ipcMain.on('ping', () => console.log('pong'))
   initDb()
   registerDbIpc()
+
+  // === Dataset folder picker ===
+  ipcMain.handle('dataset:pickFolder', async () => {
+    const res = await dialog.showOpenDialog({
+      properties: ['openDirectory']
+    })
+    if (res.canceled || res.filePaths.length === 0) return null
+
+    const folder = res.filePaths[0]
+    const files = readdirSync(folder)
+
+    const images = files.filter((f) => {
+      const ext = f.toLowerCase().slice(f.lastIndexOf('.'))
+      return IMAGE_EXTS.includes(ext)
+    })
+
+    return {
+      folder,
+      images
+    }
+  })
   createWindow()
 
   app.on('activate', function () {

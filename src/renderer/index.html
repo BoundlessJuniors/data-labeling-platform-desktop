@@ -4,40 +4,15 @@
     <meta charset="UTF-8" />
     <title>Electron</title>
     <!-- https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP -->
-   <meta http-equiv="Content-Security-Policy"
+    <meta
+      http-equiv="Content-Security-Policy"
       content="default-src 'self';
-               script-src 'self';
-               style-src 'self' 'unsafe-inline';
-               img-src 'self' data:;
-               font-src 'self' data:">
+           script-src 'self';
+           style-src 'self' 'unsafe-inline';
+           img-src 'self' data: local:;
+           font-src 'self' data:"
+    />
 
-    <!-- head içine ekle -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap"
-      rel="stylesheet"
-    />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined"
-      rel="stylesheet"
-    />
-    <script>
-      tailwind.config = {
-        darkMode: 'class',
-        theme: {
-          extend: {
-            colors: {
-              primary: '#1173d4',
-              'background-light': '#f6f7f8',
-              'background-dark': '#101922'
-            },
-            fontFamily: { display: ['Inter'] },
-            borderRadius: { DEFAULT: '0.25rem', lg: '0.5rem', xl: '0.75rem', full: '9999px' }
-          }
-        }
-      }
-    </script>
     <style>
       .material-symbols-outlined {
         font-variation-settings:

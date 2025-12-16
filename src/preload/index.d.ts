@@ -39,6 +39,12 @@ declare global {
           getExport: (mediaId: string) => Promise<{ data_json: string; updated_at: number } | null>
         }
       }
+      dataset: {
+        pickFolder: () => Promise<{
+          folder: string
+          images: string[]
+        } | null>
+      }
     }
   }
 }

@@ -28,6 +28,9 @@ const api = {
         ipcRenderer.invoke('db:annotations:saveExport', payload),
       getExport: (mediaId: string) => ipcRenderer.invoke('db:annotations:getExport', mediaId)
     }
+  },
+  dataset: {
+    pickFolder: () => ipcRenderer.invoke('dataset:pickFolder')
   }
 }
 
