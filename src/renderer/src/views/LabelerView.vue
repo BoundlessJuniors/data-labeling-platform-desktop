@@ -26,8 +26,6 @@ import KeypointIcon from '@renderer/assets/icons/custom/adjust.svg?component'
 import CircleIcon from '@renderer/assets/icons/custom/circle.svg?component'
 import DeleteIcon from '@renderer/assets/icons/custom/delete.svg?component'
 
-import { v4 as uuidv4 } from 'uuid'
-
 // Tipler
 import type { PolygonAnn, PolylineAnn, Task } from '@renderer/types/annotation'
 
