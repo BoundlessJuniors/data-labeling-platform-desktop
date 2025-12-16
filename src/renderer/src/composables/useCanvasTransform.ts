@@ -15,8 +15,11 @@ export function useCanvasTransform(
   fitToScreen: () => void
   zoom: (delta: number, clientX: number, clientY: number) => void
 } {
+  const MIN_SCALE = 0.6
+
   const updateTransform = (): void => {
     if (!canvasEl.value || !annotationsSvg.value) return
+    // Ortası canvasContainer'ın merkezi olacak şekilde ölçekle ve kaydır
     const t = `translate(${state.translateX}px, ${state.translateY}px) scale(${state.scale})`
     canvasEl.value.style.transform = t
     annotationsSvg.value.style.transform = t
@@ -24,8 +27,11 @@ export function useCanvasTransform(
 
   const fitToScreen = (): void => {
     if (!canvasEl.value || !annotationsSvg.value) return
-    const cw = canvasEl.value.parentElement?.clientWidth ?? 0
-    const ch = canvasEl.value.parentElement?.clientHeight ?? 0
+    const container = canvasEl.value.parentElement
+    if (!container) return
+
+    const cw = container.clientWidth
+    const ch = container.clientHeight
     const iw = state.img.naturalWidth || canvasEl.value.width
     const ih = state.img.naturalHeight || canvasEl.value.height
     if (!cw || !ch || !iw || !ih) return
@@ -33,10 +39,29 @@ export function useCanvasTransform(
     canvasEl.value.width = iw
     canvasEl.value.height = ih
     annotationsSvg.value.setAttribute('viewBox', `0 0 ${iw} ${ih}`)
-    const s = Math.min(cw / iw, ch / ih) * 0.98
-    state.scale = Number.isFinite(s) && s > 0 ? s : 1
-    state.translateX = (cw - iw * state.scale) / 2
-    state.translateY = (ch - ih * state.scale) / 2
+
+    const fitScale = Math.min(cw / iw, ch / ih) * 0.98
+    state.scale = Number.isFinite(fitScale) && fitScale > 0 ? fitScale : 1
+
+    const drawnW = iw * state.scale
+    const drawnH = ih * state.scale
+
+    // Container merkezine göre ortala (origin 0,0 iken)
+    state.translateX = (cw - drawnW) / 2
+    state.translateY = (ch - drawnH) / 2
+
+    console.log('[fitToScreen]', {
+      containerWidth: cw,
+      containerHeight: ch,
+      imageWidth: iw,
+      imageHeight: ih,
+      fitScale,
+      appliedScale: state.scale,
+      drawnWidth: drawnW,
+      drawnHeight: drawnH,
+      translateX: state.translateX,
+      translateY: state.translateY
+    })
 
     const ctx = canvasEl.value.getContext('2d')
     if (!ctx) return
@@ -56,7 +81,8 @@ export function useCanvasTransform(
     const mouseY = clientY - rect.top
     const worldX = (mouseX - state.translateX) / state.scale
     const worldY = (mouseY - state.translateY) / state.scale
-    const newScale = Math.max(0.05, Math.min(state.scale * (1 + delta), 10))
+    // Zoom-out sınırı: görüntünün aşırı küçülmemesi için minimum ölçek
+    const newScale = Math.max(MIN_SCALE, Math.min(state.scale * (1 + delta), 10))
 
     state.translateX = mouseX - worldX * newScale
     state.translateY = mouseY - worldY * newScale

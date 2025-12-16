@@ -41,6 +41,8 @@ export type CanvasDeps = {
   recordHistory: () => void
   renderAnnotations: () => void
   updateTransform: () => void
+  // zoom fonksiyonu: mevcut scale ve translateX/Y'yi günceller
+  zoom: (delta: number, clientX: number, clientY: number) => void
   updateCursor: () => void
   commitPoly: () => void
 }
@@ -60,6 +62,7 @@ export function useCanvasInteractions(deps: CanvasDeps): {
     recordHistory,
     renderAnnotations,
     updateTransform,
+    zoom,
     updateCursor,
     commitPoly
   } = deps
@@ -70,6 +73,7 @@ export function useCanvasInteractions(deps: CanvasDeps): {
   let handleMouseLeave: ((e: MouseEvent) => void) | null = null
   let handleContextMenu: ((e: Event) => void) | null = null
   let handleDblClick: (() => void) | null = null
+  let handleWheel: ((e: WheelEvent) => void) | null = null
 
   const finishPointer = (): void => {
     if (state.isDrawing && !state.isPanning) {
@@ -257,20 +261,24 @@ export function useCanvasInteractions(deps: CanvasDeps): {
       if (crosshairV.value) crosshairV.value.style.left = `${mouseXContainer}px`
 
       const imgCoords = getImageCoordsFromEvent(e)
+      let imgX: number | null = null
+      let imgY: number | null = null
+
       if (!imgCoords) {
         if (coords.value) coords.value.textContent = 'X: -, Y: -'
-        return
-      }
-      const { imgX, imgY } = imgCoords
-      if (coords.value) {
-        coords.value.textContent = `X: ${Math.round(imgX)}, Y: ${Math.round(imgY)}`
+      } else {
+        imgX = imgCoords.imgX
+        imgY = imgCoords.imgY
+        if (coords.value) {
+          coords.value.textContent = `X: ${Math.round(imgX)}, Y: ${Math.round(imgY)}`
+        }
       }
 
       if (state.isPanning) {
         state.translateX = e.clientX - state.startPanX
         state.translateY = e.clientY - state.startPanY
         updateTransform()
-      } else if (state.isDrawing) {
+      } else if (state.isDrawing && imgX != null && imgY != null) {
         if (state.drawingShape === 'bbox') {
           const temp = annotationsSvg.value?.querySelector('#temp-shape') as SVGRectElement | null
           if (!temp) return
@@ -323,12 +331,32 @@ export function useCanvasInteractions(deps: CanvasDeps): {
       commitPoly()
     }
 
+    handleWheel = (e: WheelEvent): void => {
+      const containerRect = canvasContainer.value?.getBoundingClientRect()
+      if (!containerRect) return
+
+      // Sadece Ctrl basılıyken zoom yap (tarayıcı zoom'unu engelle)
+      if (!e.ctrlKey) return
+
+      e.preventDefault()
+
+      const direction = e.deltaY > 0 ? -1 : 1
+      const step = 0.08
+      const delta = direction * step
+
+      const clientX = e.clientX
+      const clientY = e.clientY
+
+      zoom(delta, clientX, clientY)
+    }
+
     container.addEventListener('mousedown', handleMouseDown)
     container.addEventListener('mousemove', handleMouseMove)
     container.addEventListener('mouseup', handleMouseUp)
     container.addEventListener('mouseleave', handleMouseLeave)
     container.addEventListener('contextmenu', handleContextMenu)
     container.addEventListener('dblclick', handleDblClick)
+    container.addEventListener('wheel', handleWheel, { passive: false })
   }
 
   const detachCanvasInteractions = (): void => {
@@ -341,6 +369,7 @@ export function useCanvasInteractions(deps: CanvasDeps): {
     if (handleMouseLeave) container.removeEventListener('mouseleave', handleMouseLeave)
     if (handleContextMenu) container.removeEventListener('contextmenu', handleContextMenu)
     if (handleDblClick) container.removeEventListener('dblclick', handleDblClick)
+    if (handleWheel) container.removeEventListener('wheel', handleWheel)
 
     handleMouseDown = null
     handleMouseMove = null
@@ -348,6 +377,7 @@ export function useCanvasInteractions(deps: CanvasDeps): {
     handleMouseLeave = null
     handleContextMenu = null
     handleDblClick = null
+    handleWheel = null
   }
 
   return { attachCanvasInteractions, detachCanvasInteractions }

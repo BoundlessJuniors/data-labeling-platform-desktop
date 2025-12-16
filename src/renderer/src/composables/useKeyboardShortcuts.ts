@@ -42,15 +42,28 @@ export function useKeyboardShortcuts(deps: KeyboardDeps): {
     } = deps
 
     handler = (e: KeyboardEvent): void => {
+      const target = e.target as HTMLElement | null
+
+      if (target) {
+        const tag = target.tagName
+        const isFormElement =
+          tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' ||
+          target.isContentEditable
+
+        if (isFormElement) return
+      }
+
+      const key = e.key.toLowerCase()
+
       // Undo
-      if (e.ctrlKey && e.key === 'z') {
+      if (e.ctrlKey && !e.shiftKey && key === 'z') {
         e.preventDefault()
         undo()
         return
       }
 
       // Redo
-      if (e.ctrlKey && e.key === 'y') {
+      if ((e.ctrlKey && key === 'y') || (e.ctrlKey && e.shiftKey && key === 'z')) {
         e.preventDefault()
         redo()
         return
@@ -82,9 +95,18 @@ export function useKeyboardShortcuts(deps: KeyboardDeps): {
 
       // Genel Escape davranışı
       if (e.key === 'Escape') {
+        // Önce mevcut seçim varsa onu temizle
         if (state.selectedAnnotationId != null) {
           e.preventDefault()
           clearSelection()
+          return
+        }
+
+        // Shapes aracı aktifken (özellikle polygon/polyline) her durumda çizimi iptal et
+        // Bu, KonvaCanvas içindeki geçici çizgileri de temizler ve pan/select moduna döner.
+        if (state.lastUsedTool === 'shapes') {
+          e.preventDefault()
+          cancelPoly()
           return
         }
 
@@ -98,12 +120,12 @@ export function useKeyboardShortcuts(deps: KeyboardDeps): {
       }
     }
 
-    document.addEventListener('keydown', handler)
+    window.addEventListener('keydown', handler, true)
   }
 
   const detachKeyboardShortcuts = (): void => {
     if (handler) {
-      document.removeEventListener('keydown', handler)
+      window.removeEventListener('keydown', handler, true)
       handler = null
     }
   }

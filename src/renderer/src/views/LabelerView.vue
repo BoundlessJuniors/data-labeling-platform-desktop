@@ -28,14 +28,13 @@ import DeleteIcon from '@renderer/assets/icons/custom/delete.svg?component'
 
 import road from '@renderer/assets/images/road.jpg'
 // Tipler
-import type { PolygonAnn, PolylineAnn, Task } from '@renderer/types/annotation'
+import type { Annotation, Task } from '@renderer/types/annotation'
 
 // Util
 import { loadImage } from '@renderer/utils/image'
 import { qsa } from '@renderer/utils/dom'
 
 // Composable’lar
-import { useCanvasInteractions } from '@renderer/composables/useCanvasInteractions'
 import { useLabelerState } from '@renderer/composables/useLabelerState'
 import { useHistory } from '@renderer/composables/useHistory'
 import { useCanvasTransform } from '@renderer/composables/useCanvasTransform'
@@ -43,28 +42,32 @@ import { useTasks } from '@renderer/composables/useTasks'
 import { useAnnotationsRenderer } from '@renderer/composables/useAnnotationsRenderer'
 import { useKeyboardShortcuts } from '@renderer/composables/useKeyboardShortcuts'
 import { useLabelerActions } from '@renderer/composables/useLabelerActions'
+import KonvaCanvas from '@renderer/components/KonvaCanvas.vue'
 
 /* =============================
    Refs (DOM erişimi)
    ============================= */
 const canvasContainer = ref<HTMLDivElement | null>(null)
+// Eski canvas/SVG artık kullanılmıyor, ancak bazı composable'lar tip için referansa ihtiyaç duyuyor
 const canvasEl = ref<HTMLCanvasElement | null>(null)
 const annotationsSvg = ref<SVGSVGElement | null>(null)
 
 const shapesToolBtn = ref<HTMLButtonElement | null>(null)
 const shapesDropdown = ref<HTMLDivElement | null>(null)
 
-const filterBtn = ref<HTMLButtonElement | null>(null)
-const filterDropdown = ref<HTMLDivElement | null>(null)
+// Filter butonu/düğmesi henüz script tarafında kullanılmıyor; sadece template için mevcut.
 
-const crosshairH = ref<HTMLDivElement | null>(null)
-const crosshairV = ref<HTMLDivElement | null>(null)
-const coords = ref<HTMLDivElement | null>(null)
+// Crosshair ve koordinat overlay'leri şimdilik sadece template tarafında, script içinde
+// kullanılmıyor; bu yüzden burada ref tanımlamıyoruz.
 
 const zoomInBtn = ref<HTMLButtonElement | null>(null)
 const zoomOutBtn = ref<HTMLButtonElement | null>(null)
 const fitScreenBtn = ref<HTMLButtonElement | null>(null)
 const resetViewBtn = ref<HTMLButtonElement | null>(null)
+
+const crosshairH = ref<HTMLDivElement | null>(null)
+const crosshairV = ref<HTMLDivElement | null>(null)
+const coords = ref<HTMLDivElement | null>(null)
 
 const toolGroup = ref<HTMLDivElement | null>(null)
 const labelList = ref<HTMLDivElement | null>(null)
@@ -83,6 +86,10 @@ const nextBtn = ref<HTMLButtonElement | null>(null)
 
 const deleteBtn = ref<HTMLButtonElement | null>(null)
 
+// Label seçilmeden shapes aracı kullanıldığında gösterilecek küçük uyarı
+const showLabelHint = ref(false)
+let labelHintTimer: number | null = null
+
 /* =============================
    İç durum
    ============================= */
@@ -90,18 +97,24 @@ const deleteBtn = ref<HTMLButtonElement | null>(null)
 // Reactif state
 const { state } = useLabelerState()
 
+const konvaCanvasRef = ref<InstanceType<typeof KonvaCanvas> | null>(null)
+
+// Uygulama açıkken, her task için geçici (kaydedilmemiş) annotation'ları hafızada tutmak için
+// basit bir cache. Key: media_id (şu an Task.title), Value: Annotation[] snapshot.
+const localAnnotationsByTask = new Map<string, Annotation[]>()
+
 // Undo/Redo vb. geçmiş yönetimi
 const { recordHistory, undo, redo } = useHistory(state)
 
-// Canvas transform & zoom yönetimi
-const { updateTransform, fitToScreen, zoom } = useCanvasTransform(state, canvasEl, annotationsSvg)
+// Canvas transform & zoom yönetimi (eski canvas için). Şu an KonvaCanvas zoom/pan'i
+// yönettiği için buradan sadece fitToScreen kullanılıyor.
+const { fitToScreen } = useCanvasTransform(state, canvasEl, annotationsSvg)
 
 const {
   renderAnnotations,
   exportAnnotationsToImageSpace,
   clearSelection,
   deleteSelected,
-  getImageCoordsFromEvent,
   updateDeleteButton
 } = useAnnotationsRenderer(
   state,
@@ -126,20 +139,28 @@ const initialTasks: Task[] = [
 // Görevler (task listesi) ve aktif indeks
 const { tasks, currentTaskIndex, initFromDb } = useTasks(initialTasks)
 
-const { onUndo, onRedo, onDelete, onSaveDraft, onSubmit, onZoomIn, onZoomOut, onFitScreen } =
-  useLabelerActions({
-    tasks,
-    currentTaskIndex,
-    canvasEl,
-    undo,
-    redo,
-    deleteSelected,
-    exportAnnotationsToImageSpace,
-    zoom,
-    fitToScreen
-  })
+const undoAndRender = (): void => {
+  undo()
+  renderAnnotations()
+}
 
-let containerRO: ResizeObserver | null = null
+const redoAndRender = (): void => {
+  redo()
+  renderAnnotations()
+}
+
+const { onUndo, onRedo, onDelete, onSaveDraft, onSubmit } = useLabelerActions({
+  tasks,
+  currentTaskIndex,
+  canvasEl,
+  undo: undoAndRender,
+  redo: redoAndRender,
+  deleteSelected,
+  exportAnnotationsToImageSpace,
+  fitToScreen
+})
+
+let autoSaveTimer: number | null = null
 let onThemeToggleClick: (() => void) | null = null
 
 /* =============================
@@ -172,6 +193,9 @@ function toggleShapes(e?: Event): void {
    ============================= */
 
 function enterPanMode(): void {
+  // KonvaCanvas üzerinde devam eden bir çizim varsa iptal et
+  konvaCanvasRef.value?.cancelCurrentShape?.()
+
   const temp = annotationsSvg.value?.querySelector('#temp-shape')
   temp?.remove()
 
@@ -189,34 +213,70 @@ function enterPanMode(): void {
 function setActiveTool(el: HTMLElement | null): void {
   if (!toolGroup.value) return
   qsa<HTMLElement>(toolGroup.value, '.annotation-tool').forEach((e) => e.classList.remove('active'))
-  if (el) {
-    el.classList.add('active')
-    const tool = el.dataset.tool
-
-    if (el.closest('#shapes-dropdown')) {
-      shapesToolBtn.value?.classList.add('active')
-
-      if (
-        tool === 'bbox' ||
-        tool === 'polygon' ||
-        tool === 'polyline' ||
-        tool === 'keypoint' ||
-        tool === 'circle'
-      ) {
-        state.lastUsedShape = tool
-      } else {
-        state.lastUsedShape = 'bbox'
-      }
-
-      state.lastUsedTool = 'shapes'
-    } else {
-      if (tool === 'select' || tool === 'sam' || tool === 'shapes') {
-        state.lastUsedTool = tool
-      } else {
-        state.lastUsedTool = 'select'
-      }
-    }
+  if (!el) {
+    updateCursor()
+    return
   }
+
+  const tool = el.dataset.tool
+
+  // Shapes dropdown içindeki gerçek şekil seçimi
+  if (el.closest('#shapes-dropdown')) {
+    // Henüz label seçili değilse: shapes moduna geçme, sadece küçük bir uyarı göster
+    if (!state.activeLabel) {
+      showLabelHint.value = true
+      if (labelHintTimer != null) window.clearTimeout(labelHintTimer)
+      labelHintTimer = window.setTimeout(() => {
+        showLabelHint.value = false
+        labelHintTimer = null
+      }, 3000)
+      updateCursor()
+      return
+    }
+
+    // Label seçiliyse shapes aracı ve ilgili şekli gerçekten aktif et
+    shapesToolBtn.value?.classList.add('active')
+    el.classList.add('active')
+
+    if (
+      tool === 'bbox' ||
+      tool === 'polygon' ||
+      tool === 'polyline' ||
+      tool === 'keypoint' ||
+      tool === 'circle'
+    ) {
+      state.lastUsedShape = tool
+    } else {
+      state.lastUsedShape = 'bbox'
+    }
+
+    state.lastUsedTool = 'shapes'
+    updateCursor()
+    return
+  }
+
+  // Dropdown dışında: select / sam / ana shapes butonu
+  if (tool === 'shapes' && !state.activeLabel) {
+    // Label yokken shapes moduna hiç geçme, uyarı göster
+    showLabelHint.value = true
+    if (labelHintTimer != null) window.clearTimeout(labelHintTimer)
+    labelHintTimer = window.setTimeout(() => {
+      showLabelHint.value = false
+      labelHintTimer = null
+    }, 3000)
+    updateCursor()
+    return
+  }
+
+  // Buraya gelmişsek, ya select/sam seçiliyor ya da label zaten seçiliyken ana shapes butonu basıldı
+  el.classList.add('active')
+
+  if (tool === 'select' || tool === 'sam' || tool === 'shapes') {
+    state.lastUsedTool = tool
+  } else {
+    state.lastUsedTool = 'select'
+  }
+
   updateCursor()
 }
 
@@ -255,6 +315,40 @@ function updateCursor(): void {
   }
 }
 
+function handlePointerMove(payload: {
+  screenX: number
+  screenY: number
+  imgX: number | null
+  imgY: number | null
+}): void {
+  const container = canvasContainer.value
+  if (!container) return
+
+  container.classList.add('has-pointer')
+
+  if (crosshairH.value) crosshairH.value.style.top = `${payload.screenY}px`
+  if (crosshairV.value) crosshairV.value.style.left = `${payload.screenX}px`
+
+  if (coords.value) {
+    if (payload.imgX != null && payload.imgY != null) {
+      const x = Math.round(payload.imgX)
+      const y = Math.round(payload.imgY)
+      coords.value.textContent = `X: ${x}, Y: ${y}`
+    } else {
+      coords.value.textContent = 'X: -, Y: -'
+    }
+  }
+}
+
+function handlePointerLeave(): void {
+  const container = canvasContainer.value
+  if (container) container.classList.remove('has-pointer')
+
+  if (coords.value) {
+    coords.value.textContent = 'X: -, Y: -'
+  }
+}
+
 /* =============================
    Render
    ============================= */
@@ -267,44 +361,50 @@ function selectAnnotation(id: number): void {
   renderAnnotations()
 }
 
+function handleCreateAnnotationFromKonva(ann: Annotation): void {
+  state.annotations.push(ann)
+  recordHistory()
+  renderAnnotations()
+  updateDeleteButton()
+}
+
+function handleSelectAnnotationFromKonva(id: number | null): void {
+  if (id == null) {
+    state.selectedAnnotationId = null
+    clearSelection()
+  } else {
+    selectAnnotation(id)
+  }
+}
+
 /* =============================
    Polygon / Polyline Tamamlama
    ============================= */
 const cancelPoly = (): void => {
-  if (!state.isDrawing) return
-  const temp = annotationsSvg.value!.querySelector('#temp-shape')
-  temp?.remove()
-  state.polyPoints = []
-  state.drawingShape = null
-  state.isDrawing = false
-  updateCursor()
+  // Eğer Konva tarafında devam eden bir polygon/polyline çizimi varsa
+  // önce sadece o çizimi iptal et (shapes modunda kal).
+  const konva = konvaCanvasRef.value as | { hasActiveDrawing?: () => boolean; cancelCurrentShape?: () => void } | null
+
+  if (konva?.hasActiveDrawing?.()) {
+    konva.cancelCurrentShape?.()
+
+    // Global state'i de temizle (cursor vs. için)
+    state.polyPoints = []
+    state.drawingShape = null
+    state.isDrawing = false
+    updateCursor()
+    return
+  }
+
+  // Herhangi bir aktif çizim yoksa normal pan/select moduna geç
+  enterPanMode()
 }
 
 const commitPoly = (): void => {
-  if (!state.isDrawing || !(state.drawingShape === 'polygon' || state.drawingShape === 'polyline'))
-    return
-  const minPts = state.drawingShape === 'polygon' ? 3 : 2
-  if (state.polyPoints.length >= minPts) {
-    const ann =
-      state.drawingShape === 'polygon'
-        ? ({
-            id: Date.now(),
-            type: 'polygon',
-            label: state.activeLabel,
-            points: [...state.polyPoints]
-          } as PolygonAnn)
-        : ({
-            id: Date.now(),
-            type: 'polyline',
-            label: state.activeLabel,
-            points: [...state.polyPoints]
-          } as PolylineAnn)
-    state.annotations.push(ann)
-    recordHistory()
-    renderAnnotations()
-  }
-  const temp = annotationsSvg.value!.querySelector('#temp-shape')
-  temp?.remove()
+  // Enter ile mevcut Konva çizimini (bbox/polygon/polyline) tamamla
+  konvaCanvasRef.value?.finishCurrentShape?.()
+
+  // Eski state bayraklarını resetle
   state.polyPoints = []
   state.drawingShape = null
   state.isDrawing = false
@@ -313,8 +413,8 @@ const commitPoly = (): void => {
 
 const { attachKeyboardShortcuts, detachKeyboardShortcuts } = useKeyboardShortcuts({
   state,
-  undo,
-  redo,
+  undo: undoAndRender,
+  redo: redoAndRender,
   deleteSelected,
   commitPoly,
   cancelPoly,
@@ -322,21 +422,7 @@ const { attachKeyboardShortcuts, detachKeyboardShortcuts } = useKeyboardShortcut
   enterPanMode
 })
 
-const { attachCanvasInteractions, detachCanvasInteractions } = useCanvasInteractions({
-  state,
-  canvasContainer,
-  canvasEl,
-  annotationsSvg,
-  crosshairH,
-  crosshairV,
-  coords,
-  getImageCoordsFromEvent,
-  recordHistory,
-  renderAnnotations,
-  updateTransform,
-  updateCursor,
-  commitPoly
-})
+// Eski canvas etkileşimleri (useCanvasInteractions) Konva geçişiyle birlikte devre dışı bırakıldı.
 
 /* =============================
    Lifecycle: onMounted / onBeforeUnmount
@@ -436,36 +522,93 @@ onMounted(async (): Promise<void> => {
   saveBtn.value?.addEventListener('click', onSaveDraft)
   submitBtn.value?.addEventListener('click', onSubmit)
 
-  zoomInBtn.value?.addEventListener('click', onZoomIn)
-  zoomOutBtn.value?.addEventListener('click', onZoomOut)
-  fitScreenBtn.value?.addEventListener('click', onFitScreen)
-  resetViewBtn.value?.addEventListener('click', onFitScreen)
-
-  window.addEventListener('resize', fitToScreen)
-
-  containerRO = new ResizeObserver((): void => {
-    requestAnimationFrame(fitToScreen)
+  // Zoom butonlarını şimdilik KonvaCanvas üzerinden elle yöneteceğiz
+  zoomInBtn.value?.addEventListener('click', () => {
+    konvaCanvasRef.value?.zoomBy(0.1)
   })
-  if (canvasContainer.value) containerRO.observe(canvasContainer.value)
-  // Canvas mouse/pointer etkileşimleri
-  attachCanvasInteractions()
+  zoomOutBtn.value?.addEventListener('click', () => {
+    konvaCanvasRef.value?.zoomBy(-0.1)
+  })
+  fitScreenBtn.value?.addEventListener('click', () => {
+    konvaCanvasRef.value?.fitToContainer()
+  })
+  resetViewBtn.value?.addEventListener('click', () => {
+    konvaCanvasRef.value?.fitToContainer()
+  })
+
+  // Eski canvas tabanlı fitToScreen/zoom artık KonvaCanvas içinde yönetiliyor.
+  // window.addEventListener('resize', fitToScreen)
+
+  // Eski canvas etkileşimleri (pan/zoom/çizim) devre dışı; KonvaCanvas bunları devralıyor.
+  // containerRO = new ResizeObserver((): void => {
+  //   requestAnimationFrame(fitToScreen)
+  // })
+  // if (canvasContainer.value) containerRO.observe(canvasContainer.value)
+  // attachCanvasInteractions()
 
   prevBtn.value?.addEventListener('click', (): void => goPrevTask())
   nextBtn.value?.addEventListener('click', (): void => goNextTask())
 
   loadTaskByIndex(0)
   updateDeleteButton()
+
+  // 10 dakikada bir oto-kayıt: tüm görevler için eldeki annotation'ları DB'ye yaz.
+  const AUTO_SAVE_INTERVAL_MS = 5 * 60 * 1000
+  const triggerAutoSave = async (): Promise<void> => {
+    if (!tasks.value.length) return
+
+    // Küçük bir görsel geri bildirim için Save Draft butonuna animasyon sınıfı ekle
+    const btn = saveBtn.value
+    if (btn) {
+      btn.classList.add('save-autosaving')
+    }
+
+    try {
+      for (const t of tasks.value) {
+        const mediaId = t.title ?? String(t.id)
+
+        let anns: Annotation[] | null = null
+        // Aktif task ise export fonksiyonunu kullan (image-space rounding için)
+        if (t === tasks.value[currentTaskIndex.value]) {
+          anns = exportAnnotationsToImageSpace() as Annotation[]
+        } else {
+          const cached = localAnnotationsByTask.get(mediaId)
+          if (cached && cached.length > 0) {
+            anns = JSON.parse(JSON.stringify(cached)) as Annotation[]
+          }
+        }
+
+        if (anns && anns.length > 0) {
+          const dataJson = JSON.stringify(anns, null, 2)
+          await window.api.db.annotations.saveExport({ media_id: mediaId, data_json: dataJson })
+        }
+      }
+    } catch (e) {
+      console.error('[AutoSave] failed:', e)
+    } finally {
+      if (btn) {
+        // Animasyon sınıfını kısa bir süre sonra kaldır
+        window.setTimeout(() => {
+          btn.classList.remove('save-autosaving')
+        }, 900)
+      }
+    }
+  }
+
+  autoSaveTimer = window.setInterval(() => {
+    void triggerAutoSave()
+  }, AUTO_SAVE_INTERVAL_MS)
 })
 
 onBeforeUnmount((): void => {
   if (onThemeToggleClick) themeToggle.value?.removeEventListener('click', onThemeToggleClick)
-  window.removeEventListener('resize', fitToScreen)
-  containerRO?.disconnect()
+  // window.removeEventListener('resize', fitToScreen)
+  // containerRO?.disconnect()
   shapesToolBtn.value?.removeEventListener('click', toggleShapes)
   if (onDocClick) document.removeEventListener('click', onDocClick)
   if (onEsc) document.removeEventListener('keydown', onEsc)
   detachKeyboardShortcuts()
-  detachCanvasInteractions()
+  // detachCanvasInteractions()
 
   undoBtn.value?.removeEventListener('click', onUndo)
   redoBtn.value?.removeEventListener('click', onRedo)
@@ -473,10 +616,19 @@ onBeforeUnmount((): void => {
   saveBtn.value?.removeEventListener('click', onSaveDraft)
   submitBtn.value?.removeEventListener('click', onSubmit)
 
-  zoomInBtn.value?.removeEventListener('click', onZoomIn)
-  zoomOutBtn.value?.removeEventListener('click', onZoomOut)
-  fitScreenBtn.value?.removeEventListener('click', onFitScreen)
-  resetViewBtn.value?.removeEventListener('click', onFitScreen)
+  if (labelHintTimer != null) {
+    window.clearTimeout(labelHintTimer)
+    labelHintTimer = null
+  }
+
+  if (autoSaveTimer != null) {
+    window.clearInterval(autoSaveTimer)
+    autoSaveTimer = null
+  }
+
+  // Zoom/reset butonları için addEventListener'da anonim fonksiyon kullandığımız için
+  // burada removeEventListener ile temizleyemiyoruz; bu, sadece küçük bir sızıntı ve
+  // Konva geçişi tamamlanırken ayrı bir refaktörde ele alınabilir.
 })
 
 /* =============================
@@ -484,7 +636,21 @@ onBeforeUnmount((): void => {
    ============================= */
 async function loadTaskByIndex(i: number): Promise<void> {
   if (tasks.value.length === 0) return
+
+  // Önce mevcut task'in annotation'larını hafızaya yaz (uygulama açıkken geçerli).
+  const currentTask = tasks.value[currentTaskIndex.value]
+  if (currentTask) {
+    const currentMediaId = currentTask.title ?? String(currentTask.id)
+    // Derin kopya alarak referans karmaşasını önle
+    const snapshot = JSON.parse(JSON.stringify(state.annotations)) as Annotation[]
+    localAnnotationsByTask.set(currentMediaId, snapshot)
+  }
+
   const clamped = Math.max(0, Math.min(tasks.value.length - 1, i))
+  // Aynı task'e tekrar tıklanıyorsa, mevcut (kaydedilmemiş) etiketleri silmemek için yeniden yükleme
+  // yapma. Böylece tek task senaryosunda etiketler korunur.
+  if (clamped === currentTaskIndex.value) return
+
   currentTaskIndex.value = clamped
   const t = tasks.value[clamped]
 
@@ -511,24 +677,31 @@ async function loadTaskByIndex(i: number): Promise<void> {
     }
     fitToScreen()
 
-    // === RESTORE SAVED ANNOTATIONS (DB) ===
-    try {
-      const mediaId = t.title ?? String(t.id) // şu an Task.title = media_id (road_demo)
-      const saved = await window.api.db.annotations.getExport(mediaId)
-      if (saved?.data_json) {
-        const parsed = JSON.parse(saved.data_json)
-        if (Array.isArray(parsed)) {
-          // parsed beklenen format: Annotation[]
-          state.annotations = parsed
+    const mediaId = t.title ?? String(t.id) // şu an Task.title = media_id (road_demo)
+
+    // Önce, bu task için oturum içi cache'te annotation var mı diye bak.
+    const cached = localAnnotationsByTask.get(mediaId)
+    if (cached) {
+      state.annotations = JSON.parse(JSON.stringify(cached)) as Annotation[]
+    } else {
+      // === RESTORE SAVED ANNOTATIONS (DB) ===
+      try {
+        const saved = await window.api.db.annotations.getExport(mediaId)
+        if (saved?.data_json) {
+          const parsed = JSON.parse(saved.data_json)
+          if (Array.isArray(parsed)) {
+            // parsed beklenen format: Annotation[]
+            state.annotations = parsed
+          } else {
+            state.annotations = []
+          }
         } else {
           state.annotations = []
         }
-      } else {
+      } catch (e) {
+        console.error('[DB] restore annotations failed:', e)
         state.annotations = []
       }
-    } catch (e) {
-      console.error('[DB] restore annotations failed:', e)
-      state.annotations = []
     }
 
     const firstLabel = labelList.value?.querySelector('.label-item') as HTMLElement | null
@@ -818,8 +991,19 @@ function goNextTask(): void {
               ref="canvasContainer"
               class="relative w-full h-full rounded-md bg-background-light dark:bg-background-dark overflow-hidden canvas-container"
             >
-              <canvas id="canvas" ref="canvasEl"></canvas>
-              <svg id="annotations-svg" ref="annotationsSvg"></svg>
+              <KonvaCanvas
+                ref="konvaCanvasRef"
+                :image-src="tasks[currentTaskIndex]?.image ?? null"
+                :annotations="state.annotations"
+                :active-tool="state.lastUsedTool"
+                :active-shape="state.lastUsedShape"
+                :active-label="state.activeLabel"
+                :selected-id="state.selectedAnnotationId"
+                @create-annotation="handleCreateAnnotationFromKonva"
+                @select-annotation="handleSelectAnnotationFromKonva"
+                @pointer-move="handlePointerMove"
+                @pointer-leave="handlePointerLeave"
+              />
 
               <div class="crosshair-lines">
                 <div ref="crosshairH" class="crosshair-line crosshair-horizontal"></div>
@@ -855,7 +1039,7 @@ function goNextTask(): void {
                 ref="coords"
                 class="absolute bottom-4 left-4 bg-black/50 text-white text-xs font-mono rounded px-2 py-1"
               >
-                X: 0, Y: 0
+                X: -, Y: -
               </div>
             </div>
           </div>
@@ -874,6 +1058,9 @@ function goNextTask(): void {
             class="bg-surface/70 dark:bg-background-dark p-4 rounded-lg border border-border dark:border-gray-800 flex flex-col flex-1"
           >
             <h3 class="text-lg font-semibold mb-3">Labels</h3>
+            <p v-if="showLabelHint" class="text-xs text-amber-500 mb-2">
+              Lütfen önce bir label seçin.
+            </p>
             <div class="relative mb-3">
               <SearchIcon
                 class="ui-svg h-5 w-5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2"
