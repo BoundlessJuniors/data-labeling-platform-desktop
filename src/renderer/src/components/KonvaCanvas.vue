@@ -225,23 +225,41 @@ const toWorldCoords = (stage: Konva.Stage): { x: number; y: number } | null => {
   }
 }
 
+const getImagePoint = (stage: Konva.Stage): { x: number; y: number } | null => {
+  if (!imageObj.value) return null
+  const world = toWorldCoords(stage)
+  if (!world) return null
+
+  const iw = imageObj.value.naturalWidth
+  const ih = imageObj.value.naturalHeight
+
+  if (world.x < 0 || world.y < 0 || world.x > iw || world.y > ih) return null
+
+  return world
+}
+
+const getClampedImagePoint = (stage: Konva.Stage): { x: number; y: number } | null => {
+  if (!imageObj.value) return null
+  const world = toWorldCoords(stage)
+  if (!world) return null
+
+  const iw = imageObj.value.naturalWidth
+  const ih = imageObj.value.naturalHeight
+
+  const x = Math.min(Math.max(world.x, 0), iw)
+  const y = Math.min(Math.max(world.y, 0), ih)
+
+  return { x, y }
+}
+
 const emitPointerMove = (stage: Konva.Stage): void => {
   const pointer = stage.getPointerPosition()
   if (!pointer) return
 
-  const world = toWorldCoords(stage)
+  const imgPoint = getImagePoint(stage)
 
-  let imgX: number | null = null
-  let imgY: number | null = null
-
-  if (world && imageObj.value) {
-    const iw = imageObj.value.naturalWidth
-    const ih = imageObj.value.naturalHeight
-    if (world.x >= 0 && world.y >= 0 && world.x <= iw && world.y <= ih) {
-      imgX = world.x
-      imgY = world.y
-    }
-  }
+  const imgX: number | null = imgPoint ? imgPoint.x : null
+  const imgY: number | null = imgPoint ? imgPoint.y : null
 
   emit('pointer-move', {
     screenX: pointer.x,
@@ -259,12 +277,8 @@ const handleMouseDown = (e: KonvaEventObject<MouseEvent>): void => {
   if (!evt) return
 
   // Sağ tık ile pan: kullanıcı shapes (etiketleme) modundayken bile sahneyi
-  // rahatça taşıyabilsin. Aktif bir çizim varsa sağ tıkı yok say.
+  // rahatça taşıyabilsin. BBox dahil tüm şekillerde sağ tık pan serbest.
   if (evt.button === 2) {
-    // BBox drag'i sırasında sağ tık pan, bbox'u bozabileceği için engelleniyor.
-    // Polygon / polyline için ise sağ tık pan serbest.
-    if (isDrawing.value && drawingShape.value === 'bbox') return
-
     evt.preventDefault()
 
     const pointer = stage.getPointerPosition()
@@ -281,8 +295,8 @@ const handleMouseDown = (e: KonvaEventObject<MouseEvent>): void => {
   // Sol tık dışındaki her şeyi yok say
   if (evt.button !== 0) return
 
-  const world = toWorldCoords(stage)
-  if (!world) return
+  const imgPoint = getImagePoint(stage)
+  if (!imgPoint) return
 
   // Çizim modu: shapes + bbox / polygon / polyline / keypoint / circle
   if (props.activeTool === 'shapes') {
@@ -290,8 +304,8 @@ const handleMouseDown = (e: KonvaEventObject<MouseEvent>): void => {
       // BBox çizimi (drag)
       isDrawing.value = true
       drawingShape.value = 'bbox'
-      drawingStart.value = { ...world }
-      tempBBox.value = { x: world.x, y: world.y, width: 0, height: 0 }
+      drawingStart.value = { ...imgPoint }
+      tempBBox.value = { x: imgPoint.x, y: imgPoint.y, width: 0, height: 0 }
       isPanning.value = false
       panStart.value = null
       return
@@ -303,8 +317,8 @@ const handleMouseDown = (e: KonvaEventObject<MouseEvent>): void => {
         id: Date.now(),
         type: 'keypoint',
         label: props.activeLabel,
-        x: world.x,
-        y: world.y
+        x: imgPoint.x,
+        y: imgPoint.y
       }
       emit('create-annotation', kp)
       return
@@ -314,8 +328,8 @@ const handleMouseDown = (e: KonvaEventObject<MouseEvent>): void => {
       // Daire çizimi (merkez + drag ile yarıçap)
       isDrawing.value = true
       drawingShape.value = 'circle'
-      drawingStart.value = { ...world }
-      tempCircle.value = { cx: world.x, cy: world.y, r: 0 }
+      drawingStart.value = { ...imgPoint }
+      tempCircle.value = { cx: imgPoint.x, cy: imgPoint.y, r: 0 }
       isPanning.value = false
       panStart.value = null
       return
@@ -329,10 +343,10 @@ const handleMouseDown = (e: KonvaEventObject<MouseEvent>): void => {
         // İlk nokta
         isDrawing.value = true
         drawingShape.value = shape
-        polyPoints.value = [{ x: world.x, y: world.y }]
+        polyPoints.value = [{ x: imgPoint.x, y: imgPoint.y }]
       } else {
         // Sonraki noktalar
-        polyPoints.value = [...polyPoints.value, { x: world.x, y: world.y }]
+        polyPoints.value = [...polyPoints.value, { x: imgPoint.x, y: imgPoint.y }]
       }
 
       return
@@ -368,21 +382,21 @@ const handleMouseMove = (e: KonvaEventObject<MouseEvent>): void => {
   }
 
   if (isDrawing.value && drawingShape.value === 'bbox' && drawingStart.value) {
-    const world = toWorldCoords(stage)
-    if (!world) return
-    const x = Math.min(world.x, drawingStart.value.x)
-    const y = Math.min(world.y, drawingStart.value.y)
-    const width = Math.abs(world.x - drawingStart.value.x)
-    const height = Math.abs(world.y - drawingStart.value.y)
+    const imgPoint = getClampedImagePoint(stage)
+    if (!imgPoint) return
+    const x = Math.min(imgPoint.x, drawingStart.value.x)
+    const y = Math.min(imgPoint.y, drawingStart.value.y)
+    const width = Math.abs(imgPoint.x - drawingStart.value.x)
+    const height = Math.abs(imgPoint.y - drawingStart.value.y)
     tempBBox.value = { x, y, width, height }
     return
   }
 
   if (isDrawing.value && drawingShape.value === 'circle' && drawingStart.value) {
-    const world = toWorldCoords(stage)
-    if (!world) return
-    const dx = world.x - drawingStart.value.x
-    const dy = world.y - drawingStart.value.y
+    const imgPoint = getClampedImagePoint(stage)
+    if (!imgPoint) return
+    const dx = imgPoint.x - drawingStart.value.x
+    const dy = imgPoint.y - drawingStart.value.y
     const r = Math.sqrt(dx * dx + dy * dy)
     tempCircle.value = { cx: drawingStart.value.x, cy: drawingStart.value.y, r }
     return
@@ -393,9 +407,9 @@ const handleMouseMove = (e: KonvaEventObject<MouseEvent>): void => {
     (drawingShape.value === 'polygon' || drawingShape.value === 'polyline') &&
     polyPoints.value.length >= 1
   ) {
-    const world = toWorldCoords(stage)
-    if (!world) return
-    tempPolyPoint.value = { x: world.x, y: world.y }
+    const imgPoint = getClampedImagePoint(stage)
+    if (!imgPoint) return
+    tempPolyPoint.value = { x: imgPoint.x, y: imgPoint.y }
     return
   }
 
