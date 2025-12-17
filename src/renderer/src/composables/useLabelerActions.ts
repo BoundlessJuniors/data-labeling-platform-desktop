@@ -14,8 +14,6 @@ export interface UseLabelerActionsOptions {
   deleteSelected: VoidFn
 
   exportAnnotationsToImageSpace: () => unknown
-
-  zoom: (delta: number, cx: number, cy: number) => void
   fitToScreen: VoidFn
 }
 
@@ -25,8 +23,6 @@ export interface UseLabelerActionsReturn {
   onDelete: VoidFn
   onSaveDraft: VoidFn
   onSubmit: VoidFn
-  onZoomIn: VoidFn
-  onZoomOut: VoidFn
   onFitScreen: VoidFn
 }
 
@@ -76,20 +72,6 @@ export function useLabelerActions(opts: UseLabelerActionsOptions): UseLabelerAct
     })()
   }
 
-  const onZoomIn = (): void => {
-    const el = opts.canvasEl.value
-    if (!el) return
-    const r = el.getBoundingClientRect()
-    opts.zoom(0.1, r.left + r.width / 2, r.top + r.height / 2)
-  }
-
-  const onZoomOut = (): void => {
-    const el = opts.canvasEl.value
-    if (!el) return
-    const r = el.getBoundingClientRect()
-    opts.zoom(-0.1, r.left + r.width / 2, r.top + r.height / 2)
-  }
-
   const onFitScreen = (): void => {
     opts.fitToScreen()
   }
@@ -100,8 +82,6 @@ export function useLabelerActions(opts: UseLabelerActionsOptions): UseLabelerAct
     onDelete,
     onSaveDraft,
     onSubmit,
-    onZoomIn,
-    onZoomOut,
     onFitScreen
   }
 }

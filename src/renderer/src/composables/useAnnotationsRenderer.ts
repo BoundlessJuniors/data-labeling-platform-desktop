@@ -49,9 +49,11 @@ export function useAnnotationsRenderer(
   function renderAnnotations(): void {
     const svgEl = refs.annotationsSvg.value
     const listEl = refs.annotationList.value
-    if (!svgEl || !listEl) return
+    if (!listEl) return
 
-    svgEl.innerHTML = ''
+    if (svgEl) {
+      svgEl.innerHTML = ''
+    }
     listEl.innerHTML = ''
 
     console.log('RENDER ANNS, count =', state.annotations.length)
@@ -60,7 +62,7 @@ export function useAnnotationsRenderer(
       const style = getAnnotationSvgStyle(ann.type)
 
       // === SVG Şekilleri ===
-      if (ann.type === 'bbox') {
+      if (ann.type === 'bbox' && svgEl) {
         console.log('ANN:', ann)
         const el = document.createElementNS(SVG_NS, 'rect')
         el.setAttribute('x', String(ann.x))
@@ -76,7 +78,7 @@ export function useAnnotationsRenderer(
 
         if (ann.id === state.selectedAnnotationId) el.classList.add('selected')
         svgEl.appendChild(el)
-      } else if (ann.type === 'polygon') {
+      } else if (ann.type === 'polygon' && svgEl) {
         const el = document.createElementNS(SVG_NS, 'polygon')
         el.setAttribute('points', ann.points.map((p) => `${p.x},${p.y}`).join(' '))
         el.setAttribute('fill', style.fill)
@@ -88,7 +90,7 @@ export function useAnnotationsRenderer(
 
         if (ann.id === state.selectedAnnotationId) el.classList.add('selected')
         svgEl.appendChild(el)
-      } else if (ann.type === 'polyline') {
+      } else if (ann.type === 'polyline' && svgEl) {
         const el = document.createElementNS(SVG_NS, 'polyline')
         el.setAttribute('points', ann.points.map((p) => `${p.x},${p.y}`).join(' '))
         el.setAttribute('fill', 'none')
@@ -98,7 +100,7 @@ export function useAnnotationsRenderer(
         el.classList.add('annotation-shape')
         if (ann.id === state.selectedAnnotationId) el.classList.add('selected')
         svgEl.appendChild(el)
-      } else if (ann.type === 'keypoint') {
+      } else if (ann.type === 'keypoint' && svgEl) {
         const el = document.createElementNS(SVG_NS, 'circle')
         el.setAttribute('cx', String(ann.x))
         el.setAttribute('cy', String(ann.y))
@@ -111,7 +113,7 @@ export function useAnnotationsRenderer(
         el.classList.add('annotation-shape')
         if (ann.id === state.selectedAnnotationId) el.classList.add('selected')
         svgEl.appendChild(el)
-      } else if (ann.type === 'circle') {
+      } else if (ann.type === 'circle' && svgEl) {
         const el = document.createElementNS(SVG_NS, 'circle')
         el.setAttribute('cx', String(ann.cx))
         el.setAttribute('cy', String(ann.cy))
