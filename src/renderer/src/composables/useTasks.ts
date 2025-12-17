@@ -37,10 +37,11 @@ export function useTasks(initial: Task[]): {
     const rows = await window.api.db.media.listByDataset(datasetId)
     tasks.value = rows.map((r, idx) => ({
       id: idx + 1,
-      title: r.id, // şimdilik başlık olarak id gösterelim
+      title: `Task ${idx + 1}`,
       mediaId: r.id, // asıl DB kimliği
       image: r.local_path,
-      status: r.status === 'completed' ? 'completed' : 'in_progress'
+      status: r.status === 'completed' ? 'completed' : 'in_progress',
+      timeSeconds: typeof r.annotation_seconds === 'number' ? r.annotation_seconds : 0
     }))
     currentTaskIndex.value = 0
   }

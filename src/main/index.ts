@@ -23,13 +23,15 @@ protocol.registerSchemesAsPrivileged([
   }
 ])
 function createWindow(): void {
-  // Create the browser window.
+  // Create the browser window with a custom (frameless) title bar so we can draw
+  // our own top bar with window controls like a code editor.
   const mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
     minWidth: 1024,
     minHeight: 600,
     show: false,
+    frame: false,
     autoHideMenuBar: true,
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
@@ -93,6 +95,27 @@ app.whenReady().then(() => {
 
   // IPC test
   ipcMain.on('ping', () => console.log('pong'))
+  // Window controls for custom title bar
+  ipcMain.handle('window:minimize', () => {
+    const win = BrowserWindow.getFocusedWindow()
+    if (win) win.minimize()
+  })
+
+  ipcMain.handle('window:toggleMaximize', () => {
+    const win = BrowserWindow.getFocusedWindow()
+    if (!win) return false
+    if (win.isMaximized()) {
+      win.unmaximize()
+      return false
+    }
+    win.maximize()
+    return true
+  })
+
+  ipcMain.handle('window:close', () => {
+    const win = BrowserWindow.getFocusedWindow()
+    if (win) win.close()
+  })
   initDb()
   registerDbIpc()
 

@@ -53,4 +53,6 @@ export type Task = {
   status: TaskStatus
   originalWidth?: number
   originalHeight?: number
+  // DB'den gelen, bu media için daha önce harcanmış toplam süre (saniye)
+  timeSeconds?: number
 }

@@ -19,6 +19,9 @@ type KeyboardDeps = {
   cancelPoly: () => void
   clearSelection: () => void
   enterPanMode: () => void
+  saveDraft: () => void
+  goPrevTask: () => void
+  goNextTask: () => void
 }
 
 export function useKeyboardShortcuts(deps: KeyboardDeps): {
@@ -38,7 +41,10 @@ export function useKeyboardShortcuts(deps: KeyboardDeps): {
       commitPoly,
       cancelPoly,
       clearSelection,
-      enterPanMode
+      enterPanMode,
+      saveDraft,
+      goPrevTask,
+      goNextTask
     } = deps
 
     handler = (e: KeyboardEvent): void => {
@@ -67,6 +73,27 @@ export function useKeyboardShortcuts(deps: KeyboardDeps): {
         e.preventDefault()
         redo()
         return
+      }
+
+      // Save Draft (Ctrl+S)
+      if (e.ctrlKey && !e.shiftKey && key === 's') {
+        e.preventDefault()
+        saveDraft()
+        return
+      }
+
+      // Task navigasyonu: sağ/sol ok tuşları
+      if (!e.ctrlKey && !e.shiftKey && !e.altKey) {
+        if (key === 'arrowright') {
+          e.preventDefault()
+          goNextTask()
+          return
+        }
+        if (key === 'arrowleft') {
+          e.preventDefault()
+          goPrevTask()
+          return
+        }
       }
 
       // Delete seçili annotation

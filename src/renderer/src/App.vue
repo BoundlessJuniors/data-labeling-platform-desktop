@@ -5,6 +5,7 @@ import LabelerView from './views/LabelerView.vue'
 type DatasetRow = { id: string; name: string; created_at: number; folder_path?: string | null }
 
 const datasets = ref<DatasetRow[]>([])
+// Son seçilen dataset'i localStorage'dan geri yükle
 const selectedDatasetId = ref<string | null>(localStorage.getItem('selectedDatasetId'))
 
 async function refreshDatasets(): Promise<void> {
@@ -69,9 +70,54 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="h-screen">
-    <!-- Dataset seçilmediyse seçim ekranı -->
-    <div v-if="!selectedDatasetId" class="h-full flex items-center justify-center p-6">
+  <div class="h-screen flex flex-col overflow-hidden">
+    <!-- Custom title bar (frameless window) -->
+    <header
+      class="flex items-center justify-between px-3 h-8 text-xs bg-slate-900 text-slate-100 select-none"
+      :class="'titlebar-drag'"
+    >
+      <div class="flex items-center gap-2 no-drag">
+        <div
+          class="h-5 w-5 rounded bg-primary/10 flex items-center justify-center text-primary font-bold text-[10px]"
+        >
+          LG
+        </div>
+        <span class="font-semibold tracking-tight">LabelGun</span>
+
+        <button
+          class="ml-3 px-2 py-1 rounded hover:bg-slate-800 text-[11px] border border-slate-700/70"
+          @click="clearSelection"
+        >
+          Datasets
+        </button>
+      </div>
+
+      <div class="flex items-center gap-1 no-drag">
+        <button
+          class="w-9 h-8 flex items-center justify-center hover:bg-slate-800"
+          @click="window.api.window.minimize()"
+        >
+          <span class="text-[10px] leading-none translate-y-[1px]">&#8212;</span>
+        </button>
+        <button
+          class="w-9 h-8 flex items-center justify-center hover:bg-slate-800"
+          @click="window.api.window.toggleMaximize()"
+        >
+          <span class="text-[9px] leading-none"></span>
+        </button>
+        <button
+          class="w-9 h-8 flex items-center justify-center hover:bg-red-600 hover:text-white"
+          @click="window.api.window.close()"
+        >
+          <span class="text-[10px] leading-none">&#10005;</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Ana içerik -->
+    <main class="flex-1 min-h-0">
+      <!-- Dataset seçilmediyse seçim ekranı -->
+      <div v-if="!selectedDatasetId" class="h-full flex items-center justify-center p-6 overflow-auto">
       <div class="w-full max-w-xl rounded-lg border border-gray-200 p-6 bg-white">
         <h1 class="text-2xl font-bold mb-2">Dataset Seçimi</h1>
         <p class="text-sm text-gray-600 mb-4">
@@ -112,11 +158,22 @@ onMounted(async () => {
           </li>
         </ul>
       </div>
-    </div>
+      </div>
 
-    <!-- Dataset seçildiyse Labeler -->
-    <div v-else class="h-full">
-      <LabelerView :dataset-id="selectedDatasetId" @back-to-datasets="clearSelection" />
-    </div>
+      <!-- Dataset seçildiyse Labeler -->
+      <div v-else class="h-full overflow-hidden">
+        <LabelerView :dataset-id="selectedDatasetId" @back-to-datasets="clearSelection" />
+      </div>
+    </main>
   </div>
 </template>
+
+<style scoped>
+.titlebar-drag {
+  -webkit-app-region: drag;
+}
+
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+</style>

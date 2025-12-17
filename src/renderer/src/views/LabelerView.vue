@@ -89,9 +89,22 @@ const deleteBtn = ref<HTMLButtonElement | null>(null)
 const showLabelHint = ref(false)
 let labelHintTimer: number | null = null
 
+// Global ve task bazlı zamanlayıcılar (saniye cinsinden)
+const globalSeconds = ref(0)
+const taskSecondsById = ref<Record<string, number>>({})
+
 /* =============================
-   İç durum
-   ============================= */
+  İç durum
+  ============================= */
+
+// Props & emit (dataset kimliği ve geri dönüş olayı)
+const props = defineProps<{ datasetId: string }>()
+const emit = defineEmits<{ (e: 'back-to-datasets'): void }>()
+
+// Başlangıçta boş; dataset seçilince DB'den doldurulacak
+const initialTasks: Task[] = []
+// Görevler (task listesi) ve aktif indeks
+const { tasks, currentTaskIndex, initFromDb } = useTasks(initialTasks)
 
 // Reactif state
 const { state } = useLabelerState()
@@ -126,13 +139,6 @@ const {
   recordHistory
 )
 
-const props = defineProps<{ datasetId: string }>()
-const emit = defineEmits<{ (e: 'back-to-datasets'): void }>()
-// Başlangıçta boş; dataset seçilince DB’den doldurulacak
-const initialTasks: Task[] = []
-// Görevler (task listesi) ve aktif indeks
-const { tasks, currentTaskIndex, initFromDb } = useTasks(initialTasks)
-
 const undoAndRender = (): void => {
   undo()
   renderAnnotations()
@@ -141,6 +147,29 @@ const undoAndRender = (): void => {
 const redoAndRender = (): void => {
   redo()
   renderAnnotations()
+}
+
+function getTaskMediaId(t: Task): string {
+  return t.mediaId ?? t.title ?? String(t.id)
+}
+
+function getTaskSeconds(t: Task): number {
+  const id = getTaskMediaId(t)
+  return taskSecondsById.value[id] ?? 0
+}
+
+function getCurrentTaskSeconds(): number {
+  const t = tasks.value[currentTaskIndex.value]
+  return t ? getTaskSeconds(t) : 0
+}
+
+function formatTime(total: number): string {
+  const sec = Math.max(0, Math.floor(total))
+  const h = Math.floor(sec / 3600)
+  const m = Math.floor((sec % 3600) / 60)
+  const s = sec % 60
+  const pad = (n: number): string => (n < 10 ? `0${n}` : String(n))
+  return `${pad(h)}:${pad(m)}:${pad(s)}`
 }
 
 const { onUndo, onRedo, onDelete, onSaveDraft, onSubmit } = useLabelerActions({
@@ -154,7 +183,9 @@ const { onUndo, onRedo, onDelete, onSaveDraft, onSubmit } = useLabelerActions({
   fitToScreen
 })
 
+const autoSaveProgress = ref(0)
 let autoSaveTimer: number | null = null
+let timerInterval: number | null = null
 let onThemeToggleClick: (() => void) | null = null
 
 /* =============================
@@ -428,6 +459,27 @@ const commitPoly = (): void => {
   updateCursor()
 }
 
+const saveDraftAndReset = (): void => {
+  onSaveDraft()
+  // Manuel kayıttan sonra otomatik kaydetme sayacını sıfırla ve süreleri kaydet
+  autoSaveProgress.value = 0
+  void flushTimeToDb()
+}
+
+async function flushTimeToDb(): Promise<void> {
+  if (!tasks.value.length) return
+
+  try {
+    for (const t of tasks.value) {
+      const mediaId = getTaskMediaId(t)
+      const secs = taskSecondsById.value[mediaId] ?? 0
+      await window.api.db.media.setTime({ media_id: mediaId, seconds: secs })
+    }
+  } catch (e) {
+    console.error('[DB] flush time failed:', e)
+  }
+}
+
 const { attachKeyboardShortcuts, detachKeyboardShortcuts } = useKeyboardShortcuts({
   state,
   undo: undoAndRender,
@@ -436,7 +488,10 @@ const { attachKeyboardShortcuts, detachKeyboardShortcuts } = useKeyboardShortcut
   commitPoly,
   cancelPoly,
   clearSelection,
-  enterPanMode
+  enterPanMode,
+  saveDraft: saveDraftAndReset,
+  goPrevTask,
+  goNextTask
 })
 
 // Eski canvas etkileşimleri (useCanvasInteractions) Konva geçişiyle birlikte devre dışı bırakıldı.
@@ -527,7 +582,7 @@ onMounted(async (): Promise<void> => {
   undoBtn.value?.addEventListener('click', onUndo)
   redoBtn.value?.addEventListener('click', onRedo)
   deleteBtn.value?.addEventListener('click', onDelete)
-  saveBtn.value?.addEventListener('click', onSaveDraft)
+  saveBtn.value?.addEventListener('click', saveDraftAndReset)
   submitBtn.value?.addEventListener('click', onSubmit)
 
   // Zoom butonlarını şimdilik KonvaCanvas üzerinden elle yöneteceğiz
@@ -562,8 +617,23 @@ onMounted(async (): Promise<void> => {
   }
   updateDeleteButton()
 
-  // 10 dakikada bir oto-kayıt: tüm görevler için eldeki annotation'ları DB'ye yaz.
-  const AUTO_SAVE_INTERVAL_MS = 5 * 60 * 1000
+  // DB'den gelen sürelerle zamanlayıcıları başlat
+  const byId: Record<string, number> = {}
+  let totalSeconds = 0
+  for (const t of tasks.value) {
+    const id = getTaskMediaId(t)
+    const secs = t.timeSeconds ?? 0
+    byId[id] = secs
+    totalSeconds += secs
+  }
+  taskSecondsById.value = byId
+  globalSeconds.value = totalSeconds
+
+  // 1 dakikalık döngüde, Save Draft butonu üzerinde saat yönünde ilerleyen bir
+  // progress halkası ve tam dolduğunda otomatik DB kaydı (oto-kayıt).
+  const AUTO_SAVE_INTERVAL_MS = 1 * 60 * 1000
+  const AUTO_SAVE_TICK_MS = 200
+
   const triggerAutoSave = async (): Promise<void> => {
     if (!tasks.value.length) return
 
@@ -575,7 +645,7 @@ onMounted(async (): Promise<void> => {
 
     try {
       for (const t of tasks.value) {
-        const mediaId = t.title ?? String(t.id)
+        const mediaId = t.mediaId ?? t.title ?? String(t.id)
 
         let anns: Annotation[] | null = null
         // Aktif task ise export fonksiyonunu kullan (image-space rounding için)
@@ -593,6 +663,9 @@ onMounted(async (): Promise<void> => {
           await window.api.db.annotations.saveExport({ media_id: mediaId, data_json: dataJson })
         }
       }
+
+        // Süreleri de periyodik olarak DB'ye yaz
+        await flushTimeToDb()
     } catch (e) {
       console.error('[AutoSave] failed:', e)
     } finally {
@@ -605,9 +678,36 @@ onMounted(async (): Promise<void> => {
     }
   }
 
+  let elapsed = 0
+  autoSaveProgress.value = 0
+
+  if (timerInterval == null) {
+    timerInterval = window.setInterval(() => {
+      if (!tasks.value.length) return
+      globalSeconds.value += 1
+
+      const current = tasks.value[currentTaskIndex.value]
+      if (!current) return
+
+      const mediaId = getTaskMediaId(current)
+      const prevTaskSeconds = taskSecondsById.value[mediaId] ?? 0
+      taskSecondsById.value = {
+        ...taskSecondsById.value,
+        [mediaId]: prevTaskSeconds + 1
+      }
+    }, 1000)
+  }
+
   autoSaveTimer = window.setInterval(() => {
-    void triggerAutoSave()
-  }, AUTO_SAVE_INTERVAL_MS)
+    elapsed += AUTO_SAVE_TICK_MS
+    if (elapsed >= AUTO_SAVE_INTERVAL_MS) {
+      elapsed = 0
+      autoSaveProgress.value = 0
+      void triggerAutoSave()
+    } else {
+      autoSaveProgress.value = elapsed / AUTO_SAVE_INTERVAL_MS
+    }
+  }, AUTO_SAVE_TICK_MS)
 })
 
 onBeforeUnmount((): void => {
@@ -623,7 +723,7 @@ onBeforeUnmount((): void => {
   undoBtn.value?.removeEventListener('click', onUndo)
   redoBtn.value?.removeEventListener('click', onRedo)
   deleteBtn.value?.removeEventListener('click', onDelete)
-  saveBtn.value?.removeEventListener('click', onSaveDraft)
+  saveBtn.value?.removeEventListener('click', saveDraftAndReset)
   submitBtn.value?.removeEventListener('click', onSubmit)
 
   if (labelHintTimer != null) {
@@ -635,6 +735,14 @@ onBeforeUnmount((): void => {
     window.clearInterval(autoSaveTimer)
     autoSaveTimer = null
   }
+
+  if (timerInterval != null) {
+    window.clearInterval(timerInterval)
+    timerInterval = null
+  }
+
+  // Çıkarken en son süreleri de sakla (fire-and-forget)
+  void flushTimeToDb()
 
   // Zoom/reset butonları için addEventListener'da anonim fonksiyon kullandığımız için
   // burada removeEventListener ile temizleyemiyoruz; bu, sadece küçük bir sızıntı ve
@@ -650,10 +758,13 @@ async function loadTaskByIndex(i: number): Promise<void> {
   // Önce mevcut task'in annotation'larını hafızaya yaz (uygulama açıkken geçerli).
   const currentTask = tasks.value[currentTaskIndex.value]
   if (currentTask) {
-    const currentMediaId = currentTask.title ?? String(currentTask.id)
-    // Derin kopya alarak referans karmaşasını önle
-    const snapshot = JSON.parse(JSON.stringify(state.annotations)) as Annotation[]
-    localAnnotationsByTask.set(currentMediaId, snapshot)
+    const currentMediaId = currentTask.mediaId ?? currentTask.title ?? String(currentTask.id)
+    // Eğer gerçekten RAM'de annotation varsa cache'e yaz; aksi halde DB'deki kaydı
+    // "boş" bir snapshot ile gölgeleme.
+    if (state.annotations.length > 0) {
+      const snapshot = JSON.parse(JSON.stringify(state.annotations)) as Annotation[]
+      localAnnotationsByTask.set(currentMediaId, snapshot)
+    }
   }
 
   const clamped = Math.max(0, Math.min(tasks.value.length - 1, i))
@@ -693,7 +804,8 @@ async function loadTaskByIndex(i: number): Promise<void> {
 
     // Önce, bu task için oturum içi cache'te annotation var mı diye bak.
     const cached = localAnnotationsByTask.get(mediaId)
-    if (cached) {
+    if (cached && cached.length > 0) {
+      // Sadece gerçekten dolu bir cache varsa onu kullan
       state.annotations = JSON.parse(JSON.stringify(cached)) as Annotation[]
     } else {
       // === RESTORE SAVED ANNOTATIONS (DB) ===
@@ -741,7 +853,7 @@ function goNextTask(): void {
 
 <template>
   <div
-    class="flex h-screen bg-background-light dark:bg-background-dark font-display text-text-primary dark:text-white"
+    class="flex h-full bg-background-light dark:bg-background-dark font-display text-text-primary dark:text-white"
   >
     <!-- Sidebar (kısa) -->
     <aside
@@ -754,11 +866,27 @@ function goNextTask(): void {
       <nav
         class="flex-1 px-4 space-y-2 overflow-y-auto bg-surface/60 dark:bg-background-dark/60 p-3"
       >
-        <h2
-          class="px-2 text-xs font-semibold text-text-secondary dark:text-gray-300 uppercase tracking-wider mb-2"
+        <div
+          class="px-2 mb-2 flex items-center justify-between text-xs font-semibold text-text-secondary dark:text-gray-300 uppercase tracking-wider"
         >
-          Tasks
-        </h2>
+          <h2>Tasks</h2>
+          <div class="flex items-center gap-1">
+            <button
+              ref="prevBtn"
+              class="p-1 rounded-md bg-slate-100 dark:bg-gray-800 hover:bg-slate-200"
+              title="Previous Task (←)"
+            >
+              <ArrowBackIcon class="ui-svg h-4 w-4 text-gray-700 dark:text-gray-200" />
+            </button>
+            <button
+              ref="nextBtn"
+              class="p-1 rounded-md bg-slate-100 dark:bg-gray-800 hover:bg-slate-200"
+              title="Next Task (→)"
+            >
+              <ArrowFwdIcon class="ui-svg h-4 w-4 text-gray-700 dark:text-gray-200" />
+            </button>
+          </div>
+        </div>
         <ul class="space-y-3">
           <li v-for="(t, idx) in tasks" :key="t.id">
             <a
@@ -798,6 +926,9 @@ function goNextTask(): void {
                     >Queued</span
                   >
                 </div>
+                <div class="mt-1 text-xs text-slate-500 dark:text-gray-400">
+                  Time: {{ formatTime(getTaskSeconds(t)) }}
+                </div>
               </div>
             </a>
           </li>
@@ -826,28 +957,7 @@ function goNextTask(): void {
         class="flex items-center justify-between p-5 border-b border-border dark:border-gray-800 bg-surface/70 dark:bg-background-dark"
       >
         <div class="flex items-center gap-4">
-          <button
-            class="rounded bg-slate-200 dark:bg-gray-700 px-3 py-2 text-sm"
-            @click="emit('back-to-datasets')"
-          >
-            Datasets
-          </button>
-
           <h2 ref="taskTitle" class="text-xl font-bold">Image Annotation - Task 1</h2>
-          <div class="flex items-center gap-2">
-            <button
-              ref="prevBtn"
-              class="p-1 rounded-md bg-slate-100 dark:bg-gray-800 hover:bg-slate-200"
-            >
-              <ArrowBackIcon class="ui-svg h-5 w-5 text-gray-700 dark:text-gray-200" />
-            </button>
-            <button
-              ref="nextBtn"
-              class="p-1 rounded-md bg-slate-100 dark:bg-gray-800 hover:bg-slate-200"
-            >
-              <ArrowFwdIcon class="ui-svg h-5 w-5 text-gray-700 dark:text-gray-200" />
-            </button>
-          </div>
         </div>
 
         <div class="flex items-center gap-4">
@@ -868,13 +978,14 @@ function goNextTask(): void {
             <div
               class="font-mono bg-slate-100 dark:bg-gray-800 rounded px-2 py-1 text-lg font-bold"
             >
-              01:23:45
+              {{ formatTime(globalSeconds) }}
             </div>
           </div>
 
           <button
             ref="saveBtn"
-            class="flex items-center gap-2 rounded bg-primary text-white hover:bg-primary-light py-2 px-4 text-sm font-semibold"
+            class="flex items-center gap-2 rounded bg-primary text-white hover:bg-primary-light py-2 px-4 text-sm font-semibold save-auto-btn"
+            :style="{ '--save-progress': String(autoSaveProgress) }"
           >
             <SaveIcon class="ui-svg h-5 w-5 text-white" />
             <span>Save Draft</span>

@@ -144,3 +144,22 @@ html.dark .annotation-tool.active {
   }
 }
 
+/* Save Draft butonu içinde dairesel (saat yönünde) fill efekti */
+.save-auto-btn {
+  position: relative;
+  overflow: hidden;
+}
+
+.save-auto-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  /* Saat 12 yönünden başlayıp saat yönünde dolan hafif overlay */
+  background: conic-gradient(
+    rgba(255, 255, 255, 0.22) 0deg calc(360deg * var(--save-progress, 0)),
+    transparent calc(360deg * var(--save-progress, 0)) 360deg
+  );
+  mix-blend-mode: soft-light;
+}
+

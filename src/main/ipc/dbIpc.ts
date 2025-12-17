@@ -100,10 +100,24 @@ export function registerDbIpc(): void {
     const db = getDb()
     return db
       .prepare(
-        'SELECT id, dataset_id, local_path, width, height, status FROM media_items WHERE dataset_id=? ORDER BY created_at ASC'
+        'SELECT id, dataset_id, local_path, width, height, status, annotation_seconds FROM media_items WHERE dataset_id=? ORDER BY created_at ASC'
       )
       .all(datasetId)
   })
+
+  ipcMain.handle(
+    'db:media:setTime',
+    (_evt, payload: { media_id: string; seconds: number }) => {
+      const db = getDb()
+      const now = Date.now()
+      db.prepare(`UPDATE media_items SET annotation_seconds=?, updated_at=? WHERE id=?`).run(
+        payload.seconds,
+        now,
+        payload.media_id
+      )
+      return { ok: true }
+    }
+  )
 
   ipcMain.handle('db:datasets:list', () => {
     const db = getDb()

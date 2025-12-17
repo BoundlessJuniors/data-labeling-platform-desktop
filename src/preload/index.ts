@@ -24,7 +24,9 @@ const api = {
       }) => ipcRenderer.invoke('db:media:upsert', payload),
       listByDataset: (datasetId: string) => ipcRenderer.invoke('db:media:listByDataset', datasetId),
       setStatus: (payload: { media_id: string; status: 'in_progress' | 'completed' }) =>
-        ipcRenderer.invoke('db:media:setStatus', payload)
+        ipcRenderer.invoke('db:media:setStatus', payload),
+      setTime: (payload: { media_id: string; seconds: number }) =>
+        ipcRenderer.invoke('db:media:setTime', payload)
     },
     annotations: {
       saveExport: (payload: { media_id: string; data_json: string }) =>
@@ -34,6 +36,11 @@ const api = {
   },
   dataset: {
     pickFolder: () => ipcRenderer.invoke('dataset:pickFolder')
+  },
+  window: {
+    minimize: () => ipcRenderer.invoke('window:minimize'),
+    toggleMaximize: () => ipcRenderer.invoke('window:toggleMaximize'),
+    close: () => ipcRenderer.invoke('window:close')
   }
 }
 
