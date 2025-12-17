@@ -2,7 +2,7 @@
 import { onMounted, ref } from 'vue'
 import LabelerView from './views/LabelerView.vue'
 
-type DatasetRow = { id: string; name: string; created_at: number }
+type DatasetRow = { id: string; name: string; created_at: number; folder_path?: string | null }
 
 const datasets = ref<DatasetRow[]>([])
 const selectedDatasetId = ref<string | null>(localStorage.getItem('selectedDatasetId'))
@@ -20,16 +20,23 @@ async function importDataset(): Promise<void> {
   const res = await window.api.dataset.pickFolder()
   if (!res) return
 
-  const datasetId = `local-${Date.now()}`
-  await window.api.db.datasets.create({
-    id: datasetId,
-    name: `Local Dataset (${res.images.length})`
-  })
+  const folderNorm = res.folder.replace(/\\/g, '/')
+  const existing = await window.api.db.datasets.getByFolder(folderNorm)
+  // Eğer klasör daha önce eklendiyse yeni dataset oluşturma; aynı dataset'e yeni görselleri sync et
+  const datasetId = existing?.id ?? `local-${Date.now()}`
+
+  if (!existing) {
+    await window.api.db.datasets.create({
+      id: datasetId,
+      name: `Local Dataset (${res.images.length})`,
+      folder_path: folderNorm
+    })
+  }
 
   for (const imgName of res.images) {
-    const fullPath = `${res.folder.replace(/\\/g, '/')}/${imgName}`
+    const fullPath = `${folderNorm}/${imgName}`
     await window.api.db.media.upsert({
-      id: imgName,
+      id: fullPath,
       dataset_id: datasetId,
       local_path: fullPath
     })
@@ -37,6 +44,18 @@ async function importDataset(): Promise<void> {
 
   await refreshDatasets()
   await selectDataset(datasetId)
+}
+
+async function deleteDataset(id: string): Promise<void> {
+  const ok = confirm('Bu dataset silinsin mi? (Geri alınamaz)')
+  if (!ok) return
+
+  await window.api.db.datasets.delete(id)
+
+  if (selectedDatasetId.value === id) {
+    clearSelection()
+  }
+  await refreshDatasets()
 }
 
 function clearSelection(): void {
@@ -78,9 +97,18 @@ onMounted(async () => {
               <div class="font-semibold">{{ d.name }}</div>
               <div class="text-xs text-gray-500">id: {{ d.id }}</div>
             </div>
-            <button class="px-3 py-2 rounded bg-green-600 text-white" @click="selectDataset(d.id)">
-              Seç
-            </button>
+            <div class="flex gap-2">
+              <button
+                class="px-3 py-2 rounded bg-green-600 text-white"
+                @click="selectDataset(d.id)"
+              >
+                Seç
+              </button>
+
+              <button class="px-3 py-2 rounded bg-red-600 text-white" @click="deleteDataset(d.id)">
+                Sil
+              </button>
+            </div>
           </li>
         </ul>
       </div>

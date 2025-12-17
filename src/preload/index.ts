@@ -6,9 +6,12 @@ const api = {
   db: {
     ping: () => ipcRenderer.invoke('db:ping'),
     datasets: {
-      create: (payload: { id: string; name: string }) =>
+      create: (payload: { id: string; name: string; folder_path?: string | null }) =>
         ipcRenderer.invoke('db:datasets:create', payload),
-      list: () => ipcRenderer.invoke('db:datasets:list')
+      list: () => ipcRenderer.invoke('db:datasets:list'),
+      getByFolder: (folderPath: string) =>
+        ipcRenderer.invoke('db:datasets:getByFolder', folderPath),
+      delete: (datasetId: string) => ipcRenderer.invoke('db:datasets:delete', datasetId)
     },
     media: {
       upsert: (payload: {

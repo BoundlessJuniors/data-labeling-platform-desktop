@@ -4,14 +4,40 @@ import { getDb } from '../db/sqlite'
 export function registerDbIpc(): void {
   ipcMain.handle('db:ping', () => ({ ok: true }))
 
-  ipcMain.handle('db:datasets:create', (_evt, payload: { id: string; name: string }) => {
+  ipcMain.handle(
+    'db:datasets:create',
+    (_evt, payload: { id: string; name: string; folder_path?: string | null }) => {
+      const db = getDb()
+      const now = Date.now()
+      db.prepare(
+        'INSERT OR IGNORE INTO datasets (id, name, folder_path, created_at) VALUES (?, ?, ?, ?)'
+      ).run(payload.id, payload.name, payload.folder_path ?? null, now)
+      return { ok: true }
+    }
+  )
+
+  ipcMain.handle('db:datasets:getByFolder', (_evt, folderPath: string) => {
     const db = getDb()
-    const now = Date.now()
-    db.prepare('INSERT OR IGNORE INTO datasets (id, name, created_at) VALUES (?, ?, ?)').run(
-      payload.id,
-      payload.name,
-      now
-    )
+    const row = db
+      .prepare('SELECT id, name, created_at, folder_path FROM datasets WHERE folder_path=? LIMIT 1')
+      .get(folderPath) as
+      | { id: string; name: string; created_at: number; folder_path: string | null }
+      | undefined
+    return row ?? null
+  })
+
+  ipcMain.handle('db:datasets:delete', (_evt, datasetId: string) => {
+    const db = getDb()
+    const tx = db.transaction(() => {
+      // annotations -> media_items -> datasets
+      db.prepare(
+        `DELETE FROM annotations 
+         WHERE media_id IN (SELECT id FROM media_items WHERE dataset_id = ?)`
+      ).run(datasetId)
+      db.prepare(`DELETE FROM media_items WHERE dataset_id = ?`).run(datasetId)
+      db.prepare(`DELETE FROM datasets WHERE id = ?`).run(datasetId)
+    })
+    tx()
     return { ok: true }
   })
 
@@ -81,7 +107,9 @@ export function registerDbIpc(): void {
 
   ipcMain.handle('db:datasets:list', () => {
     const db = getDb()
-    return db.prepare('SELECT id, name, created_at FROM datasets ORDER BY created_at DESC').all()
+    return db
+      .prepare('SELECT id, name, created_at, folder_path FROM datasets ORDER BY created_at DESC')
+      .all()
   })
 
   // Save / Load exported annotation JSON as a single blob per media

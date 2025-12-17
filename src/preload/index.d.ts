@@ -7,8 +7,21 @@ declare global {
       db: {
         ping: () => Promise<{ ok: boolean }>
         datasets: {
-          create: (payload: { id: string; name: string }) => Promise<{ ok: true }>
-          list: () => Promise<Array<{ id: string; name: string; created_at: number }>>
+          create: (payload: {
+            id: string
+            name: string
+            folder_path?: string | null
+          }) => Promise<{ ok: true }>
+          list: () => Promise<
+            Array<{ id: string; name: string; created_at: number; folder_path?: string | null }>
+          >
+          getByFolder: (folderPath: string) => Promise<{
+            id: string
+            name: string
+            created_at: number
+            folder_path: string | null
+          } | null>
+          delete: (datasetId: string) => Promise<{ ok: true }>
         }
         media: {
           upsert: (payload: {

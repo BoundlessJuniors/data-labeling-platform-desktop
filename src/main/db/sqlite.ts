@@ -24,6 +24,7 @@ export function initDb(): void {
     CREATE TABLE IF NOT EXISTS datasets (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
+      folder_path TEXT,
       created_at INTEGER NOT NULL
     );
 
@@ -55,6 +56,7 @@ export function initDb(): void {
   `)
   // --- Lightweight migrations (kolon ekleme) ---
   migrateMediaItems()
+  migrateDatasets()
 }
 
 function hasColumn(table: string, col: string): boolean {
@@ -73,4 +75,12 @@ function migrateMediaItems(): void {
   }
   // Var olan satırlarda NULL kalmışsa normalize et
   db.prepare(`UPDATE media_items SET status='in_progress' WHERE status IS NULL`).run()
+}
+function migrateDatasets(): void {
+  const db = getDb()
+  if (!hasColumn('datasets', 'folder_path')) {
+    db.exec(`ALTER TABLE datasets ADD COLUMN folder_path TEXT;`)
+  }
+  // folder_path kolonu garanti olduktan sonra index güvenle oluşturulur
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS ux_datasets_folder_path ON datasets(folder_path);`)
 }
