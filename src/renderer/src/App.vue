@@ -67,13 +67,25 @@ function clearSelection(): void {
 onMounted(async () => {
   await refreshDatasets()
 })
+
+const onMinimize = (): void => {
+  window.api?.window?.minimize()
+}
+
+const onToggleMaximize = (): void => {
+  window.api?.window?.toggleMaximize()
+}
+
+const onClose = (): void => {
+  window.api?.window?.close()
+}
 </script>
 
 <template>
   <div class="h-screen flex flex-col overflow-hidden">
     <!-- Custom title bar (frameless window) -->
     <header
-      class="flex items-center justify-between px-3 h-8 text-xs bg-slate-900 text-slate-100 select-none"
+      class="flex items-center justify-between px-3 h-8 text-xs bg-slate-900 text-slate-100 dark:bg-slate-950 border-b border-slate-800 shadow-sm select-none"
       :class="'titlebar-drag'"
     >
       <div class="flex items-center gap-2 no-drag">
@@ -94,20 +106,20 @@ onMounted(async () => {
 
       <div class="flex items-center gap-1 no-drag">
         <button
-          class="w-9 h-8 flex items-center justify-center hover:bg-slate-800"
-          @click="window.api.window.minimize()"
+          class="win-btn"
+          @click="onMinimize"
         >
           <span class="text-[10px] leading-none translate-y-[1px]">&#8212;</span>
         </button>
         <button
-          class="w-9 h-8 flex items-center justify-center hover:bg-slate-800"
-          @click="window.api.window.toggleMaximize()"
+          class="win-btn win-btn-max"
+          @click="onToggleMaximize"
         >
-          <span class="text-[9px] leading-none"></span>
+          <span class="sr-only">Maximize</span>
         </button>
         <button
-          class="w-9 h-8 flex items-center justify-center hover:bg-red-600 hover:text-white"
-          @click="window.api.window.close()"
+          class="win-btn win-btn-close"
+          @click="onClose"
         >
           <span class="text-[10px] leading-none">&#10005;</span>
         </button>
@@ -175,5 +187,42 @@ onMounted(async () => {
 
 .no-drag {
   -webkit-app-region: no-drag;
+}
+
+.win-btn {
+  width: 2.25rem; /* w-9 */
+  height: 2rem; /* h-8 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #e5e7eb; /* text-slate-200 */
+  background: transparent;
+  border: none;
+}
+
+.win-btn:hover {
+  background-color: #0f172a; /* slate-900-ish */
+}
+
+.win-btn-max {
+  position: relative;
+}
+
+.win-btn-max::before {
+  content: '';
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  width: 10px;
+  height: 10px;
+  border-radius: 1px;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.win-btn-close:hover {
+  background-color: #dc2626; /* red-600 */
+  color: #ffffff;
 }
 </style>
