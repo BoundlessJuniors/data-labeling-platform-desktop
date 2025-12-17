@@ -5,7 +5,7 @@ import LabelerView from './views/LabelerView.vue'
 type DatasetRow = { id: string; name: string; created_at: number; folder_path?: string | null }
 
 const datasets = ref<DatasetRow[]>([])
-const selectedDatasetId = ref<string | null>(localStorage.getItem('selectedDatasetId'))
+const selectedDatasetId = ref<string | null>(null)
 
 async function refreshDatasets(): Promise<void> {
   datasets.value = await window.api.db.datasets.list()
@@ -64,6 +64,8 @@ function clearSelection(): void {
 }
 
 onMounted(async () => {
+  // Uygulama her açılışta dataset seçim ekranından başlasın
+  localStorage.removeItem('selectedDatasetId')
   await refreshDatasets()
 })
 </script>
