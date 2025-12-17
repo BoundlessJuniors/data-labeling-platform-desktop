@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 // vue-konva bileşenleri global plugin ile v-stage, v-layer vb. olarak kayıtlı; doğrudan kullanacağız.
 import type {
   Annotation,
@@ -24,12 +24,15 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'create-annotation', ann: Annotation): void
   (e: 'select-annotation', id: number | null): void
-  (e: 'pointer-move', payload: {
-    screenX: number
-    screenY: number
-    imgX: number | null
-    imgY: number | null
-  }): void
+  (
+    e: 'pointer-move',
+    payload: {
+      screenX: number
+      screenY: number
+      imgX: number | null
+      imgY: number | null
+    }
+  ): void
   (e: 'pointer-leave'): void
 }>()
 
@@ -126,16 +129,30 @@ const handleResize = (forceFit = false): void => {
   clampStagePosition()
 }
 
-onMounted(() => {
-  if (props.imageSrc) {
-    const img = new window.Image()
-    img.src = props.imageSrc
-    img.onload = () => {
-      imageObj.value = img
-      handleResize(true)
-    }
+const loadImageFromSrc = (src: string | null): void => {
+  // Reset (yeni image gelene kadar stage kapanıp açılabilsin)
+  imageObj.value = null
+  hasUserTransform.value = false
+
+  if (!src) return
+
+  const img = new window.Image()
+
+  img.onload = () => {
+    imageObj.value = img
+    handleResize(true)
   }
 
+  img.onerror = (err) => {
+    console.error('[KonvaCanvas] Image load failed:', src, err)
+  }
+
+  // Cache kırmak bazen electron/local protokollerde hayat kurtarır
+  const bust = src.includes('?') ? '&' : '?'
+  img.src = `${src}${bust}t=${Date.now()}`
+}
+
+onMounted(() => {
   if (containerRef.value) {
     resizeObserver = new ResizeObserver(() => handleResize())
     resizeObserver.observe(containerRef.value)
@@ -163,6 +180,14 @@ onMounted(() => {
   }
   window.addEventListener('keydown', keydownHandler, true)
 })
+
+watch(
+  () => props.imageSrc,
+  (src) => {
+    loadImageFromSrc(src)
+  },
+  { immediate: true }
+)
 
 onBeforeUnmount(() => {
   resizeObserver?.disconnect()
@@ -370,7 +395,7 @@ const handleMouseMove = (e: KonvaEventObject<MouseEvent>): void => {
 
   emitPointerMove(stage)
 
-   // Pan aktifse, öncelikle onu güncelle (çizimden bağımsız).
+  // Pan aktifse, öncelikle onu güncelle (çizimden bağımsız).
   if (isPanning.value && panStart.value) {
     const pointer = stage.getPointerPosition()
     if (!pointer) return
@@ -412,7 +437,6 @@ const handleMouseMove = (e: KonvaEventObject<MouseEvent>): void => {
     tempPolyPoint.value = { x: imgPoint.x, y: imgPoint.y }
     return
   }
-
 }
 
 const finishDrawing = (): void => {
@@ -475,7 +499,7 @@ const finishDrawing = (): void => {
   tempBBox.value = null
   polyPoints.value = []
   tempPolyPoint.value = null
-   tempCircle.value = null
+  tempCircle.value = null
 }
 
 const handleMouseUp = (e: KonvaEventObject<MouseEvent>): void => {

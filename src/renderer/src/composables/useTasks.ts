@@ -2,6 +2,24 @@ import { ref, computed, type Ref, type ComputedRef } from 'vue'
 import type { Task } from '@renderer/types/annotation'
 import { loadImage } from '@renderer/utils/image'
 
+function toLocalUrlMaybe(p: string): string {
+  if (p.startsWith('http://') || p.startsWith('https://') || p.startsWith('local://')) return p
+
+  const isWinAbs = /^[a-zA-Z]:[\\/]/.test(p) || p.startsWith('\\\\')
+  const isPosixAbs = p.startsWith('/')
+
+  if (isWinAbs) {
+    const normalized = p.replace(/\\/g, '/')
+    return `local:///${encodeURI(normalized)}`
+  }
+
+  if (isPosixAbs) {
+    return `local:///${encodeURI(p.replace(/^\/+/, ''))}`
+  }
+
+  return p
+}
+
 export function useTasks(initial: Task[]): {
   tasks: Ref<Task[]>
   currentTaskIndex: Ref<number>
@@ -19,7 +37,8 @@ export function useTasks(initial: Task[]): {
     const rows = await window.api.db.media.listByDataset(datasetId)
     tasks.value = rows.map((r, idx) => ({
       id: idx + 1,
-      title: r.id,
+      title: r.id, // şimdilik başlık olarak id gösterelim
+      mediaId: r.id, // asıl DB kimliği
       image: r.local_path,
       status: r.status === 'completed' ? 'completed' : 'in_progress'
     }))
@@ -33,7 +52,7 @@ export function useTasks(initial: Task[]): {
     const clamped = Math.max(0, Math.min(tasks.value.length - 1, i))
     currentTaskIndex.value = clamped
     const t = tasks.value[clamped]
-    const img = await loadImage(t.image)
+    const img = await loadImage(toLocalUrlMaybe(t.image))
     assign(img)
   }
 

@@ -45,9 +45,7 @@ export function useLabelerActions(opts: UseLabelerActionsOptions): UseLabelerAct
       const t = opts.tasks.value[idx]
       if (!t) return
 
-      // Şu an Task.title = media_id olarak kullanıyoruz (road_demo gibi)
-      const mediaId = t.title ?? String(t.id)
-
+      const mediaId = t.mediaId ?? t.title ?? String(t.id)
       const exported = opts.exportAnnotationsToImageSpace()
       const dataJson = JSON.stringify(exported, null, 2)
 
@@ -64,7 +62,7 @@ export function useLabelerActions(opts: UseLabelerActionsOptions): UseLabelerAct
       const t = opts.tasks.value[idx]
       if (!t) return
 
-      const mediaId = t.title ?? String(t.id)
+      const mediaId = t.mediaId ?? t.title ?? String(t.id)
       await window.api.db.media.setStatus({ media_id: mediaId, status: 'completed' })
 
       t.status = 'completed'

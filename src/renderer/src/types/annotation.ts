@@ -47,7 +47,8 @@ export type Annotation = BBox | PolygonAnn | PolylineAnn | KeypointAnn | CircleA
 export type TaskStatus = 'in_progress' | 'completed' | 'queued'
 export type Task = {
   id: number
-  title: string
+  title: string // UI’de görünen isim
+  mediaId?: string // DB’deki media_items.id (opsiyonel)
   image: string
   status: TaskStatus
   originalWidth?: number
