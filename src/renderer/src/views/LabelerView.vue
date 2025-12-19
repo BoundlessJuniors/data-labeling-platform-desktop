@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref } from 'vue'
+import { onMounted, onBeforeUnmount, ref, nextTick } from 'vue'
 import UndoIcon from '@renderer/assets/icons/custom/undo.svg?component'
 import RedoIcon from '@renderer/assets/icons/custom/redo.svg?component'
 import SelectIcon from '@renderer/assets/icons/custom/touch_app.svg?component'
@@ -85,13 +85,29 @@ const nextBtn = ref<HTMLButtonElement | null>(null)
 
 const deleteBtn = ref<HTMLButtonElement | null>(null)
 
+const tasksNav = ref<HTMLElement | null>(null)
+const autoSaveOverlay = ref<HTMLDivElement | null>(null)
+
 // Label seçilmeden shapes aracı kullanıldığında gösterilecek küçük uyarı
 const showLabelHint = ref(false)
 let labelHintTimer: number | null = null
 
+// Global ve task bazlı zamanlayıcılar (saniye cinsinden)
+const globalSeconds = ref(0)
+const taskSecondsById = ref<Record<string, number>>({})
+
 /* =============================
-   İç durum
-   ============================= */
+  İç durum
+  ============================= */
+
+// Props & emit (dataset kimliği ve geri dönüş olayı)
+const props = defineProps<{ datasetId: string }>()
+const emit = defineEmits<{ (e: 'back-to-datasets'): void }>()
+
+// Başlangıçta boş; dataset seçilince DB'den doldurulacak
+const initialTasks: Task[] = []
+// Görevler (task listesi) ve aktif indeks
+const { tasks, currentTaskIndex, initFromDb } = useTasks(initialTasks)
 
 // Reactif state
 const { state } = useLabelerState()
@@ -126,13 +142,6 @@ const {
   recordHistory
 )
 
-const props = defineProps<{ datasetId: string }>()
-const emit = defineEmits<{ (e: 'back-to-datasets'): void }>()
-// Başlangıçta boş; dataset seçilince DB’den doldurulacak
-const initialTasks: Task[] = []
-// Görevler (task listesi) ve aktif indeks
-const { tasks, currentTaskIndex, initFromDb } = useTasks(initialTasks)
-
 const undoAndRender = (): void => {
   undo()
   renderAnnotations()
@@ -141,6 +150,29 @@ const undoAndRender = (): void => {
 const redoAndRender = (): void => {
   redo()
   renderAnnotations()
+}
+
+function getTaskMediaId(t: Task): string {
+  return t.mediaId ?? t.title ?? String(t.id)
+}
+
+function getTaskSeconds(t: Task): number {
+  const id = getTaskMediaId(t)
+  return taskSecondsById.value[id] ?? 0
+}
+
+function getCurrentTaskSeconds(): number {
+  const t = tasks.value[currentTaskIndex.value]
+  return t ? getTaskSeconds(t) : 0
+}
+
+function formatTime(total: number): string {
+  const sec = Math.max(0, Math.floor(total))
+  const h = Math.floor(sec / 3600)
+  const m = Math.floor((sec % 3600) / 60)
+  const s = sec % 60
+  const pad = (n: number): string => (n < 10 ? `0${n}` : String(n))
+  return `${pad(h)}:${pad(m)}:${pad(s)}`
 }
 
 const { onUndo, onRedo, onDelete, onSaveDraft, onSubmit } = useLabelerActions({
@@ -154,8 +186,49 @@ const { onUndo, onRedo, onDelete, onSaveDraft, onSubmit } = useLabelerActions({
   fitToScreen
 })
 
+const autoSaveProgress = ref(0)
 let autoSaveTimer: number | null = null
+let timerInterval: number | null = null
 let onThemeToggleClick: (() => void) | null = null
+
+function playAutoSaveOverlayAnimation(): void {
+  const el = autoSaveOverlay.value
+  if (!el) return
+
+  el.classList.remove('show')
+  // Force reflow so the animation can restart even if class was already present
+  // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+  void el.offsetWidth
+  el.classList.add('show')
+}
+
+async function restartCurrentTask(): Promise<void> {
+  const current = tasks.value[currentTaskIndex.value]
+  if (!current) return
+
+  // 1) Görünümü ekrana sığdır
+  konvaCanvasRef.value?.fitToContainer()
+
+  // 2) Mevcut task için tüm etiketleri temizle (hafıza + UI)
+  state.annotations = []
+  state.selectedAnnotationId = null
+  state.history = []
+  state.historyIndex = -1
+  clearSelection()
+  renderAnnotations()
+  updateDeleteButton()
+
+  const mediaId = getTaskMediaId(current)
+  localAnnotationsByTask.delete(mediaId)
+
+  // 3) DB'deki kaydı da boş bir liste ile overwrite et (tam temizlik)
+  try {
+    const emptyJson = JSON.stringify([], null, 2)
+    await window.api.db.annotations.saveExport({ media_id: mediaId, data_json: emptyJson })
+  } catch (e) {
+    console.error('[Restart] failed to clear annotations in DB:', e)
+  }
+}
 
 /* =============================
    Shapes Dropdown Control
@@ -428,6 +501,28 @@ const commitPoly = (): void => {
   updateCursor()
 }
 
+const saveDraftAndReset = (): void => {
+  onSaveDraft()
+  // Manuel kayıttan sonra otomatik kaydetme sayacını sıfırla ve süreleri kaydet
+  autoSaveProgress.value = 0
+  void flushTimeToDb()
+  playAutoSaveOverlayAnimation()
+}
+
+async function flushTimeToDb(): Promise<void> {
+  if (!tasks.value.length) return
+
+  try {
+    for (const t of tasks.value) {
+      const mediaId = getTaskMediaId(t)
+      const secs = taskSecondsById.value[mediaId] ?? 0
+      await window.api.db.media.setTime({ media_id: mediaId, seconds: secs })
+    }
+  } catch (e) {
+    console.error('[DB] flush time failed:', e)
+  }
+}
+
 const { attachKeyboardShortcuts, detachKeyboardShortcuts } = useKeyboardShortcuts({
   state,
   undo: undoAndRender,
@@ -436,7 +531,10 @@ const { attachKeyboardShortcuts, detachKeyboardShortcuts } = useKeyboardShortcut
   commitPoly,
   cancelPoly,
   clearSelection,
-  enterPanMode
+  enterPanMode,
+  saveDraft: saveDraftAndReset,
+  goPrevTask,
+  goNextTask
 })
 
 // Eski canvas etkileşimleri (useCanvasInteractions) Konva geçişiyle birlikte devre dışı bırakıldı.
@@ -527,7 +625,7 @@ onMounted(async (): Promise<void> => {
   undoBtn.value?.addEventListener('click', onUndo)
   redoBtn.value?.addEventListener('click', onRedo)
   deleteBtn.value?.addEventListener('click', onDelete)
-  saveBtn.value?.addEventListener('click', onSaveDraft)
+  saveBtn.value?.addEventListener('click', saveDraftAndReset)
   submitBtn.value?.addEventListener('click', onSubmit)
 
   // Zoom butonlarını şimdilik KonvaCanvas üzerinden elle yöneteceğiz
@@ -541,7 +639,7 @@ onMounted(async (): Promise<void> => {
     konvaCanvasRef.value?.fitToContainer()
   })
   resetViewBtn.value?.addEventListener('click', () => {
-    konvaCanvasRef.value?.fitToContainer()
+    void restartCurrentTask()
   })
 
   // Eski canvas tabanlı fitToScreen/zoom artık KonvaCanvas içinde yönetiliyor.
@@ -562,8 +660,23 @@ onMounted(async (): Promise<void> => {
   }
   updateDeleteButton()
 
-  // 10 dakikada bir oto-kayıt: tüm görevler için eldeki annotation'ları DB'ye yaz.
-  const AUTO_SAVE_INTERVAL_MS = 5 * 60 * 1000
+  // DB'den gelen sürelerle zamanlayıcıları başlat
+  const byId: Record<string, number> = {}
+  let totalSeconds = 0
+  for (const t of tasks.value) {
+    const id = getTaskMediaId(t)
+    const secs = t.timeSeconds ?? 0
+    byId[id] = secs
+    totalSeconds += secs
+  }
+  taskSecondsById.value = byId
+  globalSeconds.value = totalSeconds
+
+  // 1 dakikalık döngüde, Save Draft butonu üzerinde saat yönünde ilerleyen bir
+  // progress halkası ve tam dolduğunda otomatik DB kaydı (oto-kayıt).
+  const AUTO_SAVE_INTERVAL_MS = 1 * 10 * 1000
+  const AUTO_SAVE_TICK_MS = 200
+
   const triggerAutoSave = async (): Promise<void> => {
     if (!tasks.value.length) return
 
@@ -575,7 +688,7 @@ onMounted(async (): Promise<void> => {
 
     try {
       for (const t of tasks.value) {
-        const mediaId = t.title ?? String(t.id)
+        const mediaId = t.mediaId ?? t.title ?? String(t.id)
 
         let anns: Annotation[] | null = null
         // Aktif task ise export fonksiyonunu kullan (image-space rounding için)
@@ -593,6 +706,12 @@ onMounted(async (): Promise<void> => {
           await window.api.db.annotations.saveExport({ media_id: mediaId, data_json: dataJson })
         }
       }
+
+      // Süreleri de periyodik olarak DB'ye yaz
+      await flushTimeToDb()
+
+      // Canvas üzerinde belirgin bir oto-kayıt bildirimi göster
+      playAutoSaveOverlayAnimation()
     } catch (e) {
       console.error('[AutoSave] failed:', e)
     } finally {
@@ -605,9 +724,41 @@ onMounted(async (): Promise<void> => {
     }
   }
 
+  let elapsed = 0
+  autoSaveProgress.value = 0
+
+  if (timerInterval == null) {
+    timerInterval = window.setInterval(() => {
+      if (!tasks.value.length) return
+      globalSeconds.value += 1
+
+      const current = tasks.value[currentTaskIndex.value]
+      if (!current) return
+
+      const mediaId = getTaskMediaId(current)
+      const prevTaskSeconds = taskSecondsById.value[mediaId] ?? 0
+      taskSecondsById.value = {
+        ...taskSecondsById.value,
+        [mediaId]: prevTaskSeconds + 1
+      }
+
+      // Bu görsel üzerinde ilk kez zaman geçirilirse, status'u queued'dan in_progress'a çek
+      if (prevTaskSeconds === 0 && current.status !== 'completed') {
+        current.status = 'in_progress'
+      }
+    }, 1000)
+  }
+
   autoSaveTimer = window.setInterval(() => {
-    void triggerAutoSave()
-  }, AUTO_SAVE_INTERVAL_MS)
+    elapsed += AUTO_SAVE_TICK_MS
+    if (elapsed >= AUTO_SAVE_INTERVAL_MS) {
+      elapsed = 0
+      autoSaveProgress.value = 0
+      void triggerAutoSave()
+    } else {
+      autoSaveProgress.value = elapsed / AUTO_SAVE_INTERVAL_MS
+    }
+  }, AUTO_SAVE_TICK_MS)
 })
 
 onBeforeUnmount((): void => {
@@ -623,7 +774,7 @@ onBeforeUnmount((): void => {
   undoBtn.value?.removeEventListener('click', onUndo)
   redoBtn.value?.removeEventListener('click', onRedo)
   deleteBtn.value?.removeEventListener('click', onDelete)
-  saveBtn.value?.removeEventListener('click', onSaveDraft)
+  saveBtn.value?.removeEventListener('click', saveDraftAndReset)
   submitBtn.value?.removeEventListener('click', onSubmit)
 
   if (labelHintTimer != null) {
@@ -636,6 +787,14 @@ onBeforeUnmount((): void => {
     autoSaveTimer = null
   }
 
+  if (timerInterval != null) {
+    window.clearInterval(timerInterval)
+    timerInterval = null
+  }
+
+  // Çıkarken en son süreleri de sakla (fire-and-forget)
+  void flushTimeToDb()
+
   // Zoom/reset butonları için addEventListener'da anonim fonksiyon kullandığımız için
   // burada removeEventListener ile temizleyemiyoruz; bu, sadece küçük bir sızıntı ve
   // Konva geçişi tamamlanırken ayrı bir refaktörde ele alınabilir.
@@ -647,13 +806,20 @@ onBeforeUnmount((): void => {
 async function loadTaskByIndex(i: number): Promise<void> {
   if (tasks.value.length === 0) return
 
+  const prevTool = state.lastUsedTool
+  const prevShape = state.lastUsedShape
+  const prevLabel = state.activeLabel
+
   // Önce mevcut task'in annotation'larını hafızaya yaz (uygulama açıkken geçerli).
   const currentTask = tasks.value[currentTaskIndex.value]
   if (currentTask) {
-    const currentMediaId = currentTask.title ?? String(currentTask.id)
-    // Derin kopya alarak referans karmaşasını önle
-    const snapshot = JSON.parse(JSON.stringify(state.annotations)) as Annotation[]
-    localAnnotationsByTask.set(currentMediaId, snapshot)
+    const currentMediaId = currentTask.mediaId ?? currentTask.title ?? String(currentTask.id)
+    // Eğer gerçekten RAM'de annotation varsa cache'e yaz; aksi halde DB'deki kaydı
+    // "boş" bir snapshot ile gölgeleme.
+    if (state.annotations.length > 0) {
+      const snapshot = JSON.parse(JSON.stringify(state.annotations)) as Annotation[]
+      localAnnotationsByTask.set(currentMediaId, snapshot)
+    }
   }
 
   const clamped = Math.max(0, Math.min(tasks.value.length - 1, i))
@@ -693,7 +859,8 @@ async function loadTaskByIndex(i: number): Promise<void> {
 
     // Önce, bu task için oturum içi cache'te annotation var mı diye bak.
     const cached = localAnnotationsByTask.get(mediaId)
-    if (cached) {
+    if (cached && cached.length > 0) {
+      // Sadece gerçekten dolu bir cache varsa onu kullan
       state.annotations = JSON.parse(JSON.stringify(cached)) as Annotation[]
     } else {
       // === RESTORE SAVED ANNOTATIONS (DB) ===
@@ -716,15 +883,61 @@ async function loadTaskByIndex(i: number): Promise<void> {
       }
     }
 
-    const firstLabel = labelList.value?.querySelector('.label-item') as HTMLElement | null
-    setActiveLabel(firstLabel)
-    const selectTool = toolGroup.value?.querySelector(
-      '.annotation-tool[data-tool="select"]'
-    ) as HTMLElement | null
-    setActiveTool(selectTool)
+    let labelEl: HTMLElement | null = null
+    if (prevLabel && labelList.value) {
+      labelEl = labelList.value.querySelector(
+        `.label-item[data-label="${prevLabel}"]`
+      ) as HTMLElement | null
+    }
+    if (!labelEl) {
+      labelEl = labelList.value?.querySelector('.label-item') as HTMLElement | null
+    }
+    setActiveLabel(labelEl)
+
+    let toolEl: HTMLElement | null = null
+    if (prevTool === 'shapes') {
+      const shape = prevShape ?? 'bbox'
+      toolEl = shapesDropdown.value?.querySelector(
+        `.annotation-tool[data-tool="${shape}"]`
+      ) as HTMLElement | null
+    } else {
+      toolEl = toolGroup.value?.querySelector(
+        `.annotation-tool[data-tool="${prevTool}"]`
+      ) as HTMLElement | null
+    }
+
+    if (!toolEl) {
+      toolEl = toolGroup.value?.querySelector(
+        '.annotation-tool[data-tool="select"]'
+      ) as HTMLElement | null
+    }
+    setActiveTool(toolEl)
     // Restore sonrası UI güncelle
     renderAnnotations()
     recordHistory()
+
+    void nextTick(() => {
+      const container = tasksNav.value
+      if (!container) return
+
+      // Eğer 1. göreve geldiysek (Task 1), sidebar'ı tamamen en üste sar
+      if (currentTaskIndex.value === 0) {
+        container.scrollTo({ top: 0, behavior: 'smooth' })
+        return
+      }
+
+      const active = container.querySelector(
+        'a[data-active="true"]'
+      ) as HTMLElement | null
+      if (!active) return
+
+      const cRect = container.getBoundingClientRect()
+      const aRect = active.getBoundingClientRect()
+
+      if (aRect.top >= cRect.top && aRect.bottom <= cRect.bottom) return
+
+      active.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    })
   } catch (err) {
     console.error('Image load failed:', err)
   }
@@ -741,7 +954,7 @@ function goNextTask(): void {
 
 <template>
   <div
-    class="flex h-screen bg-background-light dark:bg-background-dark font-display text-text-primary dark:text-white"
+    class="flex h-full bg-background-light dark:bg-background-dark font-display text-text-primary dark:text-white"
   >
     <!-- Sidebar (kısa) -->
     <aside
@@ -752,17 +965,35 @@ function goNextTask(): void {
       </div>
 
       <nav
-        class="flex-1 px-4 space-y-2 overflow-y-auto bg-surface/60 dark:bg-background-dark/60 p-3"
+        ref="tasksNav"
+        class="flex-1 px-4 space-y-2 overflow-y-auto bg-surface/60 dark:bg-background-dark/60 p-3 tasks-scroll"
       >
-        <h2
-          class="px-2 text-xs font-semibold text-text-secondary dark:text-gray-300 uppercase tracking-wider mb-2"
+        <div
+          class="px-2 mb-2 flex items-center justify-between text-xs font-semibold text-text-secondary dark:text-gray-300 uppercase tracking-wider"
         >
-          Tasks
-        </h2>
+          <h2>Tasks</h2>
+          <div class="flex items-center gap-1">
+            <button
+              ref="prevBtn"
+              class="p-1 rounded-md bg-slate-100 dark:bg-gray-800 hover:bg-slate-200"
+              title="Previous Task (←)"
+            >
+              <ArrowBackIcon class="ui-svg h-4 w-4 text-gray-700 dark:text-gray-200" />
+            </button>
+            <button
+              ref="nextBtn"
+              class="p-1 rounded-md bg-slate-100 dark:bg-gray-800 hover:bg-slate-200"
+              title="Next Task (→)"
+            >
+              <ArrowFwdIcon class="ui-svg h-4 w-4 text-gray-700 dark:text-gray-200" />
+            </button>
+          </div>
+        </div>
         <ul class="space-y-3">
           <li v-for="(t, idx) in tasks" :key="t.id">
             <a
               href="#"
+              :data-active="idx === currentTaskIndex ? 'true' : null"
               :class="[
                 'block rounded-lg overflow-hidden border-2',
                 idx === currentTaskIndex
@@ -798,6 +1029,9 @@ function goNextTask(): void {
                     >Queued</span
                   >
                 </div>
+                <div class="mt-1 text-xs text-slate-500 dark:text-gray-400">
+                  Time: {{ formatTime(getTaskSeconds(t)) }}
+                </div>
               </div>
             </a>
           </li>
@@ -826,28 +1060,7 @@ function goNextTask(): void {
         class="flex items-center justify-between p-5 border-b border-border dark:border-gray-800 bg-surface/70 dark:bg-background-dark"
       >
         <div class="flex items-center gap-4">
-          <button
-            class="rounded bg-slate-200 dark:bg-gray-700 px-3 py-2 text-sm"
-            @click="emit('back-to-datasets')"
-          >
-            Datasets
-          </button>
-
           <h2 ref="taskTitle" class="text-xl font-bold">Image Annotation - Task 1</h2>
-          <div class="flex items-center gap-2">
-            <button
-              ref="prevBtn"
-              class="p-1 rounded-md bg-slate-100 dark:bg-gray-800 hover:bg-slate-200"
-            >
-              <ArrowBackIcon class="ui-svg h-5 w-5 text-gray-700 dark:text-gray-200" />
-            </button>
-            <button
-              ref="nextBtn"
-              class="p-1 rounded-md bg-slate-100 dark:bg-gray-800 hover:bg-slate-200"
-            >
-              <ArrowFwdIcon class="ui-svg h-5 w-5 text-gray-700 dark:text-gray-200" />
-            </button>
-          </div>
         </div>
 
         <div class="flex items-center gap-4">
@@ -868,13 +1081,14 @@ function goNextTask(): void {
             <div
               class="font-mono bg-slate-100 dark:bg-gray-800 rounded px-2 py-1 text-lg font-bold"
             >
-              01:23:45
+              {{ formatTime(globalSeconds) }}
             </div>
           </div>
 
           <button
             ref="saveBtn"
-            class="flex items-center gap-2 rounded bg-primary text-white hover:bg-primary-light py-2 px-4 text-sm font-semibold"
+            class="flex items-center gap-2 rounded bg-primary text-white hover:bg-primary-light py-2 px-4 text-sm font-semibold save-auto-btn"
+            :style="{ '--save-progress': String(autoSaveProgress) }"
           >
             <SaveIcon class="ui-svg h-5 w-5 text-white" />
             <span>Save Draft</span>
@@ -1052,7 +1266,7 @@ function goNextTask(): void {
                 <button
                   ref="resetViewBtn"
                   class="p-2 rounded-md hover:bg-white/20"
-                  title="Reset View"
+                  title="Restart"
                 >
                   <ResetViewIcon class="ui-svg h-6 w-6 text-white" />
                 </button>
@@ -1063,6 +1277,17 @@ function goNextTask(): void {
                 class="absolute bottom-4 left-4 bg-black/50 text-white text-xs font-mono rounded px-2 py-1"
               >
                 X: -, Y: -
+              </div>
+
+              <div ref="autoSaveOverlay" class="auto-save-overlay">
+                <div class="auto-save-pill">
+                  <div class="auto-save-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                      <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                  </div>
+                  <span class="auto-save-text">Auto saved</span>
+                </div>
               </div>
             </div>
           </div>

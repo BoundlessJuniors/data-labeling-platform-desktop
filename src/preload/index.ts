@@ -1,3 +1,6 @@
+// Electron tip deklarasyonları CommonJS tarzında olduğu için TS burada modül uyarısı verebiliyor.
+// Bunu bilerek bastırıyoruz; runtime tarafı electron-vite tarafından doğru bundle ediliyor.
+// @ts-expect-error Electron is declared as a CommonJS export in electron.d.ts
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 
@@ -24,7 +27,9 @@ const api = {
       }) => ipcRenderer.invoke('db:media:upsert', payload),
       listByDataset: (datasetId: string) => ipcRenderer.invoke('db:media:listByDataset', datasetId),
       setStatus: (payload: { media_id: string; status: 'in_progress' | 'completed' }) =>
-        ipcRenderer.invoke('db:media:setStatus', payload)
+        ipcRenderer.invoke('db:media:setStatus', payload),
+      setTime: (payload: { media_id: string; seconds: number }) =>
+        ipcRenderer.invoke('db:media:setTime', payload)
     },
     annotations: {
       saveExport: (payload: { media_id: string; data_json: string }) =>
@@ -34,13 +39,19 @@ const api = {
   },
   dataset: {
     pickFolder: () => ipcRenderer.invoke('dataset:pickFolder')
+  },
+  window: {
+    minimize: () => ipcRenderer.invoke('window:minimize'),
+    toggleMaximize: () => ipcRenderer.invoke('window:toggleMaximize'),
+    close: () => ipcRenderer.invoke('window:close')
   }
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to
 // renderer only if context isolation is enabled, otherwise
 // just add to the DOM global.
-if (process.contextIsolated) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+if ((process as any).contextIsolated) {
   try {
     contextBridge.exposeInMainWorld('electron', electronAPI)
     contextBridge.exposeInMainWorld('api', api)

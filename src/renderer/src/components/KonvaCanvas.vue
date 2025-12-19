@@ -73,7 +73,8 @@ const circleAnnotations = computed(
   () => props.annotations.filter((a) => a.type === 'circle') as CircleAnn[]
 )
 
-const MIN_SCALE = 0.2
+const MIN_SCALE = 0.05
+const minScale = ref(MIN_SCALE)
 const hasUserTransform = ref(false)
 
 const clampStagePosition = (): void => {
@@ -118,6 +119,9 @@ const handleResize = (forceFit = false): void => {
   if (forceFit || !hasUserTransform.value) {
     const fitScale = Math.min(cw / iw, ch / ih)
     stageScale.value = fitScale
+
+    const relativeMin = fitScale * 0.5
+    minScale.value = Math.min(fitScale, Math.max(MIN_SCALE, relativeMin))
 
     const drawnW = iw * fitScale
     const drawnH = ih * fitScale
@@ -226,7 +230,8 @@ const handleWheel = (e: KonvaEventObject<WheelEvent>): void => {
   const scaleBy = 1.05
   const direction = evt.deltaY > 0 ? -1 : 1
   const rawScale = direction > 0 ? oldScale * scaleBy : oldScale / scaleBy
-  const newScale = Math.max(MIN_SCALE, Math.min(rawScale, 10))
+  const limit = minScale.value || MIN_SCALE
+  const newScale = Math.max(limit, Math.min(rawScale, 10))
 
   const mousePointTo = {
     x: (pointer.x - stageX.value) / oldScale,
@@ -320,61 +325,63 @@ const handleMouseDown = (e: KonvaEventObject<MouseEvent>): void => {
   // Sol tık dışındaki her şeyi yok say
   if (evt.button !== 0) return
 
-  const imgPoint = getImagePoint(stage)
-  if (!imgPoint) return
-
   // Çizim modu: shapes + bbox / polygon / polyline / keypoint / circle
   if (props.activeTool === 'shapes') {
-    if (props.activeShape === 'bbox') {
-      // BBox çizimi (drag)
-      isDrawing.value = true
-      drawingShape.value = 'bbox'
-      drawingStart.value = { ...imgPoint }
-      tempBBox.value = { x: imgPoint.x, y: imgPoint.y, width: 0, height: 0 }
-      isPanning.value = false
-      panStart.value = null
-      return
-    }
+    const imgPoint = getImagePoint(stage)
 
-    if (props.activeShape === 'keypoint') {
-      // Tek tıklama ile keypoint oluştur
-      const kp: KeypointAnn = {
-        id: Date.now(),
-        type: 'keypoint',
-        label: props.activeLabel,
-        x: imgPoint.x,
-        y: imgPoint.y
-      }
-      emit('create-annotation', kp)
-      return
-    }
-
-    if (props.activeShape === 'circle') {
-      // Daire çizimi (merkez + drag ile yarıçap)
-      isDrawing.value = true
-      drawingShape.value = 'circle'
-      drawingStart.value = { ...imgPoint }
-      tempCircle.value = { cx: imgPoint.x, cy: imgPoint.y, r: 0 }
-      isPanning.value = false
-      panStart.value = null
-      return
-    }
-
-    if (props.activeShape === 'polygon' || props.activeShape === 'polyline') {
-      const shape = props.activeShape
-
-      // Polygon / polyline: tıklayarak nokta ekle (ilk click veya normal tekli clickler)
-      if (!isDrawing.value || drawingShape.value !== shape) {
-        // İlk nokta
+    // Görüntü dışına tıklanmışsa çizim başlatma; bu durumda altta pan'e düşeceğiz.
+    if (imgPoint) {
+      if (props.activeShape === 'bbox') {
+        // BBox çizimi (drag)
         isDrawing.value = true
-        drawingShape.value = shape
-        polyPoints.value = [{ x: imgPoint.x, y: imgPoint.y }]
-      } else {
-        // Sonraki noktalar
-        polyPoints.value = [...polyPoints.value, { x: imgPoint.x, y: imgPoint.y }]
+        drawingShape.value = 'bbox'
+        drawingStart.value = { ...imgPoint }
+        tempBBox.value = { x: imgPoint.x, y: imgPoint.y, width: 0, height: 0 }
+        isPanning.value = false
+        panStart.value = null
+        return
       }
 
-      return
+      if (props.activeShape === 'keypoint') {
+        // Tek tıklama ile keypoint oluştur
+        const kp: KeypointAnn = {
+          id: Date.now(),
+          type: 'keypoint',
+          label: props.activeLabel,
+          x: imgPoint.x,
+          y: imgPoint.y
+        }
+        emit('create-annotation', kp)
+        return
+      }
+
+      if (props.activeShape === 'circle') {
+        // Daire çizimi (merkez + drag ile yarıçap)
+        isDrawing.value = true
+        drawingShape.value = 'circle'
+        drawingStart.value = { ...imgPoint }
+        tempCircle.value = { cx: imgPoint.x, cy: imgPoint.y, r: 0 }
+        isPanning.value = false
+        panStart.value = null
+        return
+      }
+
+      if (props.activeShape === 'polygon' || props.activeShape === 'polyline') {
+        const shape = props.activeShape
+
+        // Polygon / polyline: tıklayarak nokta ekle (ilk click veya normal tekli clickler)
+        if (!isDrawing.value || drawingShape.value !== shape) {
+          // İlk nokta
+          isDrawing.value = true
+          drawingShape.value = shape
+          polyPoints.value = [{ x: imgPoint.x, y: imgPoint.y }]
+        } else {
+          // Sonraki noktalar
+          polyPoints.value = [...polyPoints.value, { x: imgPoint.x, y: imgPoint.y }]
+        }
+
+        return
+      }
     }
   }
 
@@ -525,9 +532,18 @@ const handleMouseLeave = (): void => {
 }
 
 const handleAnnClick = (id: number, e: KonvaEventObject<MouseEvent>): void => {
-  // Şekil tıklandığında selection
+  // Şekil tıklandığında selection sadece select modunda aktif olsun.
+  // Etiketleme (shapes) modundayken eski etiketlere tıklamak hiçbir şey yapmasın.
+  if (props.activeTool !== 'select') return
+
   e.cancelBubble = true
   emit('select-annotation', id)
+}
+
+const handleStageClick = (): void => {
+  // Select/pan modundayken sahnenin boş bir yerine tıklanınca seçimi temizle.
+  if (props.activeTool !== 'select') return
+  emit('select-annotation', null)
 }
 
 // Dışarıdan kontrol için basit bir API expose edelim
@@ -547,7 +563,8 @@ const zoomBy = (delta: number): void => {
 
   const oldScale = stageScaleCurrent
   const rawScale = oldScale * (1 + delta)
-  const newScale = Math.max(MIN_SCALE, Math.min(rawScale, 10))
+  const limit = minScale.value || MIN_SCALE
+  const newScale = Math.max(limit, Math.min(rawScale, 10))
 
   const mousePointTo = {
     x: (center.x - stageX.value) / oldScale,
@@ -564,10 +581,23 @@ const zoomBy = (delta: number): void => {
 defineExpose({
   fitToContainer,
   zoomBy,
-  hasActiveDrawing: () =>
-    isDrawing.value &&
-    (drawingShape.value === 'polygon' || drawingShape.value === 'polyline') &&
-    polyPoints.value.length > 0,
+  hasActiveDrawing: () => {
+    if (!isDrawing.value) return false
+
+    if (drawingShape.value === 'polygon' || drawingShape.value === 'polyline') {
+      return polyPoints.value.length > 0
+    }
+
+    if (drawingShape.value === 'bbox') {
+      return !!tempBBox.value
+    }
+
+    if (drawingShape.value === 'circle') {
+      return !!tempCircle.value
+    }
+
+    return false
+  },
   finishCurrentShape: finishDrawing,
   cancelCurrentShape: () => {
     isDrawing.value = false
@@ -600,6 +630,7 @@ defineExpose({
       @mousemove="handleMouseMove"
       @mouseup="handleMouseUp"
       @mouseleave="handleMouseLeave"
+      @click="handleStageClick"
     >
       <v-layer>
         <v-image v-bind="imageConfig" />

@@ -40,12 +40,14 @@ declare global {
               width: number | null
               height: number | null
               status: 'in_progress' | 'completed' | string | null
+              annotation_seconds?: number | null
             }>
           >
           setStatus: (payload: {
             media_id: string
             status: 'in_progress' | 'completed'
           }) => Promise<{ ok: true }>
+          setTime: (payload: { media_id: string; seconds: number }) => Promise<{ ok: true }>
         }
         annotations: {
           saveExport: (payload: { media_id: string; data_json: string }) => Promise<{ ok: true }>
@@ -57,6 +59,11 @@ declare global {
           folder: string
           images: string[]
         } | null>
+      }
+      window: {
+        minimize: () => Promise<void>
+        toggleMaximize: () => Promise<boolean>
+        close: () => Promise<void>
       }
     }
   }

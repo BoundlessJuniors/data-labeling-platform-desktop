@@ -124,6 +124,32 @@ html.dark .annotation-tool.active {
   stroke: currentColor !important;
 }
 
+/* Sidebar scrollbar styling */
+.tasks-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.tasks-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+html.dark .tasks-scroll::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.8); /* very dark navy */
+}
+
+.tasks-scroll::-webkit-scrollbar-thumb {
+  background-color: rgba(148, 163, 184, 0.9); /* slate-400/500 */
+  border-radius: 999px;
+}
+
+html.dark .tasks-scroll::-webkit-scrollbar-thumb {
+  background-color: #4b5563; /* slate-600, matches other dark UI elements */
+}
+
+.tasks-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: #64748b; /* slightly lighter on hover */
+}
+
 /* Save Draft oto-kayıt animasyonu */
 .save-autosaving {
   animation: savePulse 0.8s ease-out;
@@ -144,3 +170,165 @@ html.dark .annotation-tool.active {
   }
 }
 
+/* Save Draft butonu içinde dairesel (saat yönünde) fill efekti */
+.save-auto-btn {
+  position: relative;
+  overflow: hidden;
+}
+
+.save-auto-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  /* Saat 12 yönünden başlayıp saat yönünde dolan hafif overlay */
+  background: conic-gradient(
+    rgba(255, 255, 255, 0.22) 0deg calc(360deg * var(--save-progress, 0)),
+    transparent calc(360deg * var(--save-progress, 0)) 360deg
+  );
+  mix-blend-mode: soft-light;
+}
+
+/* Ana Overlay - Ekranın tam ortasında sabit durur */
+.auto-save-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  opacity: 0;
+  z-index: 100;
+  transition: opacity 0.3s ease;
+}
+
+.auto-save-overlay.show {
+  opacity: 1;
+}
+
+/* Pill (Kapsayıcı) */
+.auto-save-pill {
+  display: flex;
+  align-items: center;
+  padding: 6px;
+  background: rgba(15, 23, 42, 0.18); /* daha transparan, lacivertimsi blok hissini azalt */
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(248, 250, 252, 0.18);
+  border-radius: 999px;
+  color: #f8fafc;
+  overflow: hidden;
+  white-space: nowrap;
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.22);
+  /* Zıplamayı engelleyen anahtar özellikler */
+  min-width: 40px; 
+  max-width: 220px; 
+}
+
+/* İkon Kutusu */
+.auto-save-icon {
+  width: 28px;
+  height: 28px;
+  background: #22c55e; /* Canlı yeşil */
+  color: white;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  z-index: 2;
+  padding: 6px;
+}
+
+.auto-save-icon svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* Yazı */
+.auto-save-text {
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-left: 10px;
+  margin-right: 14px;
+  letter-spacing: 0.02em;
+  z-index: 1;
+  display: inline-block;
+}
+
+/* --- ANIMASYONLAR --- */
+
+/* 1. Pill Daralma ve Genişleme (Zıplama yapmaz) */
+@keyframes pillShrink {
+  0% { transform: scale(0.8); opacity: 0; max-width: 40px; }
+  15% { transform: scale(1); opacity: 1; max-width: 220px; }
+  70% { max-width: 220px; }
+  85% { max-width: 40px; transform: scale(1); } /* Yazıyı yuttuğu an */
+  95% { transform: scale(0.9); opacity: 1; }
+  100% { transform: scale(0.8); opacity: 0; max-width: 40px; }
+}
+
+/* 2. Yazının İçeri Kayma Efekti */
+@keyframes textSwallow {
+  0% { opacity: 0; transform: translateX(10px); }
+  20% { opacity: 1; transform: translateX(0); }
+  70% { opacity: 1; transform: translateX(0); }
+  85% { opacity: 0; transform: translateX(-40px); } /* Sola, ikonun kalbine doğru */
+  100% { opacity: 0; transform: translateX(-40px); }
+}
+
+/* 3. İkonun Patlama/Onay Efekti */
+@keyframes iconPulse {
+  0% { transform: scale(0.5); }
+  20% { transform: scale(1); }
+  75% { transform: scale(1); background: #22c55e; box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+  85% { transform: scale(1.25); background: #2edb6d; box-shadow: 0 0 0 15px rgba(34, 197, 94, 0); }
+  95% { transform: scale(1); }
+}
+
+/* Tetikleyiciler */
+.auto-save-overlay.show .auto-save-pill {
+  animation: pillShrink 1.8s cubic-bezier(0.19, 1, 0.22, 1) forwards;
+}
+
+.auto-save-overlay.show .auto-save-text {
+  animation: textSwallow 1.8s cubic-bezier(0.19, 1, 0.22, 1) forwards;
+}
+
+.auto-save-overlay.show .auto-save-icon {
+  animation: iconPulse 1.8s cubic-bezier(0.19, 1, 0.22, 1) forwards;
+}
+
+@media (max-width: 1024px) {
+  .auto-save-pill {
+    padding: 4px;
+  }
+
+  .auto-save-icon {
+    width: 24px;
+    height: 24px;
+    padding: 4px;
+  }
+
+  .auto-save-text {
+    font-size: 0.8rem;
+    margin-left: 8px;
+    margin-right: 10px;
+  }
+}
+
+@media (max-width: 640px) {
+  .auto-save-pill {
+    padding: 3px 4px;
+  }
+
+  .auto-save-icon {
+    width: 22px;
+    height: 22px;
+    padding: 3px;
+  }
+
+  .auto-save-text {
+    font-size: 0.78rem;
+  }
+}

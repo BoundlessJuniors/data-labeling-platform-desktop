@@ -73,6 +73,12 @@ function migrateMediaItems(): void {
   if (!hasColumn('media_items', 'updated_at')) {
     db.exec(`ALTER TABLE media_items ADD COLUMN updated_at INTEGER;`)
   }
+  // Her media için etiketleme süresi (saniye cinsinden)
+  if (!hasColumn('media_items', 'annotation_seconds')) {
+    db.exec(
+      `ALTER TABLE media_items ADD COLUMN annotation_seconds INTEGER NOT NULL DEFAULT 0;`
+    )
+  }
   // Var olan satırlarda NULL kalmışsa normalize et
   db.prepare(`UPDATE media_items SET status='in_progress' WHERE status IS NULL`).run()
 }
