@@ -52,21 +52,27 @@ export function useLabelerActions(opts: UseLabelerActionsOptions): UseLabelerAct
       await window.api.db.annotations.saveExport({ media_id: mediaId, data_json: dataJson })
 
       console.log('--- ANNOTATION DATA (IMAGE SPACE JSON) ---\n', dataJson)
-      alert('Taslak kaydedildi: Annotation JSON hem DB’ye yazıldı hem konsola basıldı (F12).')
+      alert('Draft saved: Annotation data has been written to the database and logged to the console (F12).')
     })()
   }
 
   const onSubmit = (): void => {
     void (async () => {
-      const idx = opts.currentTaskIndex.value
-      const t = opts.tasks.value[idx]
-      if (!t) return
+      // Önce tüm task'leri kontrol et: queued kalan var mı?
+      const queued = opts.tasks.value.filter((t) => t.status === 'queued')
+      if (queued.length > 0) {
+        alert('You still have queued images. Please review all images before submitting.')
+        return
+      }
 
-      const mediaId = t.mediaId ?? t.title ?? String(t.id)
-      await window.api.db.media.setStatus({ media_id: mediaId, status: 'completed' })
+      // Hiç queued kalmadıysa: tümünü tek seferde completed yap
+      for (const t of opts.tasks.value) {
+        const mediaId = t.mediaId ?? t.title ?? String(t.id)
+        await window.api.db.media.setStatus({ media_id: mediaId, status: 'completed' })
+        t.status = 'completed'
+      }
 
-      t.status = 'completed'
-      alert('Submitted ✔️')
+      alert('All tasks submitted ✔️')
     })()
   }
 

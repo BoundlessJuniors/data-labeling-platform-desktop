@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref } from 'vue'
+import { onMounted, onBeforeUnmount, ref, nextTick } from 'vue'
 import UndoIcon from '@renderer/assets/icons/custom/undo.svg?component'
 import RedoIcon from '@renderer/assets/icons/custom/redo.svg?component'
 import SelectIcon from '@renderer/assets/icons/custom/touch_app.svg?component'
@@ -84,6 +84,9 @@ const prevBtn = ref<HTMLButtonElement | null>(null)
 const nextBtn = ref<HTMLButtonElement | null>(null)
 
 const deleteBtn = ref<HTMLButtonElement | null>(null)
+
+const tasksNav = ref<HTMLElement | null>(null)
+const autoSaveOverlay = ref<HTMLDivElement | null>(null)
 
 // Label seçilmeden shapes aracı kullanıldığında gösterilecek küçük uyarı
 const showLabelHint = ref(false)
@@ -187,6 +190,45 @@ const autoSaveProgress = ref(0)
 let autoSaveTimer: number | null = null
 let timerInterval: number | null = null
 let onThemeToggleClick: (() => void) | null = null
+
+function playAutoSaveOverlayAnimation(): void {
+  const el = autoSaveOverlay.value
+  if (!el) return
+
+  el.classList.remove('show')
+  // Force reflow so the animation can restart even if class was already present
+  // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+  void el.offsetWidth
+  el.classList.add('show')
+}
+
+async function restartCurrentTask(): Promise<void> {
+  const current = tasks.value[currentTaskIndex.value]
+  if (!current) return
+
+  // 1) Görünümü ekrana sığdır
+  konvaCanvasRef.value?.fitToContainer()
+
+  // 2) Mevcut task için tüm etiketleri temizle (hafıza + UI)
+  state.annotations = []
+  state.selectedAnnotationId = null
+  state.history = []
+  state.historyIndex = -1
+  clearSelection()
+  renderAnnotations()
+  updateDeleteButton()
+
+  const mediaId = getTaskMediaId(current)
+  localAnnotationsByTask.delete(mediaId)
+
+  // 3) DB'deki kaydı da boş bir liste ile overwrite et (tam temizlik)
+  try {
+    const emptyJson = JSON.stringify([], null, 2)
+    await window.api.db.annotations.saveExport({ media_id: mediaId, data_json: emptyJson })
+  } catch (e) {
+    console.error('[Restart] failed to clear annotations in DB:', e)
+  }
+}
 
 /* =============================
    Shapes Dropdown Control
@@ -464,6 +506,7 @@ const saveDraftAndReset = (): void => {
   // Manuel kayıttan sonra otomatik kaydetme sayacını sıfırla ve süreleri kaydet
   autoSaveProgress.value = 0
   void flushTimeToDb()
+  playAutoSaveOverlayAnimation()
 }
 
 async function flushTimeToDb(): Promise<void> {
@@ -596,7 +639,7 @@ onMounted(async (): Promise<void> => {
     konvaCanvasRef.value?.fitToContainer()
   })
   resetViewBtn.value?.addEventListener('click', () => {
-    konvaCanvasRef.value?.fitToContainer()
+    void restartCurrentTask()
   })
 
   // Eski canvas tabanlı fitToScreen/zoom artık KonvaCanvas içinde yönetiliyor.
@@ -631,7 +674,7 @@ onMounted(async (): Promise<void> => {
 
   // 1 dakikalık döngüde, Save Draft butonu üzerinde saat yönünde ilerleyen bir
   // progress halkası ve tam dolduğunda otomatik DB kaydı (oto-kayıt).
-  const AUTO_SAVE_INTERVAL_MS = 1 * 60 * 1000
+  const AUTO_SAVE_INTERVAL_MS = 1 * 10 * 1000
   const AUTO_SAVE_TICK_MS = 200
 
   const triggerAutoSave = async (): Promise<void> => {
@@ -664,8 +707,11 @@ onMounted(async (): Promise<void> => {
         }
       }
 
-        // Süreleri de periyodik olarak DB'ye yaz
-        await flushTimeToDb()
+      // Süreleri de periyodik olarak DB'ye yaz
+      await flushTimeToDb()
+
+      // Canvas üzerinde belirgin bir oto-kayıt bildirimi göster
+      playAutoSaveOverlayAnimation()
     } catch (e) {
       console.error('[AutoSave] failed:', e)
     } finally {
@@ -694,6 +740,11 @@ onMounted(async (): Promise<void> => {
       taskSecondsById.value = {
         ...taskSecondsById.value,
         [mediaId]: prevTaskSeconds + 1
+      }
+
+      // Bu görsel üzerinde ilk kez zaman geçirilirse, status'u queued'dan in_progress'a çek
+      if (prevTaskSeconds === 0 && current.status !== 'completed') {
+        current.status = 'in_progress'
       }
     }, 1000)
   }
@@ -754,6 +805,10 @@ onBeforeUnmount((): void => {
    ============================= */
 async function loadTaskByIndex(i: number): Promise<void> {
   if (tasks.value.length === 0) return
+
+  const prevTool = state.lastUsedTool
+  const prevShape = state.lastUsedShape
+  const prevLabel = state.activeLabel
 
   // Önce mevcut task'in annotation'larını hafızaya yaz (uygulama açıkken geçerli).
   const currentTask = tasks.value[currentTaskIndex.value]
@@ -828,15 +883,61 @@ async function loadTaskByIndex(i: number): Promise<void> {
       }
     }
 
-    const firstLabel = labelList.value?.querySelector('.label-item') as HTMLElement | null
-    setActiveLabel(firstLabel)
-    const selectTool = toolGroup.value?.querySelector(
-      '.annotation-tool[data-tool="select"]'
-    ) as HTMLElement | null
-    setActiveTool(selectTool)
+    let labelEl: HTMLElement | null = null
+    if (prevLabel && labelList.value) {
+      labelEl = labelList.value.querySelector(
+        `.label-item[data-label="${prevLabel}"]`
+      ) as HTMLElement | null
+    }
+    if (!labelEl) {
+      labelEl = labelList.value?.querySelector('.label-item') as HTMLElement | null
+    }
+    setActiveLabel(labelEl)
+
+    let toolEl: HTMLElement | null = null
+    if (prevTool === 'shapes') {
+      const shape = prevShape ?? 'bbox'
+      toolEl = shapesDropdown.value?.querySelector(
+        `.annotation-tool[data-tool="${shape}"]`
+      ) as HTMLElement | null
+    } else {
+      toolEl = toolGroup.value?.querySelector(
+        `.annotation-tool[data-tool="${prevTool}"]`
+      ) as HTMLElement | null
+    }
+
+    if (!toolEl) {
+      toolEl = toolGroup.value?.querySelector(
+        '.annotation-tool[data-tool="select"]'
+      ) as HTMLElement | null
+    }
+    setActiveTool(toolEl)
     // Restore sonrası UI güncelle
     renderAnnotations()
     recordHistory()
+
+    void nextTick(() => {
+      const container = tasksNav.value
+      if (!container) return
+
+      // Eğer 1. göreve geldiysek (Task 1), sidebar'ı tamamen en üste sar
+      if (currentTaskIndex.value === 0) {
+        container.scrollTo({ top: 0, behavior: 'smooth' })
+        return
+      }
+
+      const active = container.querySelector(
+        'a[data-active="true"]'
+      ) as HTMLElement | null
+      if (!active) return
+
+      const cRect = container.getBoundingClientRect()
+      const aRect = active.getBoundingClientRect()
+
+      if (aRect.top >= cRect.top && aRect.bottom <= cRect.bottom) return
+
+      active.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    })
   } catch (err) {
     console.error('Image load failed:', err)
   }
@@ -864,7 +965,8 @@ function goNextTask(): void {
       </div>
 
       <nav
-        class="flex-1 px-4 space-y-2 overflow-y-auto bg-surface/60 dark:bg-background-dark/60 p-3"
+        ref="tasksNav"
+        class="flex-1 px-4 space-y-2 overflow-y-auto bg-surface/60 dark:bg-background-dark/60 p-3 tasks-scroll"
       >
         <div
           class="px-2 mb-2 flex items-center justify-between text-xs font-semibold text-text-secondary dark:text-gray-300 uppercase tracking-wider"
@@ -891,6 +993,7 @@ function goNextTask(): void {
           <li v-for="(t, idx) in tasks" :key="t.id">
             <a
               href="#"
+              :data-active="idx === currentTaskIndex ? 'true' : null"
               :class="[
                 'block rounded-lg overflow-hidden border-2',
                 idx === currentTaskIndex
@@ -1163,7 +1266,7 @@ function goNextTask(): void {
                 <button
                   ref="resetViewBtn"
                   class="p-2 rounded-md hover:bg-white/20"
-                  title="Reset View"
+                  title="Restart"
                 >
                   <ResetViewIcon class="ui-svg h-6 w-6 text-white" />
                 </button>
@@ -1174,6 +1277,17 @@ function goNextTask(): void {
                 class="absolute bottom-4 left-4 bg-black/50 text-white text-xs font-mono rounded px-2 py-1"
               >
                 X: -, Y: -
+              </div>
+
+              <div ref="autoSaveOverlay" class="auto-save-overlay">
+                <div class="auto-save-pill">
+                  <div class="auto-save-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                      <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                  </div>
+                  <span class="auto-save-text">Auto saved</span>
+                </div>
               </div>
             </div>
           </div>

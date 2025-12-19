@@ -40,7 +40,16 @@ export function useTasks(initial: Task[]): {
       title: `Task ${idx + 1}`,
       mediaId: r.id, // asıl DB kimliği
       image: r.local_path,
-      status: r.status === 'completed' ? 'completed' : 'in_progress',
+      // Durum mantığı:
+      // - DB'de status "completed" ise: her zaman completed
+      // - Aksi halde, annotation_seconds > 0 ise: in_progress (üzerinde çalışılmış)
+      // - Hiç süre yoksa: queued (henüz dokunulmamış)
+      status:
+        r.status === 'completed'
+          ? 'completed'
+          : typeof r.annotation_seconds === 'number' && r.annotation_seconds > 0
+            ? 'in_progress'
+            : 'queued',
       timeSeconds: typeof r.annotation_seconds === 'number' ? r.annotation_seconds : 0
     }))
     currentTaskIndex.value = 0

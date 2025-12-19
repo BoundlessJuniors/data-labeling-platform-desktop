@@ -126,24 +126,23 @@ const onClose = (): void => {
       </div>
     </header>
 
-    <!-- Ana içerik -->
+    <!-- Main content -->
     <main class="flex-1 min-h-0">
-      <!-- Dataset seçilmediyse seçim ekranı -->
+      <!-- Dataset selection screen -->
       <div v-if="!selectedDatasetId" class="h-full flex items-center justify-center p-6 overflow-auto">
       <div class="w-full max-w-xl rounded-lg border border-gray-200 p-6 bg-white">
-        <h1 class="text-2xl font-bold mb-2">Dataset Seçimi</h1>
+        <h1 class="text-2xl font-bold mb-2">Dataset Selection</h1>
         <p class="text-sm text-gray-600 mb-4">
-          Devam etmek için bir dataset seçin veya yeni bir klasör import edin.
+          Select a dataset to continue or import a new folder.
         </p>
 
         <div class="flex gap-2 mb-4">
           <button class="px-4 py-2 rounded bg-blue-600 text-white" @click="importDataset">
             Import Dataset
           </button>
-          <button class="px-4 py-2 rounded bg-gray-200" @click="refreshDatasets">Yenile</button>
         </div>
 
-        <div v-if="datasets.length === 0" class="text-sm text-gray-500">Kayıtlı dataset yok.</div>
+        <div v-if="datasets.length === 0" class="text-sm text-gray-500">No datasets found.</div>
 
         <ul v-else class="space-y-2">
           <li
@@ -160,11 +159,11 @@ const onClose = (): void => {
                 class="px-3 py-2 rounded bg-green-600 text-white"
                 @click="selectDataset(d.id)"
               >
-                Seç
+                Select
               </button>
 
               <button class="px-3 py-2 rounded bg-red-600 text-white" @click="deleteDataset(d.id)">
-                Sil
+                Delete
               </button>
             </div>
           </li>
