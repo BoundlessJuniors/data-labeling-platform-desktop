@@ -37,6 +37,33 @@ const api = {
       getExport: (mediaId: string) => ipcRenderer.invoke('db:annotations:getExport', mediaId)
     }
   },
+  sam: {
+    status: () => ipcRenderer.invoke('sam:status'),
+    isInstalled: () => ipcRenderer.invoke('sam:isInstalled'),
+    download: () => ipcRenderer.invoke('sam:download'),
+    ensureReady: () => ipcRenderer.invoke('sam:ensureReady'),
+    run: (payload: { imagePath: string; points: { x: number; y: number }[] }) =>
+      ipcRenderer.invoke('sam:run', payload),
+    onDownloadProgress: (
+      handler: (payload: {
+        stage: 'encoder' | 'decoder'
+        loaded: number
+        total: number | null
+      }) => void
+    ): (() => void) => {
+      const listener = (_event: unknown, payload: unknown): void => {
+        handler(payload as {
+          stage: 'encoder' | 'decoder'
+          loaded: number
+          total: number | null
+        })
+      }
+      ipcRenderer.on('sam:download-progress', listener)
+      return () => {
+        ipcRenderer.removeListener('sam:download-progress', listener)
+      }
+    }
+  },
   dataset: {
     pickFolder: () => ipcRenderer.invoke('dataset:pickFolder')
   },

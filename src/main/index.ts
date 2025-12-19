@@ -7,6 +7,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { initDb } from './db/sqlite'
 import { registerDbIpc } from './ipc/dbIpc'
+import { registerSamIpc } from './ipc/samIpc'
 
 const IMAGE_EXTS = ['.jpg', '.jpeg', '.png', '.bmp', '.webp']
 // local:// protokolünü renderer'da "güvenli/standard" gibi kullanabilmek için
@@ -118,6 +119,7 @@ app.whenReady().then(() => {
   })
   initDb()
   registerDbIpc()
+  registerSamIpc()
 
   // === Dataset folder picker ===
   ipcMain.handle('dataset:pickFolder', async () => {
