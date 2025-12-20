@@ -19,6 +19,8 @@ const props = defineProps<{
   activeShape: 'bbox' | 'polygon' | 'polyline' | 'keypoint' | 'circle'
   activeLabel: string | null
   selectedId: number | null
+  // Düzenleme modu için, şu an düzenlenen polygon id'si (yoksa null)
+  editingId?: number | null
 }>()
 
 const emit = defineEmits<{
@@ -34,6 +36,18 @@ const emit = defineEmits<{
     }
   ): void
   (e: 'pointer-leave'): void
+  (
+    e: 'sam-click',
+    payload: {
+      imgX: number
+      imgY: number
+    }
+  ): void
+  (e: 'sam-edit-request', id: number): void
+  (
+    e: 'update-annotation-geometry',
+    payload: { id: number; points: { x: number; y: number }[] }
+  ): void
 }>()
 
 const containerRef = ref<HTMLDivElement | null>(null)
@@ -55,6 +69,13 @@ const tempPolyPoint = ref<{ x: number; y: number } | null>(null)
 const tempCircle = ref<{ cx: number; cy: number; r: number } | null>(null)
 
 const imageObj = ref<HTMLImageElement | null>(null)
+
+const LONG_PRESS_MS = 400
+let longPressTimer: number | null = null
+let longPressTargetId: number | null = null
+
+// SAM düzenleme modunda, hangi vertex'in sürüklendiğini takip etmek için
+const activeEditVertex = ref<{ annId: number; idx: number } | null>(null)
 
 let resizeObserver: ResizeObserver | null = null
 let keydownHandler: ((e: KeyboardEvent) => void) | null = null
@@ -325,6 +346,32 @@ const handleMouseDown = (e: KonvaEventObject<MouseEvent>): void => {
   // Sol tık dışındaki her şeyi yok say
   if (evt.button !== 0) return
 
+  // SAM aracı aktifken: tek tıklamada imaj koordinatını dışarı bildir,
+  // pan veya shapes çizimine geçme.
+  if (props.activeTool === 'sam') {
+    // Düzenleme modundayken (editingId doluyken) sahneye tıklayınca yeni SAM etiketi üretme.
+    // Bu durumda sadece vertex handle'ları (drag) aktif kalmalı.
+    if (props.editingId != null) return
+
+    // Arka plandaki image dışındaki bir şekle (polygon, bbox, vb.) tıklıyorsak
+    // SAM isteği üretmeyelim. Bu durumlarda ya seçim ya da uzun basma ile edit beklenir.
+    const targetNode = e.target as unknown as Konva.Node | null
+    const className = targetNode && typeof (targetNode as any).getClassName === 'function'
+      ? (targetNode as any).getClassName()
+      : ''
+
+    if (className && className !== 'Image') {
+      // Örneğin polygon veya bbox; SAM tıklaması yapma.
+      return
+    }
+
+    const imgPoint = getImagePoint(stage)
+    if (imgPoint) {
+      emit('sam-click', { imgX: imgPoint.x, imgY: imgPoint.y })
+    }
+    return
+  }
+
   // Çizim modu: shapes + bbox / polygon / polyline / keypoint / circle
   if (props.activeTool === 'shapes') {
     const imgPoint = getImagePoint(stage)
@@ -410,6 +457,30 @@ const handleMouseMove = (e: KonvaEventObject<MouseEvent>): void => {
     stageX.value = pointer.x - panStart.value.x
     stageY.value = pointer.y - panStart.value.y
     clampStagePosition()
+    return
+  }
+
+  // SAM polygon düzenleme modunda: aktif bir vertex sürükleniyorsa, sadece
+  // bu vertex'in konumunu güncelle.
+  if (activeEditVertex.value && props.editingId != null && props.activeTool === 'sam') {
+    const imgPoint = getClampedImagePoint(stage)
+    if (!imgPoint) return
+
+    const annId = activeEditVertex.value.annId
+    const idx = activeEditVertex.value.idx
+    const ann = polygonAnnotations.value.find((a) => a.id === annId)
+    if (!ann) return
+
+    const nextPoints = ann.points.map((p, i) =>
+      i === idx
+        ? {
+            x: imgPoint.x,
+            y: imgPoint.y
+          }
+        : p
+    )
+
+    emit('update-annotation-geometry', { id: annId, points: nextPoints })
     return
   }
 
@@ -523,19 +594,70 @@ const handleMouseUp = (e: KonvaEventObject<MouseEvent>): void => {
   }
   isPanning.value = false
   panStart.value = null
+  activeEditVertex.value = null
 }
 
 const handleMouseLeave = (): void => {
   isPanning.value = false
   panStart.value = null
+  activeEditVertex.value = null
+  if (longPressTimer != null) {
+    window.clearTimeout(longPressTimer)
+    longPressTimer = null
+    longPressTargetId = null
+  }
   emit('pointer-leave')
 }
 
-const handleAnnClick = (id: number, e: KonvaEventObject<MouseEvent>): void => {
-  // Şekil tıklandığında selection sadece select modunda aktif olsun.
-  // Etiketleme (shapes) modundayken eski etiketlere tıklamak hiçbir şey yapmasın.
-  if (props.activeTool !== 'select') return
+const clearLongPress = (): void => {
+  if (longPressTimer != null) {
+    window.clearTimeout(longPressTimer)
+    longPressTimer = null
+    longPressTargetId = null
+  }
+}
 
+const handlePolygonMouseDown = (id: number, e: KonvaEventObject<MouseEvent>): void => {
+  const evt = e.evt
+  if (evt.button !== 0) return
+
+  // SAM modundayken: uzun basma ile düzenleme isteği gönder
+  if (props.activeTool === 'sam') {
+    // Bu tıklamanın stage @mousedown handler'ına gitmesini engelle ki
+    // aynı noktada yeni SAM etiketi üretilmesin.
+    e.cancelBubble = true
+    // Bu tıklamanın stage @mousedown handler'ına gitmesini engelle ki
+    // SAM yeni bir maske üretmesin.
+    clearLongPress()
+    longPressTargetId = id
+    longPressTimer = window.setTimeout(() => {
+      if (longPressTargetId === id) {
+        emit('sam-edit-request', id)
+      }
+      clearLongPress()
+    }, LONG_PRESS_MS)
+  }
+}
+
+const handlePolygonMouseUp = (): void => {
+  clearLongPress()
+}
+
+const handleAnnClick = (id: number, e: KonvaEventObject<MouseEvent>): void => {
+  // Her modda (select / shapes / sam) eski etiketleri seçilebilir yap.
+  e.cancelBubble = true
+  emit('select-annotation', id)
+}
+
+const handlePolygonClick = (id: number, e: KonvaEventObject<MouseEvent>): void => {
+  // SAM modunda polygon'a normal tıklama hiçbir şey yapmamalı (yeni SAM, seçim, mod değişimi yok).
+  if (props.activeTool === 'sam') {
+    e.cancelBubble = true
+    return
+  }
+
+  // Diğer araçlarda (select / shapes) polygon'a tıklama seçimi günceller.
+  // Bu click'in stage @click'ine gitmesini engellemek için bubble'ı kesiyoruz.
   e.cancelBubble = true
   emit('select-annotation', id)
 }
@@ -576,6 +698,18 @@ const zoomBy = (delta: number): void => {
   stageY.value = center.y - mousePointTo.y * newScale
   hasUserTransform.value = true
   clampStagePosition()
+}
+
+const handleVertexMouseDown = (
+  annId: number,
+  idx: number,
+  e: KonvaEventObject<MouseEvent>
+): void => {
+  const evt = e.evt
+  if (evt.button !== 0) return
+  // Sadece bu vertex'i düzenlemek için işaretle; asıl güncelleme stage mousemove içinde yapılır.
+  e.cancelBubble = true
+  activeEditVertex.value = { annId, idx }
 }
 
 defineExpose({
@@ -699,16 +833,46 @@ defineExpose({
           :key="ann.id"
           :points="ann.points.flatMap((p) => [p.x, p.y])"
           :closed="true"
-          :stroke="ann.id === selectedId ? '#ea580c' : '#f97316'"
-          :stroke-width="ann.id === selectedId ? 2 : 0.75"
-          :shadow-color="ann.id === selectedId ? '#ea580c' : undefined"
-          :shadow-blur="ann.id === selectedId ? 8 : 0"
-          :shadow-opacity="ann.id === selectedId ? 0.7 : 0"
+          :stroke="
+            ann.id === editingId
+              ? '#db2777'
+              : ann.id === selectedId
+                ? '#ea580c'
+                : '#f97316'
+          "
+          :stroke-width="ann.id === editingId ? 2.5 : ann.id === selectedId ? 2 : 0.75"
+          :shadow-color="ann.id === editingId ? '#db2777' : ann.id === selectedId ? '#ea580c' : undefined"
+          :shadow-blur="ann.id === editingId || ann.id === selectedId ? 8 : 0"
+          :shadow-opacity="ann.id === editingId || ann.id === selectedId ? 0.7 : 0"
           :shadow-offset-x="0"
           :shadow-offset-y="0"
-          :fill="ann.id === selectedId ? 'rgba(249,115,22,0.2)' : 'rgba(249,115,22,0.15)'"
-          @click="(e) => handleAnnClick(ann.id, e)"
+          :fill="
+            ann.id === editingId
+              ? 'rgba(236,72,153,0.25)'
+              : ann.id === selectedId
+                ? 'rgba(249,115,22,0.2)'
+                : 'rgba(249,115,22,0.15)'
+          "
+          @click="(e) => handlePolygonClick(ann.id, e)"
+          @mousedown="(e) => handlePolygonMouseDown(ann.id, e)"
+          @mouseup="handlePolygonMouseUp"
         />
+
+        <!-- Polygon düzenleme modu: vertex handle'ları (her zaman polygonların ÜSTÜNDE) -->
+        <template v-for="ann in polygonAnnotations" :key="`edit-${ann.id}`">
+          <v-circle
+            v-if="editingId === ann.id"
+            v-for="(p, idx) in ann.points"
+            :key="`edit-handle-${ann.id}-${idx}`"
+            :x="p.x"
+            :y="p.y"
+            :radius="5"
+            fill="#ffffff"
+            stroke="#ec4899"
+            :stroke-width="1.5"
+            @mousedown="(e) => handleVertexMouseDown(ann.id, idx, e)"
+          />
+        </template>
 
         <v-line
           v-for="ann in polylineAnnotations"

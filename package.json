@@ -26,8 +26,10 @@
     "@popperjs/core": "^2.11.8",
     "better-sqlite3": "^12.5.0",
     "electron-updater": "^6.3.9",
-    "konva": "^9.3.22",
-    "vue-konva": "^3.2.6"
+      "konva": "^9.3.22",
+      "onnxruntime-node": "^1.23.2",
+      "jimp": "^0.22.12",
+      "vue-konva": "^3.2.6"
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config-prettier": "3.0.0",

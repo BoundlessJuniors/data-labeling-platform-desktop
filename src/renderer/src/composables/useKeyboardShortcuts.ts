@@ -22,6 +22,8 @@ type KeyboardDeps = {
   saveDraft: () => void
   goPrevTask: () => void
   goNextTask: () => void
+  // SAM polygon düzenleme modu aktif mi? (LabelerView içindeki samEditingId üzerinden)
+  hasSamEditing: () => boolean
 }
 
 export function useKeyboardShortcuts(deps: KeyboardDeps): {
@@ -44,7 +46,8 @@ export function useKeyboardShortcuts(deps: KeyboardDeps): {
       enterPanMode,
       saveDraft,
       goPrevTask,
-      goNextTask
+      goNextTask,
+      hasSamEditing
     } = deps
 
     handler = (e: KeyboardEvent): void => {
@@ -102,7 +105,21 @@ export function useKeyboardShortcuts(deps: KeyboardDeps): {
         return
       }
 
-      // Polygon / polyline tamamlama – iptal
+      // SAM polygon düzenleme modu: Enter / Escape
+      if (hasSamEditing()) {
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          commitPoly()
+          return
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault()
+          cancelPoly()
+          return
+        }
+      }
+
+      // Polygon / polyline çizimi (manuel shapes aracı) için Enter/Escape
       if (
         state.isDrawing &&
         (state.drawingShape === 'polygon' || state.drawingShape === 'polyline')
@@ -121,6 +138,14 @@ export function useKeyboardShortcuts(deps: KeyboardDeps): {
 
       // Genel Escape davranışı
       if (e.key === 'Escape') {
+        // Buraya gelmişsek SAM edit modu (hasSamEditing) zaten yukarıda ele alındı.
+        // SAM aracı aktifken ve edit modu kapalıyken: tek Esc ile pan/select moduna geç.
+        if (state.lastUsedTool === 'sam') {
+          e.preventDefault()
+          enterPanMode()
+          return
+        }
+
         // Önce mevcut seçim varsa onu temizle
         if (state.selectedAnnotationId != null) {
           e.preventDefault()

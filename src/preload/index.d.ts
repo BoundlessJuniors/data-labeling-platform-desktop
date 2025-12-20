@@ -54,6 +54,48 @@ declare global {
           getExport: (mediaId: string) => Promise<{ data_json: string; updated_at: number } | null>
         }
       }
+      sam: {
+        status: () => Promise<{
+          status: 'idle' | 'downloading' | 'ready' | 'error'
+          error: string | null
+        }>
+        isInstalled: () => Promise<{
+          downloaded: boolean
+          state: {
+            status: 'idle' | 'downloading' | 'ready' | 'error'
+            error: string | null
+          }
+        }>
+        download: () => Promise<{
+          ok: boolean
+          path: string
+          state: {
+            status: 'idle' | 'downloading' | 'ready' | 'error'
+            error: string | null
+          }
+        }>
+        ensureReady: () => Promise<{
+          ok: boolean
+          state: {
+            status: 'idle' | 'downloading' | 'ready' | 'error'
+            error: string | null
+          }
+        }>
+        run: (payload: {
+          imagePath: string
+          points: { x: number; y: number }[]
+        }) => Promise<{
+          ok: boolean
+          mask: { points: { x: number; y: number }[] }
+        }>
+        onDownloadProgress: (
+          handler: (payload: {
+            stage: 'encoder' | 'decoder'
+            loaded: number
+            total: number | null
+          }) => void
+        ) => () => void
+      }
       dataset: {
         pickFolder: () => Promise<{
           folder: string
