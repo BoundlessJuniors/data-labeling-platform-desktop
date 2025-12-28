@@ -47,7 +47,7 @@ const emit = defineEmits<{
       imgY: number
     }
   ): void
-  (e: 'sam-edit-request', id: number): void
+  (e: 'edit-request', id: number): void
   (
     e: 'update-annotation-geometry',
     payload: { id: number; points: { x: number; y: number }[] }
@@ -370,13 +370,16 @@ const handleMouseDown = (e: KonvaEventObject<MouseEvent>): void => {
   // Sol tık dışındaki her şeyi yok say
   if (evt.button !== 0) return
 
+  // Eğer herhangi bir polygon düzenleniyorsa (SAM veya Shapes),
+  // sahneye tıklanması yeni bir çizim başlatmamalıdır.
+  // Sadece vertex handle'ları (drag) çalışmalı.
+  if (props.editingId != null) return
+
   // SAM aracı aktifken: tek tıklamada imaj koordinatını dışarı bildir,
   // pan veya shapes çizimine geçme.
   if (props.activeTool === 'sam') {
-    // Düzenleme modundayken (editingId doluyken) sahneye tıklayınca yeni SAM etiketi üretme.
-    // Bu durumda sadece vertex handle'ları (drag) aktif kalmalı.
-    if (props.editingId != null) return
-
+    // (editingId kontrolü yukarı taşındı)
+    
     // Arka plandaki image dışındaki bir şekle (polygon, bbox, vb.) tıklıyorsak
     // SAM isteği üretmeyelim. Bu durumlarda ya seçim ya da uzun basma ile edit beklenir.
     const targetNode = e.target as unknown as Konva.Node | null
@@ -484,9 +487,9 @@ const handleMouseMove = (e: KonvaEventObject<MouseEvent>): void => {
     return
   }
 
-  // SAM polygon düzenleme modunda: aktif bir vertex sürükleniyorsa, sadece
+  // Polygon düzenleme modunda: aktif bir vertex sürükleniyorsa, sadece
   // bu vertex'in konumunu güncelle.
-  if (activeEditVertex.value && props.editingId != null && props.activeTool === 'sam') {
+  if (activeEditVertex.value && props.editingId != null) {
     const imgPoint = getClampedImagePoint(stage)
     if (!imgPoint) return
 
@@ -663,8 +666,11 @@ const handlePolygonMouseDown = (id: number, e: KonvaEventObject<MouseEvent>): vo
   const evt = e.evt
   if (evt.button !== 0) return
 
-  // SAM modundayken
-  if (props.activeTool === 'sam') {
+  // SAM veya Shapes modundayken edit moduna geçişi destekle
+  if (
+    props.activeTool === 'sam' ||
+    props.activeTool === 'shapes'
+  ) {
     e.cancelBubble = true
 
     // EĞER bu polygon zaten düzenleniyorsa (editingId === id), tıklanan yere nokta ekle
@@ -716,7 +722,7 @@ const handlePolygonMouseDown = (id: number, e: KonvaEventObject<MouseEvent>): vo
     longPressTargetId = id
     longPressTimer = window.setTimeout(() => {
       if (longPressTargetId === id) {
-        emit('sam-edit-request', id)
+        emit('edit-request', id)
       }
       clearLongPress()
     }, LONG_PRESS_MS)

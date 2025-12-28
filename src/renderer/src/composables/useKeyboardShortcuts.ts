@@ -22,11 +22,11 @@ type KeyboardDeps = {
   saveDraft: () => void
   goPrevTask: () => void
   goNextTask: () => void
-  // SAM polygon düzenleme modu aktif mi? (LabelerView içindeki samEditingId üzerinden)
-  hasSamEditing: () => boolean
-  // SAM edit modunda özel undo/redo (opsiyonel)
-  undoSamEdit?: () => void
-  redoSamEdit?: () => void
+  // Polygon düzenleme modu aktif mi? (LabelerView içindeki editingAnnotationId üzerinden)
+  hasLocalEditing: () => boolean
+  // Edit modunda özel undo/redo (opsiyonel)
+  undoLocalEdit?: () => void
+  redoLocalEdit?: () => void
 }
 
 export function useKeyboardShortcuts(deps: KeyboardDeps): {
@@ -50,9 +50,9 @@ export function useKeyboardShortcuts(deps: KeyboardDeps): {
       saveDraft,
       goPrevTask,
       goNextTask,
-      hasSamEditing,
-      undoSamEdit,
-      redoSamEdit
+      hasLocalEditing,
+      undoLocalEdit,
+      redoLocalEdit
     } = deps
 
     handler = (e: KeyboardEvent): void => {
@@ -72,9 +72,9 @@ export function useKeyboardShortcuts(deps: KeyboardDeps): {
       // Undo
       if (e.ctrlKey && !e.shiftKey && key === 'z') {
         e.preventDefault()
-        // SAM edit modundaysak ve özel handler varsa onu kullan
-        if (hasSamEditing() && undoSamEdit) {
-          undoSamEdit()
+        // Edit modundaysak ve özel handler varsa onu kullan
+        if (hasLocalEditing() && undoLocalEdit) {
+          undoLocalEdit()
         } else {
           undo()
         }
@@ -84,9 +84,9 @@ export function useKeyboardShortcuts(deps: KeyboardDeps): {
       // Redo
       if ((e.ctrlKey && key === 'y') || (e.ctrlKey && e.shiftKey && key === 'z')) {
         e.preventDefault()
-        // SAM edit modundaysak ve özel handler varsa onu kullan
-        if (hasSamEditing() && redoSamEdit) {
-          redoSamEdit()
+        // Edit modundaysak ve özel handler varsa onu kullan
+        if (hasLocalEditing() && redoLocalEdit) {
+          redoLocalEdit()
         } else {
           redo()
         }
@@ -121,8 +121,8 @@ export function useKeyboardShortcuts(deps: KeyboardDeps): {
         return
       }
 
-      // SAM polygon düzenleme modu: Enter / Escape
-      if (hasSamEditing()) {
+      // Polygon düzenleme modu: Enter / Escape
+      if (hasLocalEditing()) {
         if (e.key === 'Enter') {
           e.preventDefault()
           commitPoly()
@@ -154,7 +154,7 @@ export function useKeyboardShortcuts(deps: KeyboardDeps): {
 
       // Genel Escape davranışı
       if (e.key === 'Escape') {
-        // Buraya gelmişsek SAM edit modu (hasSamEditing) zaten yukarıda ele alındı.
+        // Buraya gelmişsek edit modu (hasLocalEditing) zaten yukarıda ele alındı.
         // SAM aracı aktifken ve edit modu kapalıyken: tek Esc ile pan/select moduna geç.
         if (state.lastUsedTool === 'sam') {
           e.preventDefault()

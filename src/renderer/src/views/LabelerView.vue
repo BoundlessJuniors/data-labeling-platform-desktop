@@ -94,18 +94,17 @@ const samDownloading = ref(false)
 const samDownloadProgress = ref(0)
 const samDownloadStage = ref<'idle' | 'encoder' | 'decoder' | 'done'>('idle')
 
-// SAM ile oluşturulmuş polygon için düzenleme modu
-const samEditingId = ref<number | null>(null)
-const samEditingOriginalPoints = ref<{ x: number; y: number }[] | null>(null)
-// SAM edit modu için yerel undo/redo geçmişi
-// Her adım bir nokta dizisidir: {x,y}[]
-const samEditHistory = ref<{ x: number; y: number }[][]>([])
-const samEditHistoryIndex = ref(-1)
+// Polygon düzenleme modu (SAM veya normal polygon)
+const editingAnnotationId = ref<number | null>(null)
+const editingOriginalPoints = ref<{ x: number; y: number }[] | null>(null)
+// Edit modu için yerel undo/redo geçmişi
+const editHistory = ref<{ x: number; y: number }[][]>([])
+const editHistoryIndex = ref(-1)
 
-// SAM etiketi oluşturulduğunda, kullanıcıya kısa bir edit ipucu göstermek için
-const showSamEditHint = ref(false)
-let samEditHintTimer: number | null = null
-const samEditHintDismissed = ref(false)
+// Edit ipucu (artık genel)
+const showEditHint = ref(false)
+let editHintTimer: number | null = null
+const editHintDismissed = ref(false)
 
 // Label seçilmeden shapes aracı kullanıldığında gösterilecek küçük uyarı
 const showLabelHint = ref(false)
@@ -530,6 +529,11 @@ function handleSelectAnnotationFromKonva(id: number | null): void {
     state.selectedAnnotationId = null
     clearSelection()
   } else {
+    // FIX: Eğer zaten düzenleme modundaysak ve aynı etikete tıklandıysa (long-press sonrası click),
+    // araç değişimini (pan moda geçişi) engellemek için işlem yapma.
+    if (editingAnnotationId.value === id) {
+      return
+    }
     selectAnnotation(id)
   }
 }
@@ -594,14 +598,13 @@ async function handleSamClickFromKonva(payload: { imgX: number; imgY: number }):
     renderAnnotations()
     updateDeleteButton()
 
-    // Kullanıcıya SAM maskesini uzun basarak düzenleyebileceğini kısa süreli göster
-    // (eğer kullanıcı daha önce "Don't show again" demediyse)
-    if (!samEditHintDismissed.value) {
-      showSamEditHint.value = true
-      if (samEditHintTimer != null) window.clearTimeout(samEditHintTimer)
-      samEditHintTimer = window.setTimeout(() => {
-        showSamEditHint.value = false
-        samEditHintTimer = null
+    // Kullanıcıya maskeyi düzenleyebileceğini göster
+    if (!editHintDismissed.value) {
+      showEditHint.value = true
+      if (editHintTimer != null) window.clearTimeout(editHintTimer)
+      editHintTimer = window.setTimeout(() => {
+        showEditHint.value = false
+        editHintTimer = null
       }, 2600)
     }
   } catch (e) {
@@ -610,17 +613,19 @@ async function handleSamClickFromKonva(payload: { imgX: number; imgY: number }):
   }
 }
 
-function handleSamEditRequestFromKonva(id: number): void {
+function handleEditRequestFromKonva(id: number): void {
   const ann = state.annotations.find((a) => a.id === id && a.type === 'polygon')
   if (!ann || !ann.points || ann.points.length < 3) return
 
-  samEditingId.value = id
-  samEditingId.value = id
-  samEditingOriginalPoints.value = ann.points.map((p) => ({ x: p.x, y: p.y }))
+  editingAnnotationId.value = id
+  editingOriginalPoints.value = ann.points.map((p) => ({ x: p.x, y: p.y }))
   // Edit başlarken mevcut hali geçmişe ekle
-  samEditHistory.value = [ann.points.map((p) => ({ x: p.x, y: p.y }))]
-  samEditHistoryIndex.value = 0
+  editHistory.value = [ann.points.map((p) => ({ x: p.x, y: p.y }))]
+  editHistoryIndex.value = 0
+  editHistoryIndex.value = 0
   state.selectedAnnotationId = id
+  renderAnnotations()
+  updateDeleteButton()
 }
 
 function handleUpdateAnnotationGeometryFromKonva(payload: {
@@ -652,14 +657,14 @@ function handleUpdateAnnotationGeometryFromKonva(payload: {
 }
 
 function handleAnnotationTransformEndFromKonva(): void {
-  // Eğer SAM edit modundaysak, bu bitişi yerel history'ye ekle
-  if (samEditingId.value != null) {
-    const ann = state.annotations.find((a) => a.id === samEditingId.value)
+  // Eğer edit modundaysak, bu bitişi yerel history'ye ekle
+  if (editingAnnotationId.value != null) {
+    const ann = state.annotations.find((a) => a.id === editingAnnotationId.value)
     if (ann && ann.points) {
       // History'nin ilerisini kes (yeni dal)
-      samEditHistory.value = samEditHistory.value.slice(0, samEditHistoryIndex.value + 1)
-      samEditHistory.value.push(ann.points.map((p) => ({ x: p.x, y: p.y })))
-      samEditHistoryIndex.value++
+      editHistory.value = editHistory.value.slice(0, editHistoryIndex.value + 1)
+      editHistory.value.push(ann.points.map((p) => ({ x: p.x, y: p.y })))
+      editHistoryIndex.value++
     }
     return
   }
@@ -668,29 +673,29 @@ function handleAnnotationTransformEndFromKonva(): void {
   recordHistory()
 }
 
-// SAM Local Undo
-function undoSamEdit(): void {
-  if (samEditHistoryIndex.value > 0) {
-    samEditHistoryIndex.value--
-    const points = samEditHistory.value[samEditHistoryIndex.value]
+// Local Undo
+function undoLocalEdit(): void {
+  if (editHistoryIndex.value > 0) {
+    editHistoryIndex.value--
+    const points = editHistory.value[editHistoryIndex.value]
     // State'i güncelle
-    updateSamPolygonPoints(points)
+    updatePolygonPoints(points)
   }
 }
 
-// SAM Local Redo
-function redoSamEdit(): void {
-  if (samEditHistoryIndex.value < samEditHistory.value.length - 1) {
-    samEditHistoryIndex.value++
-    const points = samEditHistory.value[samEditHistoryIndex.value]
+// Local Redo
+function redoLocalEdit(): void {
+  if (editHistoryIndex.value < editHistory.value.length - 1) {
+    editHistoryIndex.value++
+    const points = editHistory.value[editHistoryIndex.value]
     // State'i güncelle
-    updateSamPolygonPoints(points)
+    updatePolygonPoints(points)
   }
 }
 
-function updateSamPolygonPoints(points: { x: number; y: number }[]): void {
-  if (samEditingId.value == null) return
-  const idx = state.annotations.findIndex((a) => a.id === samEditingId.value)
+function updatePolygonPoints(points: { x: number; y: number }[]): void {
+  if (editingAnnotationId.value == null) return
+  const idx = state.annotations.findIndex((a) => a.id === editingAnnotationId.value)
   if (idx === -1) return
 
   const updated = {
@@ -702,28 +707,28 @@ function updateSamPolygonPoints(points: { x: number; y: number }[]): void {
   state.annotations = next
 }
 
-function dismissSamEditHint(): void {
-  samEditHintDismissed.value = true
-  showSamEditHint.value = false
-  if (samEditHintTimer != null) {
-    window.clearTimeout(samEditHintTimer)
-    samEditHintTimer = null
+function dismissEditHint(): void {
+  editHintDismissed.value = true
+  showEditHint.value = false
+  if (editHintTimer != null) {
+    window.clearTimeout(editHintTimer)
+    editHintTimer = null
   }
-  localStorage.setItem('samEditHintDismissed', '1')
+  localStorage.setItem('editHintDismissed', '1')
 }
 
 /* =============================
    Polygon / Polyline Tamamlama
    ============================= */
 const cancelPoly = (): void => {
-  // Önce SAM polygon düzenleme modundan çıkmak gerekiyorsa onu ele al
-  if (samEditingId.value != null) {
-    const ann = state.annotations.find((a) => a.id === samEditingId.value && a.type === 'polygon')
-    if (ann && samEditingOriginalPoints.value) {
-      ann.points = samEditingOriginalPoints.value.map((p) => ({ x: p.x, y: p.y }))
+  // Önce polygon düzenleme modundan çıkmak gerekiyorsa onu ele al
+  if (editingAnnotationId.value != null) {
+    const ann = state.annotations.find((a) => a.id === editingAnnotationId.value && a.type === 'polygon')
+    if (ann && editingOriginalPoints.value) {
+      ann.points = editingOriginalPoints.value.map((p) => ({ x: p.x, y: p.y }))
     }
-    samEditingId.value = null
-    samEditingOriginalPoints.value = null
+    editingAnnotationId.value = null
+    editingOriginalPoints.value = null
     return
   }
 
@@ -750,10 +755,10 @@ const cancelPoly = (): void => {
 }
 
 const commitPoly = (): void => {
-  // SAM polygon düzenleme modunda Enter: sadece düzenlemeyi sonlandır, SAM aracı açık kalsın
-  if (samEditingId.value != null) {
-    samEditingId.value = null
-    samEditingOriginalPoints.value = null
+  // Polygon düzenleme modunda Enter: sadece düzenlemeyi sonlandır
+  if (editingAnnotationId.value != null) {
+    editingAnnotationId.value = null
+    editingOriginalPoints.value = null
     recordHistory()
     return
   }
@@ -804,9 +809,11 @@ const { attachKeyboardShortcuts, detachKeyboardShortcuts } = useKeyboardShortcut
   goNextTask,
   goPrevTask,
   goNextTask,
-  hasSamEditing: () => samEditingId.value != null,
-  undoSamEdit,
-  redoSamEdit
+  goPrevTask,
+  goNextTask,
+  hasLocalEditing: () => editingAnnotationId.value != null,
+  undoLocalEdit,
+  redoLocalEdit
 })
 
 // Eski canvas etkileşimleri (useCanvasInteractions) Konva geçişiyle birlikte devre dışı bırakıldı.
@@ -829,8 +836,8 @@ onMounted(async (): Promise<void> => {
   document.documentElement.classList.toggle('dark', shouldDark)
 
   // SAM edit ipucu daha önce kapatıldıysa tekrar gösterme
-  const samHintFlag = localStorage.getItem('samEditHintDismissed')
-  samEditHintDismissed.value = samHintFlag === '1'
+  const samHintFlag = localStorage.getItem('editHintDismissed')
+  editHintDismissed.value = samHintFlag === '1'
 
   // === THEME TOGGLE BUTTON ===
   onThemeToggleClick = (): void => {
@@ -1562,30 +1569,30 @@ function goNextTask(): void {
                 :active-label="state.activeLabel"
                 :selected-id="state.selectedAnnotationId"
 
-                :editing-id="samEditingId"
+                :editing-id="editingAnnotationId"
                 :stroke-width="strokeWidth"
                 @create-annotation="handleCreateAnnotationFromKonva"
                 @select-annotation="handleSelectAnnotationFromKonva"
                 @pointer-move="handlePointerMove"
                 @pointer-leave="handlePointerLeave"
                 @sam-click="handleSamClickFromKonva"
-                @sam-edit-request="handleSamEditRequestFromKonva"
+                @edit-request="handleEditRequestFromKonva"
                 @update-annotation-geometry="handleUpdateAnnotationGeometryFromKonva"
                 @annotation-transform-end="handleAnnotationTransformEndFromKonva"
               />
 
-              <!-- SAM edit hint toast -->
+              <!-- Edit hint toast -->
               <transition name="fade">
                 <div
-                  v-if="showSamEditHint"
+                  v-if="showEditHint"
                   class="absolute top-4 right-4 bg-black/80 text-white text-xs sm:text-sm px-3 py-2 rounded-lg shadow-lg flex items-center gap-2 max-w-xs"
                 >
                   <SamIcon class="ui-svg h-4 w-4 text-primary-light" />
-                  <span>Tip: Long-press on a SAM mask to adjust its shape.</span>
+                  <span>Tip: Long-press on a polygon to adjust its shape.</span>
                   <button
                     type="button"
                     class="ml-1 text-[10px] sm:text-xs underline underline-offset-2 decoration-white/60 hover:decoration-white focus:outline-none"
-                    @click.stop="dismissSamEditHint"
+                    @click.stop="dismissEditHint"
                   >
                     Don’t show again
                   </button>
