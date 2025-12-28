@@ -52,6 +52,7 @@ const emit = defineEmits<{
     e: 'update-annotation-geometry',
     payload: { id: number; points: { x: number; y: number }[] }
   ): void
+  (e: 'annotation-transform-end'): void
 }>()
 
 const containerRef = ref<HTMLDivElement | null>(null)
@@ -617,6 +618,11 @@ const handleMouseUp = (e: KonvaEventObject<MouseEvent>): void => {
   }
   isPanning.value = false
   panStart.value = null
+
+  // Eğer bir vertex düzenliyorsak, işlem bittiğinde state'i haber ver
+  if (activeEditVertex.value) {
+    emit('annotation-transform-end')
+  }
   activeEditVertex.value = null
 }
 
@@ -640,17 +646,72 @@ const clearLongPress = (): void => {
   }
 }
 
+const getDistToSegment = (
+  p: { x: number; y: number },
+  v: { x: number; y: number },
+  w: { x: number; y: number }
+): { dist: number; proj: { x: number; y: number } } => {
+  const l2 = (v.x - w.x) ** 2 + (v.y - w.y) ** 2
+  if (l2 === 0) return { dist: Math.hypot(p.x - v.x, p.y - v.y), proj: v }
+  let t = ((p.x - v.x) * (w.x - v.x) + (p.y - v.y) * (w.y - v.y)) / l2
+  t = Math.max(0, Math.min(1, t))
+  const proj = { x: v.x + t * (w.x - v.x), y: v.y + t * (w.y - v.y) }
+  return { dist: Math.hypot(p.x - proj.x, p.y - proj.y), proj }
+}
+
 const handlePolygonMouseDown = (id: number, e: KonvaEventObject<MouseEvent>): void => {
   const evt = e.evt
   if (evt.button !== 0) return
 
-  // SAM modundayken: uzun basma ile düzenleme isteği gönder
+  // SAM modundayken
   if (props.activeTool === 'sam') {
-    // Bu tıklamanın stage @mousedown handler'ına gitmesini engelle ki
-    // aynı noktada yeni SAM etiketi üretilmesin.
     e.cancelBubble = true
-    // Bu tıklamanın stage @mousedown handler'ına gitmesini engelle ki
-    // SAM yeni bir maske üretmesin.
+
+    // EĞER bu polygon zaten düzenleniyorsa (editingId === id), tıklanan yere nokta ekle
+    if (props.editingId === id) {
+      const stage = e.target?.getStage?.()
+      if (!stage) return
+      const imgPoint = getClampedImagePoint(stage)
+      if (!imgPoint) return
+
+      const ann = polygonAnnotations.value.find((a) => a.id === id)
+      if (!ann) return
+
+      // En uygun ekleme noktasını bul (en yakın segment)
+      let minDist = Infinity
+      let insertIndex = -1
+      // Varsayılan olarak tıklanan noktayı alacağız, ama proje edilmiş noktayı (çizgi üstü) kullanmak daha şık olur.
+      let newPoint = { x: imgPoint.x, y: imgPoint.y }
+
+      const points = ann.points
+      for (let i = 0; i < points.length; i++) {
+        const p1 = points[i]
+        const p2 = points[(i + 1) % points.length] // Döngüsel
+
+        const { dist, proj } = getDistToSegment(imgPoint, p1, p2)
+        if (dist < minDist) {
+          minDist = dist
+          insertIndex = i + 1
+          newPoint = proj
+        }
+      }
+
+      if (insertIndex !== -1) {
+        const newPoints = [
+          ...points.slice(0, insertIndex),
+          newPoint,
+          ...points.slice(insertIndex)
+        ]
+        
+        emit('update-annotation-geometry', { id, points: newPoints })
+        
+        // Eklediğimiz noktayı hemen düzenlemeye (drag) başla
+        activeEditVertex.value = { annId: id, idx: insertIndex }
+      }
+      return
+    }
+
+    // EĞER düzenlenmiyorsa, uzun basma ile düzenleme modu isteği gönder
     clearLongPress()
     longPressTargetId = id
     longPressTimer = window.setTimeout(() => {

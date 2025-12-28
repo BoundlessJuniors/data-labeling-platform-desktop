@@ -24,6 +24,9 @@ type KeyboardDeps = {
   goNextTask: () => void
   // SAM polygon düzenleme modu aktif mi? (LabelerView içindeki samEditingId üzerinden)
   hasSamEditing: () => boolean
+  // SAM edit modunda özel undo/redo (opsiyonel)
+  undoSamEdit?: () => void
+  redoSamEdit?: () => void
 }
 
 export function useKeyboardShortcuts(deps: KeyboardDeps): {
@@ -47,7 +50,9 @@ export function useKeyboardShortcuts(deps: KeyboardDeps): {
       saveDraft,
       goPrevTask,
       goNextTask,
-      hasSamEditing
+      hasSamEditing,
+      undoSamEdit,
+      redoSamEdit
     } = deps
 
     handler = (e: KeyboardEvent): void => {
@@ -67,14 +72,24 @@ export function useKeyboardShortcuts(deps: KeyboardDeps): {
       // Undo
       if (e.ctrlKey && !e.shiftKey && key === 'z') {
         e.preventDefault()
-        undo()
+        // SAM edit modundaysak ve özel handler varsa onu kullan
+        if (hasSamEditing() && undoSamEdit) {
+          undoSamEdit()
+        } else {
+          undo()
+        }
         return
       }
 
       // Redo
       if ((e.ctrlKey && key === 'y') || (e.ctrlKey && e.shiftKey && key === 'z')) {
         e.preventDefault()
-        redo()
+        // SAM edit modundaysak ve özel handler varsa onu kullan
+        if (hasSamEditing() && redoSamEdit) {
+          redoSamEdit()
+        } else {
+          redo()
+        }
         return
       }
 

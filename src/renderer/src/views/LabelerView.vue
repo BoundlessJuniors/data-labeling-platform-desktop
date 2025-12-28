@@ -97,6 +97,10 @@ const samDownloadStage = ref<'idle' | 'encoder' | 'decoder' | 'done'>('idle')
 // SAM ile oluşturulmuş polygon için düzenleme modu
 const samEditingId = ref<number | null>(null)
 const samEditingOriginalPoints = ref<{ x: number; y: number }[] | null>(null)
+// SAM edit modu için yerel undo/redo geçmişi
+// Her adım bir nokta dizisidir: {x,y}[]
+const samEditHistory = ref<{ x: number; y: number }[][]>([])
+const samEditHistoryIndex = ref(-1)
 
 // SAM etiketi oluşturulduğunda, kullanıcıya kısa bir edit ipucu göstermek için
 const showSamEditHint = ref(false)
@@ -611,7 +615,11 @@ function handleSamEditRequestFromKonva(id: number): void {
   if (!ann || !ann.points || ann.points.length < 3) return
 
   samEditingId.value = id
+  samEditingId.value = id
   samEditingOriginalPoints.value = ann.points.map((p) => ({ x: p.x, y: p.y }))
+  // Edit başlarken mevcut hali geçmişe ekle
+  samEditHistory.value = [ann.points.map((p) => ({ x: p.x, y: p.y }))]
+  samEditHistoryIndex.value = 0
   state.selectedAnnotationId = id
 }
 
@@ -627,7 +635,68 @@ function handleUpdateAnnotationGeometryFromKonva(payload: {
     points: payload.points.map((p) => ({ x: p.x, y: p.y }))
   }
 
-  // Vue reaktivitesini garanti etmek için diziyi kopyalayarak güncelle
+  const next = state.annotations.slice()
+  next[idx] = updated as Annotation
+  state.annotations = next
+
+  // Eğer SAM edit modundaysak, her geometri güncellemesini yerel geçmişe ekle
+  // Ancak "sürükleme sırasında" yüzlerce kez tetiklenmemesi için
+  // KonvaCanvas tarafında "annotation-transform-end" kullanacağız.
+  // FAKAT burada basitlik adına ve "Ctrl+Z"nin anlık çalışması için:
+  // Mouse sürüklerken sürekli update gelir. Bunu history'ye yazmak yerine
+  // sadece interaction bittiğinde yazmak daha doğru. 
+  // O yüzden buraya eklemiyoruz. KonvaCanvas'tan gelen özel bir event bekleyeceğiz.
+  // YA DA: Kullanıcı isteği "noktaları düzenlerken" yani drag+drop sonrasında.
+  // KonvaCanvas güncellemesi drag sırasında sürekli akar. Biz bunu anlık state'e yansıttık.
+  // History kaydını ise handleAnnotationTransformEndFromKonva'da yapacağız.
+}
+
+function handleAnnotationTransformEndFromKonva(): void {
+  // Eğer SAM edit modundaysak, bu bitişi yerel history'ye ekle
+  if (samEditingId.value != null) {
+    const ann = state.annotations.find((a) => a.id === samEditingId.value)
+    if (ann && ann.points) {
+      // History'nin ilerisini kes (yeni dal)
+      samEditHistory.value = samEditHistory.value.slice(0, samEditHistoryIndex.value + 1)
+      samEditHistory.value.push(ann.points.map((p) => ({ x: p.x, y: p.y })))
+      samEditHistoryIndex.value++
+    }
+    return
+  }
+
+  // Normal modda (BBox resize vb.) global history kaydı al
+  recordHistory()
+}
+
+// SAM Local Undo
+function undoSamEdit(): void {
+  if (samEditHistoryIndex.value > 0) {
+    samEditHistoryIndex.value--
+    const points = samEditHistory.value[samEditHistoryIndex.value]
+    // State'i güncelle
+    updateSamPolygonPoints(points)
+  }
+}
+
+// SAM Local Redo
+function redoSamEdit(): void {
+  if (samEditHistoryIndex.value < samEditHistory.value.length - 1) {
+    samEditHistoryIndex.value++
+    const points = samEditHistory.value[samEditHistoryIndex.value]
+    // State'i güncelle
+    updateSamPolygonPoints(points)
+  }
+}
+
+function updateSamPolygonPoints(points: { x: number; y: number }[]): void {
+  if (samEditingId.value == null) return
+  const idx = state.annotations.findIndex((a) => a.id === samEditingId.value)
+  if (idx === -1) return
+
+  const updated = {
+    ...state.annotations[idx],
+    points: points.map((p) => ({ x: p.x, y: p.y }))
+  }
   const next = state.annotations.slice()
   next[idx] = updated as Annotation
   state.annotations = next
@@ -685,6 +754,7 @@ const commitPoly = (): void => {
   if (samEditingId.value != null) {
     samEditingId.value = null
     samEditingOriginalPoints.value = null
+    recordHistory()
     return
   }
 
@@ -732,7 +802,11 @@ const { attachKeyboardShortcuts, detachKeyboardShortcuts } = useKeyboardShortcut
   saveDraft: saveDraftAndReset,
   goPrevTask,
   goNextTask,
-  hasSamEditing: () => samEditingId.value != null
+  goPrevTask,
+  goNextTask,
+  hasSamEditing: () => samEditingId.value != null,
+  undoSamEdit,
+  redoSamEdit
 })
 
 // Eski canvas etkileşimleri (useCanvasInteractions) Konva geçişiyle birlikte devre dışı bırakıldı.
@@ -1497,6 +1571,7 @@ function goNextTask(): void {
                 @sam-click="handleSamClickFromKonva"
                 @sam-edit-request="handleSamEditRequestFromKonva"
                 @update-annotation-geometry="handleUpdateAnnotationGeometryFromKonva"
+                @annotation-transform-end="handleAnnotationTransformEndFromKonva"
               />
 
               <!-- SAM edit hint toast -->
