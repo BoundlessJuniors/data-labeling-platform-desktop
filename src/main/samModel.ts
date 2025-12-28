@@ -61,12 +61,27 @@ export const SAM_MODELS: Record<SamModelId, SamModelConfig> = {
 
 export type SamStatus = 'idle' | 'downloading' | 'ready' | 'error' | 'loading'
 
+// GPU Provider Information
+export interface ProviderInfo {
+  name: string
+  available: boolean
+  priority: number
+  options?: Record<string, any>
+}
+
+export interface GpuInfo {
+  provider: string | null
+  platform: string
+  availableProviders: string[]
+}
+
 export interface SamState {
   status: SamStatus
   currentModelId: SamModelId
   downloadProgress: Record<SamModelId, number | null> // 0-1 or null if not downloading
   modelsStatus: Record<SamModelId, 'available' | 'not_downloaded'>
   error: string | null
+  gpuInfo: GpuInfo | null
 }
 
 let ortModule: typeof Ort | null = null
@@ -79,7 +94,8 @@ const samState: SamState = {
   currentModelId: 'vit_b',
   downloadProgress: { vit_b: null, vit_l: null, vit_h: null },
   modelsStatus: { vit_b: 'not_downloaded', vit_l: 'not_downloaded', vit_h: 'not_downloaded' },
-  error: null
+  error: null,
+  gpuInfo: null
 }
 
 export interface SamDownloadProgress {
@@ -342,6 +358,120 @@ async function ensureOrtLoaded(): Promise<typeof Ort> {
   return mod
 }
 
+/**
+ * GPU Provider Detection and Configuration
+ */
+
+function getCudaOptions(): Record<string, any> {
+  return {
+    deviceId: 0,
+    cudnnConvAlgoSearch: 'DEFAULT',
+    cudnnConvUseMaxWorkspace: true,
+    enableCudaGraph: true,
+    cudaMallocBehavior: 0
+  }
+}
+
+function getDirectMLOptions(): Record<string, any> {
+  return {
+    deviceId: 0,
+    enableGraphCapture: true
+  }
+}
+
+function getCoreMLOptions(): Record<string, any> {
+  return {
+    // CoreML default options
+  }
+}
+
+async function detectAvailableProviders(): Promise<ProviderInfo[]> {
+  const platform = process.platform
+  const providers: ProviderInfo[] = []
+
+  console.log(`[SAM-GPU] Detecting providers on platform: ${platform}`)
+
+  // CUDA - Available on Windows and Linux with NVIDIA GPUs
+  if (platform === 'win32' || platform === 'linux') {
+    try {
+      // CUDA provider detection - will be tested during session creation
+      providers.push({
+        name: 'cuda',
+        available: true, // Will be tested during session creation
+        priority: 1,
+        options: getCudaOptions()
+      })
+      console.log('[SAM-GPU] CUDA provider added to candidate list')
+    } catch (e) {
+      console.log('[SAM-GPU] CUDA provider not available:', (e as Error).message)
+    }
+  }
+
+  // DirectML - Available on Windows 10+ with any GPU
+  if (platform === 'win32') {
+    try {
+      providers.push({
+        name: 'directml',
+        available: true,
+        priority: 2,
+        options: getDirectMLOptions()
+      })
+      console.log('[SAM-GPU] DirectML provider added to candidate list')
+    } catch (e) {
+      console.log('[SAM-GPU] DirectML provider not available:', (e as Error).message)
+    }
+  }
+
+  // CoreML - Available on macOS
+  if (platform === 'darwin') {
+    try {
+      providers.push({
+        name: 'coreml',
+        available: true,
+        priority: 1,
+        options: getCoreMLOptions()
+      })
+      console.log('[SAM-GPU] CoreML provider added to candidate list')
+    } catch (e) {
+      console.log('[SAM-GPU] CoreML provider not available:', (e as Error).message)
+    }
+  }
+
+  // CPU - Always available as fallback
+  providers.push({
+    name: 'cpu',
+    available: true,
+    priority: 99,
+    options: {}
+  })
+  console.log('[SAM-GPU] CPU provider added as fallback')
+
+  return providers.sort((a, b) => a.priority - b.priority)
+}
+
+function buildSessionOptions(providers: ProviderInfo[], useDirectML: boolean): any {
+  const executionProviders = providers
+    .filter(p => p.available)
+    .map(p => {
+      if (p.options && Object.keys(p.options).length > 0) {
+        return { name: p.name, ...p.options }
+      }
+      return p.name
+    })
+
+  const sessionOptions: any = {
+    executionProviders,
+    executionMode: 'sequential', // Required for DirectML and recommended for large models
+    graphOptimizationLevel: 'all',
+    enableCpuMemArena: true,
+    enableMemPattern: !useDirectML, // Must be false for DirectML
+    logSeverityLevel: 2,
+    logVerbosityLevel: 0
+  }
+
+  return sessionOptions
+}
+
 export async function ensureSamSessionLoaded(): Promise<void> {
   if (samEncoderSession && samDecoderSession) return
 
@@ -353,7 +483,10 @@ export async function ensureSamSessionLoaded(): Promise<void> {
   }
 
   samState.status = 'loading'
+  
   try {
+    console.log('[SAM-GPU] Initializing sessions...')
+    
     const ort = await ensureOrtLoaded()
     const dir = getModelDir(modelId)
     const config = SAM_MODELS[modelId]
@@ -361,22 +494,86 @@ export async function ensureSamSessionLoaded(): Promise<void> {
     const encoderPath = join(dir, config.encoderFile)
     const decoderPath = join(dir, config.decoderFile)
     
-    const sessionOptions: any = {
-      executionProviders: ['cuda', 'directml', 'cpu'],
-      executionMode: 'sequential', // parallel sometimes causes issues with large models
-      enableCpuMemArena: true
+    // Detect available GPU providers
+    const providers = await detectAvailableProviders()
+    const availableProviderNames = providers.map(p => p.name)
+    
+    console.log('[SAM-GPU] Available providers:', availableProviderNames)
+    
+    // Try each provider in priority order
+    let sessionCreated = false
+    let activeProvider: string | null = null
+    
+    for (const provider of providers) {
+      if (!provider.available) continue
+      
+      try {
+        console.log(`[SAM-GPU] Attempting to load sessions with provider: ${provider.name}`)
+        
+        // Check if DirectML is in the providers list for special config
+        const useDirectML = provider.name === 'directml'
+        
+        // Build session options for this provider attempt
+        const sessionOptions = buildSessionOptions([provider], useDirectML)
+        
+        console.log(`[SAM-GPU] Session options:`, {
+          executionProviders: sessionOptions.executionProviders,
+          executionMode: sessionOptions.executionMode,
+          enableMemPattern: sessionOptions.enableMemPattern
+        })
+        
+        // Create encoder session
+        samEncoderSession = await ort.InferenceSession.create(encoderPath, sessionOptions)
+        
+        // Create decoder session
+        samDecoderSession = await ort.InferenceSession.create(decoderPath, sessionOptions)
+        
+        // Log actual providers used
+        console.log('[SAM-GPU] Encoder session providers:', (samEncoderSession as any).executionProviders || provider.name)
+        console.log('[SAM-GPU] Decoder session providers:', (samDecoderSession as any).executionProviders || provider.name)
+        console.log(`[SAM-GPU] ✓ Successfully loaded sessions with provider: ${provider.name}`)
+        
+        activeProvider = provider.name
+        sessionCreated = true
+        break
+        
+      } catch (error) {
+        // Clean up any partially created sessions
+        if (samEncoderSession) {
+          try { (samEncoderSession as any).release?.() } catch (e) { /* ignore */ }
+          samEncoderSession = null
+        }
+        if (samDecoderSession) {
+          try { (samDecoderSession as any).release?.() } catch (e) { /* ignore */ }
+          samDecoderSession = null
+        }
+        
+        const errorMsg = error instanceof Error ? error.message : String(error)
+        console.warn(`[SAM-GPU] Failed to load with ${provider.name}: ${errorMsg}`)
+        
+        // Continue to next provider
+      }
     }
-
-    console.log('[SAM] Loading sessions with providers:', sessionOptions.executionProviders)
-
-    // Create sessions
-    samEncoderSession = await ort.InferenceSession.create(encoderPath, sessionOptions)
-    samDecoderSession = await ort.InferenceSession.create(decoderPath, sessionOptions)
+    
+    if (!sessionCreated) {
+      throw new Error('Failed to create SAM sessions with any available provider')
+    }
+    
+    // Update state with GPU info
+    samState.gpuInfo = {
+      provider: activeProvider,
+      platform: process.platform,
+      availableProviders: availableProviderNames
+    }
     
     samState.status = 'ready'
+    
+    console.log('[SAM-GPU] Sessions ready. Active provider:', activeProvider)
+    
   } catch (e) {
     samState.status = 'error'
     samState.error = e instanceof Error ? e.message : String(e)
+    samState.gpuInfo = null
     throw e
   }
 }
@@ -611,7 +808,12 @@ export async function runSamInference(
   let entry = embeddingCache.get(imagePath)
   // Check if cache entry exists AND belongs to the current model
   if (!entry || entry.modelId !== samState.currentModelId) {
+    const embeddingStart = performance.now()
     entry = await computeImageEmbedding(imagePath)
+    const embeddingTime = performance.now() - embeddingStart
+    console.log(`[SAM-GPU] Image embedding computed in ${embeddingTime.toFixed(2)}ms`)
+  } else {
+    console.log('[SAM-GPU] Using cached image embedding')
   }
 
   const { embedding, origWidth, origHeight } = entry
@@ -640,7 +842,12 @@ export async function runSamInference(
     orig_im_size: origSize
   }
 
+  // Measure decoder inference time (where GPU makes the biggest difference)
+  const inferenceStart = performance.now()
   const outputs = await samDecoderSession.run(decoderInputs)
+  const inferenceTime = performance.now() - inferenceStart
+  console.log(`[SAM-GPU] Decoder inference completed in ${inferenceTime.toFixed(2)}ms (Provider: ${samState.gpuInfo?.provider || 'unknown'})`)
+  
   const firstOutputName = samDecoderSession.outputNames[0]
   const masksTensor = outputs[firstOutputName] as Ort.Tensor
 
