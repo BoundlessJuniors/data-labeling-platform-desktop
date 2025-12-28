@@ -408,17 +408,43 @@ async function detectAvailableProviders(): Promise<ProviderInfo[]> {
   }
 
   // DirectML - Available on Windows 10+ with any GPU
+  // Try multiple provider name variations as ONNX Runtime might use different names
+  if (platform === 'win32') {
+    try {
+      // DirectML can be named 'directml', 'DML', or 'DirectML' depending on version
+      const directMLVariants = [
+        { name: 'directml', priority: 2 },
+        { name: 'DML', priority: 3 },
+        { name: 'DirectML', priority: 4 }
+      ]
+      
+      for (const variant of directMLVariants) {
+        providers.push({
+          name: variant.name,
+          available: true,
+          priority: variant.priority,
+          options: getDirectMLOptions()
+        })
+      }
+      
+      console.log('[SAM-GPU] DirectML provider variants added to candidate list:', directMLVariants.map(v => v.name).join(', '))
+    } catch (e) {
+      console.log('[SAM-GPU] DirectML provider not available:', (e as Error).message)
+    }
+  }
+
+  // WebGPU - Experimental on Windows (modern GPUs)
   if (platform === 'win32') {
     try {
       providers.push({
-        name: 'directml',
+        name: 'webgpu',
         available: true,
-        priority: 2,
-        options: getDirectMLOptions()
+        priority: 5, // After DirectML variants, before CPU
+        options: {}
       })
-      console.log('[SAM-GPU] DirectML provider added to candidate list')
+      console.log('[SAM-GPU] WebGPU provider added to candidate list (experimental)')
     } catch (e) {
-      console.log('[SAM-GPU] DirectML provider not available:', (e as Error).message)
+      console.log('[SAM-GPU] WebGPU provider not available:', (e as Error).message)
     }
   }
 
@@ -549,7 +575,21 @@ export async function ensureSamSessionLoaded(): Promise<void> {
         }
         
         const errorMsg = error instanceof Error ? error.message : String(error)
-        console.warn(`[SAM-GPU] Failed to load with ${provider.name}: ${errorMsg}`)
+        const errorStack = error instanceof Error ? error.stack : ''
+        
+        console.warn(`[SAM-GPU] ❌ Failed to load with ${provider.name}`)
+        console.warn(`[SAM-GPU]    Error: ${errorMsg}`)
+        
+        // Detailed diagnostics for DirectML failures
+        if (provider.name.toLowerCase().includes('directml') || provider.name === 'DML') {
+          console.warn('[SAM-GPU]    DirectML Diagnostics:')
+          console.warn('[SAM-GPU]      - DirectML.dll should be in node_modules/onnxruntime-node/bin/napi-v6/win32/x64/')
+          console.warn('[SAM-GPU]      - Windows 10 1903+ or Windows 11 required')
+          console.warn('[SAM-GPU]      - Try alternative provider names: directml, DML, DirectML')
+          if (errorStack) {
+            console.warn('[SAM-GPU]      Stack trace:', errorStack.split('\n').slice(0, 3).join('\n'))
+          }
+        }
         
         // Continue to next provider
       }
