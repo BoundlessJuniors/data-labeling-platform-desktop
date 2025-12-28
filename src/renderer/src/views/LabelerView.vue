@@ -111,6 +111,9 @@ let labelHintTimer: number | null = null
 const globalSeconds = ref(0)
 const taskSecondsById = ref<Record<string, number>>({})
 
+// Çizgi kalınlığı ayarı (1-10 arası)
+const strokeWidth = ref(2)
+
 /* =============================
   İç durum
   ============================= */
@@ -1438,13 +1441,29 @@ function goNextTask(): void {
                 <RedoIcon class="ui-svg h-5 w-5 text-slate-600 dark:text-gray-300" />
               </button>
 
-              <button
+            <button
                 ref="deleteBtn"
                 class="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-gray-800 disabled:opacity-50"
                 title="Delete (Del)"
               >
                 <DeleteIcon class="ui-svg h-5 w-5 text-slate-600 dark:text-gray-300" />
               </button>
+
+              <div class="h-6 w-px bg-slate-200 dark:bg-gray-700 mx-1"></div>
+
+              <!-- Stroke Width Slider -->
+              <div class="flex items-center gap-2 px-2" title="Border Thickness">
+                <span class="text-xs font-bold text-slate-500 dark:text-gray-400">Size</span>
+                <input
+                  type="range"
+                  min="1"
+                  max="10"
+                  step="0.5"
+                  v-model.number="strokeWidth"
+                  class="w-20 h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700 accent-primary"
+                />
+                <span class="text-xs font-mono text-slate-500 dark:text-gray-400 w-6 text-right">{{ strokeWidth }}</span>
+              </div>
             </div>
           </div>
 
@@ -1468,7 +1487,9 @@ function goNextTask(): void {
                 :active-shape="state.lastUsedShape"
                 :active-label="state.activeLabel"
                 :selected-id="state.selectedAnnotationId"
+
                 :editing-id="samEditingId"
+                :stroke-width="strokeWidth"
                 @create-annotation="handleCreateAnnotationFromKonva"
                 @select-annotation="handleSelectAnnotationFromKonva"
                 @pointer-move="handlePointerMove"
@@ -1576,13 +1597,13 @@ function goNextTask(): void {
             <div ref="labelList" class="flex flex-wrap gap-2">
               <span
                 class="cursor-pointer bg-primary/10 text-primary text-xs font-medium px-2.5 py-1 rounded-full hover:bg-primary/20 label-item"
-                data-label="Car"
-                >Car</span
+                data-label="Göz"
+                >Göz</span
               >
               <span
                 class="cursor-pointer bg-primary/10 text-primary text-xs font-medium px-2.5 py-1 rounded-full hover:bg-primary/20 label-item"
-                data-label="Pedestrian"
-                >Pedestrian</span
+                data-label="Kulak"
+                >Kulak</span
               >
             </div>
           </div>

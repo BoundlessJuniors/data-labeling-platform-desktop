@@ -12,7 +12,7 @@ import type {
 import type Konva from 'konva'
 import type { KonvaEventObject } from 'konva/lib/Node'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   imageSrc: string | null
   annotations: Annotation[]
   activeTool: 'select' | 'sam' | 'shapes'
@@ -21,7 +21,11 @@ const props = defineProps<{
   selectedId: number | null
   // Düzenleme modu için, şu an düzenlenen polygon id'si (yoksa null)
   editingId?: number | null
-}>()
+  // Kullanıcı tarafından UI'dan seçilen kalınlık (default: 2)
+  strokeWidth?: number
+}>(), {
+  strokeWidth: 2
+})
 
 const emit = defineEmits<{
   (e: 'create-annotation', ann: Annotation): void
@@ -231,6 +235,25 @@ const imageConfig = computed(() => {
     height: imageObj.value.naturalHeight
   }
 })
+
+const computedStyles = computed(() => {
+  if (!imageObj.value) return { keypointRadius: 4 }
+  const w = imageObj.value.naturalWidth
+  const h = imageObj.value.naturalHeight
+  const maxDim = Math.max(w, h)
+  // Kullanıcının belirttiği formül: max(W, H) / 200
+  // Ancak çok küçük görsellerde minik kalmasın diye alt limit (örn: 3px) koyuyoruz.
+  const kpRadius = Math.max(3, maxDim / 200)
+  return {
+    keypointRadius: kpRadius
+  }
+})
+
+watch(() => props.strokeWidth, (val) => {
+  console.log('[KonvaCanvas] strokeWidth prop changed:', val, typeof val)
+})
+
+const computedStrokeWidth = computed(() => props.strokeWidth || 2)
 
 // Konva wheel event
 const handleWheel = (e: KonvaEventObject<WheelEvent>): void => {
@@ -777,7 +800,11 @@ defineExpose({
           :width="ann.width"
           :height="ann.height"
           :stroke="ann.id === selectedId ? '#1d4ed8' : '#2563eb'"
-          :stroke-width="ann.id === selectedId ? 2 : 0.75"
+          :stroke-width="computedStrokeWidth"
+          :config="{
+            strokeScaleEnabled: false
+          }"
+
           :shadow-color="ann.id === selectedId ? '#1d4ed8' : undefined"
           :shadow-blur="ann.id === selectedId ? 8 : 0"
           :shadow-opacity="ann.id === selectedId ? 0.7 : 0"
@@ -793,10 +820,13 @@ defineExpose({
           :y="tempBBox.y"
           :width="tempBBox.width"
           :height="tempBBox.height"
-          stroke="#60a5fa"
-          :stroke-width="0.75"
-          :dash="[6, 4]"
-          fill="rgba(37,99,235,0.08)"
+          :config="{
+            stroke: '#60a5fa',
+            strokeWidth: computedStrokeWidth,
+            strokeScaleEnabled: false,
+            dash: [6, 4],
+            fill: 'rgba(37,99,235,0.08)'
+          }"
         />
 
         <!-- Circle geçici çizim -->
@@ -805,10 +835,13 @@ defineExpose({
           :x="tempCircle.cx"
           :y="tempCircle.cy"
           :radius="tempCircle.r"
-          stroke="#60a5fa"
-          :stroke-width="0.75"
-          :dash="[6, 4]"
-          fill="rgba(37,99,235,0.08)"
+          :config="{
+            stroke: '#60a5fa',
+            strokeWidth: computedStrokeWidth,
+            strokeScaleEnabled: false,
+            dash: [6, 4],
+            fill: 'rgba(37,99,235,0.08)'
+          }"
         />
 
         <!-- Polygon / Polyline geçici çizim -->
@@ -822,10 +855,13 @@ defineExpose({
             [...polyPoints, ...(tempPolyPoint ? [tempPolyPoint] : [])].flatMap((p) => [p.x, p.y])
           "
           :closed="drawingShape === 'polygon'"
-          stroke="#60a5fa"
-          :stroke-width="0.75"
-          :dash="[6, 4]"
-          :fill="drawingShape === 'polygon' ? 'rgba(96,165,250,0.15)' : 'transparent'"
+          :config="{
+            stroke: '#60a5fa',
+            strokeWidth: computedStrokeWidth,
+            strokeScaleEnabled: false,
+            dash: [6, 4],
+            fill: drawingShape === 'polygon' ? 'rgba(96,165,250,0.15)' : 'transparent'
+          }"
         />
 
         <v-line
@@ -840,7 +876,10 @@ defineExpose({
                 ? '#ea580c'
                 : '#f97316'
           "
-          :stroke-width="ann.id === editingId ? 2.5 : ann.id === selectedId ? 2 : 0.75"
+          :config="{
+            strokeWidth: computedStrokeWidth,
+            strokeScaleEnabled: false
+          }"
           :shadow-color="ann.id === editingId ? '#db2777' : ann.id === selectedId ? '#ea580c' : undefined"
           :shadow-blur="ann.id === editingId || ann.id === selectedId ? 8 : 0"
           :shadow-opacity="ann.id === editingId || ann.id === selectedId ? 0.7 : 0"
@@ -866,10 +905,12 @@ defineExpose({
             :key="`edit-handle-${ann.id}-${idx}`"
             :x="p.x"
             :y="p.y"
-            :radius="5"
+
             fill="#ffffff"
             stroke="#ec4899"
             :stroke-width="1.5"
+            :strokeScaleEnabled="false"
+            :radius="5 / (stageScale || 1)"
             @mousedown="(e) => handleVertexMouseDown(ann.id, idx, e)"
           />
         </template>
@@ -879,8 +920,12 @@ defineExpose({
           :key="ann.id"
           :points="ann.points.flatMap((p) => [p.x, p.y])"
           :closed="false"
+
           :stroke="ann.id === selectedId ? '#16a34a' : '#22c55e'"
-          :stroke-width="ann.id === selectedId ? 2 : 0.75"
+          :config="{
+            strokeWidth: computedStrokeWidth,
+            strokeScaleEnabled: false
+          }"
           :shadow-color="ann.id === selectedId ? '#16a34a' : undefined"
           :shadow-blur="ann.id === selectedId ? 8 : 0"
           :shadow-opacity="ann.id === selectedId ? 0.7 : 0"
@@ -894,7 +939,7 @@ defineExpose({
           :key="ann.id"
           :x="ann.x"
           :y="ann.y"
-          :radius="ann.id === selectedId ? 4.5 : 3.5"
+          :radius="ann.id === selectedId ? computedStyles.keypointRadius * 1.2 : computedStyles.keypointRadius"
           :fill="ann.id === selectedId ? '#facc15' : '#eab308'"
           :shadow-color="ann.id === selectedId ? '#facc15' : undefined"
           :shadow-blur="ann.id === selectedId ? 8 : 0"
@@ -911,7 +956,10 @@ defineExpose({
           :y="ann.cy"
           :radius="ann.r"
           :stroke="ann.id === selectedId ? '#db2777' : '#ec4899'"
-          :stroke-width="ann.id === selectedId ? 2 : 0.75"
+          :config="{
+            strokeWidth: computedStrokeWidth,
+            strokeScaleEnabled: false
+          }"
           :shadow-color="ann.id === selectedId ? '#db2777' : undefined"
           :shadow-blur="ann.id === selectedId ? 8 : 0"
           :shadow-opacity="ann.id === selectedId ? 0.7 : 0"
