@@ -360,11 +360,18 @@ export async function ensureSamSessionLoaded(): Promise<void> {
     
     const encoderPath = join(dir, config.encoderFile)
     const decoderPath = join(dir, config.decoderFile)
+    
+    const sessionOptions: any = {
+      executionProviders: ['cuda', 'directml', 'cpu'],
+      executionMode: 'sequential', // parallel sometimes causes issues with large models
+      enableCpuMemArena: true
+    }
+
+    console.log('[SAM] Loading sessions with providers:', sessionOptions.executionProviders)
 
     // Create sessions
-    // Using CPU by default. For GPU support, options would need to be passed here.
-    samEncoderSession = await ort.InferenceSession.create(encoderPath)
-    samDecoderSession = await ort.InferenceSession.create(decoderPath)
+    samEncoderSession = await ort.InferenceSession.create(encoderPath, sessionOptions)
+    samDecoderSession = await ort.InferenceSession.create(decoderPath, sessionOptions)
     
     samState.status = 'ready'
   } catch (e) {
@@ -494,35 +501,84 @@ interface XY {
   y: number
 }
 
-function convexHull(points: XY[]): XY[] {
-  if (points.length <= 1) return points
-
-  const pts = [...points].sort((a, b) => (a.x === b.x ? a.y - b.y : a.x - b.x))
-
-  const cross = (o: XY, a: XY, b: XY): number => {
-    return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x)
-  }
-
-  const lower: XY[] = []
-  for (const p of pts) {
-    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) {
-      lower.pop()
+/**
+ * Simple implementation of Moore-Neighbor Tracing for contour detection.
+ * Extracts the boundary of the mask as an ordered list of points.
+ */
+function traceBoundary(
+  maskData: Float32Array,
+  maskWidth: number,
+  maskHeight: number,
+  scaleX: number,
+  scaleY: number
+): XY[] {
+    const getPixel = (x: number, y: number) => {
+        if (x < 0 || x >= maskWidth || y < 0 || y >= maskHeight) return 0
+        return maskData[y * maskWidth + x] > 0 ? 1 : 0
     }
-    lower.push(p)
-  }
 
-  const upper: XY[] = []
-  for (let i = pts.length - 1; i >= 0; i--) {
-    const p = pts[i]
-    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) {
-      upper.pop()
+    // 1. Find start
+    let sx = -1, sy = -1
+    for (let y = 0; y < maskHeight; y++) {
+        for (let x = 0; x < maskWidth; x++) {
+            if (getPixel(x, y)) {
+                sx = x; sy = y; break;
+            }
+        }
+        if (sx !== -1) break
     }
-    upper.push(p)
-  }
+    if (sx === -1) return []
 
-  upper.pop()
-  lower.pop()
-  return lower.concat(upper)
+    const points: XY[] = []
+    let cx = sx, cy = sy
+    
+    // Direction offsets: E, SE, S, SW, W, NW, N, NE (Clockwise)
+    const dx = [1, 1, 0, -1, -1, -1, 0, 1]
+    const dy = [0, 1, 1, 1, 0, -1, -1, -1]
+    
+    // We arrive from North (virtual), so we start looking from West?
+    // (sx, sy-1) is neighbor 6 (North) relative to P
+    // Search start index = 6. 
+    // Wait, if we use the robust rule: enteredFrom = 6 (North)
+    let enteredFrom = 6 
+    
+    let loops = 0
+    while (true) {
+        points.push({ x: cx * scaleX, y: cy * scaleY })
+        
+        let found = false
+        for (let i = 0; i < 8; i++) {
+            // Check neighbors clockwise starting from enteredFrom
+            const nd = (enteredFrom + i) % 8
+            const nx = cx + dx[nd]
+            const ny = cy + dy[nd]
+            
+            if (getPixel(nx, ny)) {
+                // Found next boundary pixel
+                // New entering direction logic:
+                // If we moved in direction 'nd', we effectively entered the new pixel from the opposite side?
+                // No, Moore-Neighbor tracing rule: B = P_prev_neighbor (backtrack).
+                // Here we simplify by implicitly tracking "where we came from".
+                // If we move East (0), we enter from West (4).
+                // Next search starts from (enteredFrom + 2) % 8 for 4-connected, 
+                // or just follow the crawler rule: start from (nd + 4 + 2)?
+                // Let's use the proven: start from (nd + 5) % 8  (Look "Left-ish")
+                const from = (nd + 4) % 8
+                enteredFrom = (from + 2) % 8
+                
+                cx = nx
+                cy = ny
+                found = true
+                break
+            }
+        }
+        
+        if (!found) break // Isolated pixel
+        if (cx === sx && cy === sy) break // Back to start
+        if (loops++ > maskWidth * maskHeight) break // Safety
+    }
+    
+    return points
 }
 
 function maskToPolygon(
@@ -532,25 +588,11 @@ function maskToPolygon(
   origWidth: number,
   origHeight: number
 ): { x: number; y: number }[] {
-  const points: XY[] = []
-
   const scaleX = origWidth / maskWidth
   const scaleY = origHeight / maskHeight
-
-  for (let y = 0; y < maskHeight; y++) {
-    for (let x = 0; x < maskWidth; x++) {
-      const v = maskData[y * maskWidth + x]
-      if (v <= 0) continue
-
-      points.push({ x: x * scaleX, y: y * scaleY })
-    }
-  }
-
-  if (points.length === 0) {
-    return []
-  }
-
-  return convexHull(points)
+  
+  // Use tracing instead of scanning + convex hull
+  return traceBoundary(maskData, maskWidth, maskHeight, scaleX, scaleY)
 }
 
 export async function runSamInference(
