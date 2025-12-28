@@ -96,9 +96,9 @@ const samDownloadStage = ref<'idle' | 'encoder' | 'decoder' | 'done'>('idle')
 
 // Polygon düzenleme modu (SAM veya normal polygon)
 const editingAnnotationId = ref<number | null>(null)
-const editingOriginalPoints = ref<{ x: number; y: number }[] | null>(null)
+const editingOriginalState = ref<any>(null)
 // Edit modu için yerel undo/redo geçmişi
-const editHistory = ref<{ x: number; y: number }[][]>([])
+const editHistory = ref<any[]>([])
 const editHistoryIndex = ref(-1)
 
 // Edit ipucu (artık genel)
@@ -614,30 +614,39 @@ async function handleSamClickFromKonva(payload: { imgX: number; imgY: number }):
 }
 
 function handleEditRequestFromKonva(id: number): void {
-  const ann = state.annotations.find((a) => a.id === id && a.type === 'polygon')
-  if (!ann || !ann.points || ann.points.length < 3) return
+  const ann = state.annotations.find((a) => a.id === id)
+  if (!ann) return
 
   editingAnnotationId.value = id
-  editingOriginalPoints.value = ann.points.map((p) => ({ x: p.x, y: p.y }))
-  // Edit başlarken mevcut hali geçmişe ekle
-  editHistory.value = [ann.points.map((p) => ({ x: p.x, y: p.y }))]
-  editHistoryIndex.value = 0
+
+  // Tipe göre orijinal hali sakla
+  if (ann.type === 'polygon' || ann.type === 'polyline') {
+    editingOriginalState.value = { points: ann.points.map((p) => ({ ...p })) }
+    editHistory.value = [{ points: ann.points.map((p) => ({ ...p })) }]
+  } else if (ann.type === 'bbox') {
+    editingOriginalState.value = { x: ann.x, y: ann.y, width: ann.width, height: ann.height }
+    editHistory.value = [{ x: ann.x, y: ann.y, width: ann.width, height: ann.height }]
+  } else if (ann.type === 'circle') {
+    editingOriginalState.value = { cx: ann.cx, cy: ann.cy, r: ann.r }
+    editHistory.value = [{ cx: ann.cx, cy: ann.cy, r: ann.r }]
+  } else if (ann.type === 'keypoint') {
+    editingOriginalState.value = { x: ann.x, y: ann.y, r: ann.r || 5 }
+    editHistory.value = [{ x: ann.x, y: ann.y, r: ann.r || 5 }]
+  }
+
   editHistoryIndex.value = 0
   state.selectedAnnotationId = id
   renderAnnotations()
   updateDeleteButton()
 }
 
-function handleUpdateAnnotationGeometryFromKonva(payload: {
-  id: number
-  points: { x: number; y: number }[]
-}): void {
-  const idx = state.annotations.findIndex((a) => a.id === payload.id && a.type === 'polygon')
+function handleUpdateAnnotationStateFromKonva(payload: { id: number; patch: any }): void {
+  const idx = state.annotations.findIndex((a) => a.id === payload.id)
   if (idx === -1) return
 
   const updated = {
     ...state.annotations[idx],
-    points: payload.points.map((p) => ({ x: p.x, y: p.y }))
+    ...payload.patch
   }
 
   const next = state.annotations.slice()
@@ -660,10 +669,20 @@ function handleAnnotationTransformEndFromKonva(): void {
   // Eğer edit modundaysak, bu bitişi yerel history'ye ekle
   if (editingAnnotationId.value != null) {
     const ann = state.annotations.find((a) => a.id === editingAnnotationId.value)
-    if (ann && ann.points) {
-      // History'nin ilerisini kes (yeni dal)
+    if (ann) {
+      let snapshot: any = {}
+      if (ann.type === 'polygon' || ann.type === 'polyline') {
+        snapshot = { points: ann.points.map((p) => ({ ...p })) }
+      } else if (ann.type === 'bbox') {
+        snapshot = { x: ann.x, y: ann.y, width: ann.width, height: ann.height }
+      } else if (ann.type === 'circle') {
+        snapshot = { cx: ann.cx, cy: ann.cy, r: ann.r }
+      } else if (ann.type === 'keypoint') {
+        snapshot = { x: ann.x, y: ann.y, r: ann.r }
+      }
+
       editHistory.value = editHistory.value.slice(0, editHistoryIndex.value + 1)
-      editHistory.value.push(ann.points.map((p) => ({ x: p.x, y: p.y })))
+      editHistory.value.push(snapshot)
       editHistoryIndex.value++
     }
     return
@@ -677,9 +696,8 @@ function handleAnnotationTransformEndFromKonva(): void {
 function undoLocalEdit(): void {
   if (editHistoryIndex.value > 0) {
     editHistoryIndex.value--
-    const points = editHistory.value[editHistoryIndex.value]
-    // State'i güncelle
-    updatePolygonPoints(points)
+    const stateSnapshot = editHistory.value[editHistoryIndex.value]
+    applyLocalState(stateSnapshot)
   }
 }
 
@@ -687,21 +705,17 @@ function undoLocalEdit(): void {
 function redoLocalEdit(): void {
   if (editHistoryIndex.value < editHistory.value.length - 1) {
     editHistoryIndex.value++
-    const points = editHistory.value[editHistoryIndex.value]
-    // State'i güncelle
-    updatePolygonPoints(points)
+    const stateSnapshot = editHistory.value[editHistoryIndex.value]
+    applyLocalState(stateSnapshot)
   }
 }
 
-function updatePolygonPoints(points: { x: number; y: number }[]): void {
+function applyLocalState(snapshot: any): void {
   if (editingAnnotationId.value == null) return
   const idx = state.annotations.findIndex((a) => a.id === editingAnnotationId.value)
   if (idx === -1) return
 
-  const updated = {
-    ...state.annotations[idx],
-    points: points.map((p) => ({ x: p.x, y: p.y }))
-  }
+  const updated = { ...state.annotations[idx], ...snapshot }
   const next = state.annotations.slice()
   next[idx] = updated as Annotation
   state.annotations = next
@@ -721,14 +735,14 @@ function dismissEditHint(): void {
    Polygon / Polyline Tamamlama
    ============================= */
 const cancelPoly = (): void => {
-  // Önce polygon düzenleme modundan çıkmak gerekiyorsa onu ele al
+  // Önce düzenleme modundan çıkmak gerekiyorsa onu ele al
   if (editingAnnotationId.value != null) {
-    const ann = state.annotations.find((a) => a.id === editingAnnotationId.value && a.type === 'polygon')
-    if (ann && editingOriginalPoints.value) {
-      ann.points = editingOriginalPoints.value.map((p) => ({ x: p.x, y: p.y }))
+    if (editingOriginalState.value) {
+      applyLocalState(editingOriginalState.value)
     }
     editingAnnotationId.value = null
-    editingOriginalPoints.value = null
+    editingOriginalState.value = null
+    editHistory.value = []
     return
   }
 
@@ -755,10 +769,11 @@ const cancelPoly = (): void => {
 }
 
 const commitPoly = (): void => {
-  // Polygon düzenleme modunda Enter: sadece düzenlemeyi sonlandır
+  // Düzenleme modunda Enter: son halini kabul et
   if (editingAnnotationId.value != null) {
     editingAnnotationId.value = null
-    editingOriginalPoints.value = null
+    editingOriginalState.value = null
+    editHistory.value = []
     recordHistory()
     return
   }
@@ -805,10 +820,6 @@ const { attachKeyboardShortcuts, detachKeyboardShortcuts } = useKeyboardShortcut
   clearSelection,
   enterPanMode,
   saveDraft: saveDraftAndReset,
-  goPrevTask,
-  goNextTask,
-  goPrevTask,
-  goNextTask,
   goPrevTask,
   goNextTask,
   hasLocalEditing: () => editingAnnotationId.value != null,
@@ -1084,9 +1095,9 @@ onBeforeUnmount((): void => {
     timerInterval = null
   }
 
-  if (samEditHintTimer != null) {
-    window.clearTimeout(samEditHintTimer)
-    samEditHintTimer = null
+  if (editHintTimer != null) {
+    window.clearTimeout(editHintTimer)
+    editHintTimer = null
   }
 
   if (samProgressUnsub) {
@@ -1577,7 +1588,7 @@ function goNextTask(): void {
                 @pointer-leave="handlePointerLeave"
                 @sam-click="handleSamClickFromKonva"
                 @edit-request="handleEditRequestFromKonva"
-                @update-annotation-geometry="handleUpdateAnnotationGeometryFromKonva"
+                @update-annotation-state="handleUpdateAnnotationStateFromKonva"
                 @annotation-transform-end="handleAnnotationTransformEndFromKonva"
               />
 
