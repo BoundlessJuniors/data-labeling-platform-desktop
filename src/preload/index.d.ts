@@ -57,27 +57,51 @@ declare global {
       sam: {
         status: () => Promise<{
           status: 'idle' | 'downloading' | 'ready' | 'error'
+          currentModelId: string
+          modelsStatus: Record<string, 'available' | 'not_downloaded'>
           error: string | null
         }>
-        isInstalled: () => Promise<{
+        isInstalled: (modelId?: string) => Promise<{
           downloaded: boolean
           state: {
             status: 'idle' | 'downloading' | 'ready' | 'error'
+            currentModelId: string
+            modelsStatus: Record<string, 'available' | 'not_downloaded'>
             error: string | null
           }
         }>
-        download: () => Promise<{
+        download: (modelId: string) => Promise<{
           ok: boolean
-          path: string
           state: {
             status: 'idle' | 'downloading' | 'ready' | 'error'
+            currentModelId: string
+            modelsStatus: Record<string, 'available' | 'not_downloaded'>
             error: string | null
           }
         }>
+        pauseDownload: (modelId: string) => Promise<{ ok: boolean }>
+        cancelDownload: (modelId: string) => Promise<{ ok: boolean }>
+        setModel: (modelId: string) => Promise<{
+          ok: boolean
+          state: {
+            status: 'idle' | 'downloading' | 'ready' | 'error'
+            currentModelId: string
+            modelsStatus: Record<string, 'available' | 'not_downloaded'>
+            error: string | null
+          }
+        }>
+        getModels: () => Promise<Record<string, {
+          id: string
+          name: string
+          description: string
+          quantized: boolean
+        }>>
         ensureReady: () => Promise<{
           ok: boolean
           state: {
             status: 'idle' | 'downloading' | 'ready' | 'error'
+            currentModelId: string
+            modelsStatus: Record<string, 'available' | 'not_downloaded'>
             error: string | null
           }
         }>
@@ -90,6 +114,7 @@ declare global {
         }>
         onDownloadProgress: (
           handler: (payload: {
+            modelId?: string
             stage: 'encoder' | 'decoder'
             loaded: number
             total: number | null

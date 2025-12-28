@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref, nextTick } from 'vue'
+import { onMounted, onBeforeUnmount, ref, nextTick, watch } from 'vue'
 import UndoIcon from '@renderer/assets/icons/custom/undo.svg?component'
 import RedoIcon from '@renderer/assets/icons/custom/redo.svg?component'
 import SelectIcon from '@renderer/assets/icons/custom/touch_app.svg?component'
@@ -25,6 +25,12 @@ import PolyLineIcon from '@renderer/assets/icons/custom/polyline.svg?component'
 import KeypointIcon from '@renderer/assets/icons/custom/adjust.svg?component'
 import CircleIcon from '@renderer/assets/icons/custom/circle.svg?component'
 import DeleteIcon from '@renderer/assets/icons/custom/delete.svg?component'
+import ArrowDropDownIcon from '@renderer/assets/icons/custom/arrow_drop_down.svg?component'
+import PauseIcon from '@renderer/assets/icons/custom/pause.svg?component'
+import PlayIcon from '@renderer/assets/icons/custom/play_arrow.svg?component'
+import CloseIcon from '@renderer/assets/icons/custom/close.svg?component'
+
+
 
 // Tipler
 import type { Annotation, Task } from '@renderer/types/annotation'
@@ -89,10 +95,34 @@ const tasksNav = ref<HTMLElement | null>(null)
 const autoSaveOverlay = ref<HTMLDivElement | null>(null)
 
 // SAM durumu (model indirildi / hazır mı?)
+// SAM durumu (model indirildi / hazır mı?)
 const samReady = ref(false)
 const samDownloading = ref(false)
+const samPaused = ref(false) // Track if download is paused
 const samDownloadProgress = ref(0)
 const samDownloadStage = ref<'idle' | 'encoder' | 'decoder' | 'done'>('idle')
+const samDownloadingModelId = ref<string | null>(null) // Track which model is downloading
+
+const showSamSettings = ref(false)
+const samModels = ref<Record<string, any>>({})
+const samStatus = ref<any>({
+  status: 'idle',
+  currentModelId: 'vit_b',
+  modelsStatus: {},
+  error: null
+})
+const downloadConfirmation = ref<{
+  show: boolean
+  modelId: string
+  modelName: string
+  size: string
+}>({
+  show: false,
+  modelId: '',
+  modelName: '',
+  size: ''
+})
+
 
 // Polygon düzenleme modu (SAM veya normal polygon)
 const editingAnnotationId = ref<number | null>(null)
@@ -115,7 +145,12 @@ const globalSeconds = ref(0)
 const taskSecondsById = ref<Record<string, number>>({})
 
 // Çizgi kalınlığı ayarı (1-10 arası)
-const strokeWidth = ref(2)
+const savedStroke = localStorage.getItem('labelgun-stroke-width')
+const strokeWidth = ref(savedStroke ? parseFloat(savedStroke) : 2)
+
+watch(strokeWidth, (val) => {
+  localStorage.setItem('labelgun-stroke-width', String(val))
+})
 
 /* =============================
   İç durum
@@ -424,52 +459,7 @@ function updateCursor(): void {
   }
 }
 
-async function ensureSamReadyWithPrompt(): Promise<boolean> {
-  if (samReady.value) return true
 
-  try {
-    const info = await window.api.sam.isInstalled()
-    if (!info.downloaded) {
-      const ok = window.confirm(
-        'The SAM model (ViT-B) will be downloaded. This requires an internet connection (approximately 120 MB). Do you want to continue?'
-      )
-      if (!ok) return false
-
-      samDownloading.value = true
-      samDownloadProgress.value = 0
-      samDownloadStage.value = 'encoder'
-      try {
-        if (!samProgressUnsub) {
-          samProgressUnsub = window.api.sam.onDownloadProgress((payload) => {
-            samDownloadStage.value = payload.stage
-            if (payload.total && payload.total > 0) {
-              const frac = payload.loaded / payload.total
-              const base = payload.stage === 'encoder' ? 0 : 0.5
-              const overall = Math.max(0, Math.min(1, base + frac * 0.5))
-              samDownloadProgress.value = overall
-            }
-          })
-        }
-        await window.api.sam.download()
-        await window.api.sam.ensureReady()
-        samReady.value = true
-        alert('The SAM model has been downloaded and is ready to use.')
-        return true
-      } finally {
-        samDownloading.value = false
-      }
-    } else {
-      // Model dosyası var; sadece session'ı hazırla
-      await window.api.sam.ensureReady()
-      samReady.value = true
-      return true
-    }
-  } catch (e) {
-    console.error('[SAM] prepare failed:', e)
-    alert('An error occurred while preparing the SAM model. Check the console for details.')
-    return false
-  }
-}
 
 function handlePointerMove(payload: {
   screenX: number
@@ -542,10 +532,21 @@ async function handleSamClickFromKonva(payload: { imgX: number; imgY: number }):
   if (!tasks.value.length) return
 
   // SAM aracı seçiliyken, her tıklamada önceden hazır olduğunu varsayıyoruz.
-  // Güvenlik için burada da hızlı bir kontrol yapalım.
-  if (!samReady.value && !samDownloading.value) {
-    const ok = await ensureSamReadyWithPrompt()
-    if (!ok) return
+  if (!samReady.value) {
+     // Modeli yüklemeyi dene (sessizce veya loading göstererek)
+     try {
+       await window.api.sam.ensureReady()
+       // samReady should be updated by polling or state sync? 
+       // We rely on status polling or the resolve of ensureReady updating state?
+       // Let's manually double check or re-fetch status
+       const s = await window.api.sam.status()
+       samStatus.value = s
+       samReady.value = s.status === 'ready'
+       if (!samReady.value) return
+     } catch(e) {
+       console.error("Auto-ensure ready failed", e)
+       return
+     }
   }
 
   const current = tasks.value[currentTaskIndex.value]
@@ -904,11 +905,25 @@ onMounted(async (): Promise<void> => {
     if ((target as HTMLElement).tagName === 'A') (e as MouseEvent).preventDefault()
     const tool = target.dataset.tool
     if (tool === 'sam') {
-      void (async () => {
-        if (samDownloading.value) return
-        const ok = await ensureSamReadyWithPrompt()
-        if (ok) setActiveTool(target)
-      })()
+      const currentModelId = samStatus.value.currentModelId
+      const isAvailable = samStatus.value.modelsStatus[currentModelId] === 'available'
+
+      if (isAvailable) {
+         setActiveTool(target)
+         // Eğer session yüklü değilse (idle), arkada yüklemeye başla
+         if (samStatus.value.status !== 'ready' && samStatus.value.status !== 'loading') {
+            samStatus.value.status = 'loading' // Optimistic UI
+            window.api.sam.ensureReady().then(res => {
+                samStatus.value = res.state // Update full state
+                samReady.value = res.state.status === 'ready'
+            })
+         }
+      } else {
+         // Model yoksa indirme onayı aç
+         void handleSamModelSelect(currentModelId)
+         // Aracı aktif etme, Pan moduna geç (veya kal)
+         enterPanMode()
+      }
     } else {
       setActiveTool(target)
     }
@@ -1062,6 +1077,65 @@ onMounted(async (): Promise<void> => {
       autoSaveProgress.value = elapsed / AUTO_SAVE_INTERVAL_MS
     }
   }, AUTO_SAVE_TICK_MS)
+  
+  // Fetch SAM Status & Models
+  await window.api.sam.getModels().then(models => {
+    samModels.value = models
+  })
+  
+  // Initial Status Check & Auto-Select Logic
+  await window.api.sam.status().then(async (status) => {
+    samStatus.value = status
+    samReady.value = status.status === 'ready'
+    
+    // 1. Try to restore last used model
+    const savedModel = localStorage.getItem('lastSamModel')
+    let targetModel = savedModel
+    
+    // 2. If no saved model (or invalid), look for ANY downloaded model
+    if (!targetModel || !samModels.value[targetModel]) {
+       // Find first available 'available' model
+       const available = Object.entries(status.modelsStatus).find(([id, st]) => st === 'available')
+       if (available) {
+          targetModel = available[0]
+       } else {
+          targetModel = 'vit_b' // Default fallback
+       }
+    }
+    
+    // 3. Switch if needed (and valid)
+    if (targetModel && targetModel !== status.currentModelId) {
+        // If we prioritize downloaded, we just switch.
+        // We don't trigger download here, just selection.
+        console.log('[SAM] Auto-switching to preferred model:', targetModel)
+        await performModelSwitch(targetModel)
+    } else if (targetModel) {
+        // Ensure localStorage is synced if we fell back to a default
+        localStorage.setItem('lastSamModel', targetModel)
+    }
+  })
+
+  // Setup Download Listener
+  samProgressUnsub = window.api.sam.onDownloadProgress((payload) => {
+    // If the progress event matches the intended model or just generally update UI
+    if (payload.total && payload.total > 0) {
+      samDownloadProgress.value = payload.loaded / payload.total
+    }
+    samDownloadStage.value = payload.stage
+  })
+  
+  // Listen for global click to close dropdowns
+  onDocClick = (e: Event) => {
+    const target = e.target as HTMLElement
+    if (shapesDropdown.value && !shapesToolBtn.value?.contains(target)) {
+      // Logic for shapes dropdown already handled by toggleShapes hopefully or similar
+    }
+    // Also close SAM settings if clicked outside
+    if (showSamSettings.value && !target.closest('.sam-settings-container')) {
+      showSamSettings.value = false
+    }
+  }
+  document.addEventListener('click', onDocClick)
 })
 
 onBeforeUnmount((): void => {
@@ -1263,6 +1337,119 @@ function goPrevTask(): void {
 function goNextTask(): void {
   loadTaskByIndex((currentTaskIndex.value + 1) % tasks.value.length)
 }
+
+function handleStrokeWidthScroll(e: WheelEvent): void {
+  const delta = Math.sign(e.deltaY) * -1 // Aşağı scroll -> değer azalır, Yukarı scroll -> değer artar
+  let newVal = strokeWidth.value + delta * 0.5
+  newVal = Math.max(1, Math.min(10, newVal))
+  strokeWidth.value = newVal
+}
+
+async function handleSamModelSelect(modelId: string): Promise<void> {
+  // Guard: Confirm dialog is already open
+  if (downloadConfirmation.value.show) return
+
+  // Guard: Download in progress
+  if (samDownloading.value || samPaused.value) {
+      if (samDownloadingModelId.value === modelId) {
+          // Already downloading this model, ignore click
+          return
+      } else {
+          // Downloading a DIFFERENT model, block switching
+          alert("Please wait for the current download to complete or cancel it first.")
+          return
+      }
+  }
+
+  if (samStatus.value.currentModelId === modelId && samStatus.value.status === 'ready') return
+  
+  // Check if downloaded
+  const isDownloaded = samStatus.value.modelsStatus?.[modelId] === 'available'
+  
+  if (!isDownloaded) {
+     // Show confirmation instead of downloading immediately
+     const model = samModels.value[modelId]
+     downloadConfirmation.value = {
+        show: true,
+        modelId,
+        modelName: model?.name || modelId,
+        size: model?.size || 'Unknown'
+     }
+     // Close settings dropdown
+     showSamSettings.value = false
+     return
+  } 
+  
+  performModelSwitch(modelId)
+}
+
+async function performModelSwitch(modelId: string, downloadFirst = false): Promise<void> {
+    // Optimistic update
+  samStatus.value.currentModelId = modelId
+  samStatus.value.status = 'idle' // Reset ready status until loaded
+  samReady.value = false
+
+  if (downloadFirst) {
+     samDownloading.value = true
+     samDownloadingModelId.value = modelId // Track ID
+     samPaused.value = false
+     samDownloadProgress.value = 0
+     try {
+       await window.api.sam.download(modelId)
+       // Refresh status after download
+       const newStatus = await window.api.sam.status()
+       samStatus.value.modelsStatus[modelId] = 'available'
+     } catch(e) {
+       console.error("Download failed or paused", e)
+       // Status check handles pause/cancel state logic in UI
+     } finally {
+       if (!samPaused.value) {
+           samDownloading.value = false
+           samDownloadingModelId.value = null
+       }
+     }
+  }
+  
+  // Set model (this also unloads previous)
+  const res = await window.api.sam.setModel(modelId)
+  samStatus.value = res.state
+  
+  // Persist user preference
+  localStorage.setItem('lastSamModel', modelId)
+}
+
+async function togglePauseDownload(modelId: string): Promise<void> {
+    if (samPaused.value) {
+        // Resume
+        samPaused.value = false
+        performModelSwitch(modelId, true)
+    } else {
+        // Pause
+        samPaused.value = true
+        samDownloading.value = false // Stop spinner
+        await window.api.sam.pauseDownload(modelId)
+    }
+}
+
+async function cancelDownload(modelId: string): Promise<void> {
+    samDownloading.value = false
+    samDownloadingModelId.value = null
+    samPaused.value = false
+    samDownloadProgress.value = 0
+    await window.api.sam.cancelDownload(modelId)
+    // Update status
+    const newStatus = await window.api.sam.status()
+    samStatus.value = newStatus
+}
+
+function confirmDownloadAction(accept: boolean): void {
+  const { modelId } = downloadConfirmation.value
+  downloadConfirmation.value.show = false
+  
+  if (accept && modelId) {
+    performModelSwitch(modelId, true)
+  }
+}
 </script>
 
 <template>
@@ -1398,19 +1585,11 @@ function goNextTask(): void {
             </div>
           </div>
 
-          <div
-            v-if="samDownloading"
-            class="flex items-center gap-2 text-xs text-slate-600 dark:text-gray-400"
-          >
-            <SamIcon class="ui-svg h-4 w-4 text-primary" />
-            <div class="w-32 h-1.5 rounded-full bg-slate-200 dark:bg-gray-700 overflow-hidden">
-              <div
-                class="h-full bg-primary transition-all duration-150"
-                :style="{ width: String(Math.round(samDownloadProgress * 100)) + '%' }"
-              ></div>
-            </div>
-            <span>{{ Math.round(samDownloadProgress * 100) }}%</span>
-          </div>
+
+          
+          <!-- Removed old floating progress bar as it is now in the menu -->
+
+
 
           <button
             ref="saveBtn"
@@ -1431,7 +1610,7 @@ function goNextTask(): void {
         </div>
       </header>
 
-      <div class="flex-1 flex p-4 gap-4 overflow-y-auto">
+      <div class="flex-1 flex p-4 gap-4 overflow-hidden">
         <div class="flex-1 flex flex-col gap-2">
           <!-- Toolbar -->
           <div
@@ -1448,13 +1627,100 @@ function goNextTask(): void {
 
               <div class="h-6 w-px bg-gray-200 dark:bg-gray-700 mx-1"></div>
 
-              <button
-                class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 annotation-tool"
-                data-tool="sam"
-                title="Shoot with LabelGun SAM"
-              >
-                <SamIcon class="ui-svg h-6 w-6 text-slate-600 dark:text-gray-300" />
-              </button>
+              <div class="h-6 w-px bg-gray-200 dark:bg-gray-700 mx-1"></div>
+
+              <div class="relative flex items-center sam-split-button group">
+                 <!-- Main Tool Button (Left) -->
+                 <button
+                  class="p-2 rounded-l-lg hover:bg-gray-100 dark:hover:bg-gray-800 annotation-tool border-r border-gray-200 dark:border-gray-700 flex items-center justify-center relative"
+                  data-tool="sam"
+                  :title="`Shoot with labelGun (${samModels[samStatus.currentModelId]?.name || 'Fast'})`"
+                >
+                  <SamIcon class="ui-svg h-6 w-6 text-slate-600 dark:text-gray-300" :class="{'text-primary': samStatus.status === 'ready'}" />
+                  <!-- Loading Indicator Overlay -->
+                  <div v-if="samStatus.status === 'loading'" class="absolute inset-0 flex items-center justify-center bg-white/50 dark:bg-black/50 rounded-l-lg">
+                      <div class="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+                  </div>
+                </button>
+                
+                <!-- Dropdown Trigger (Right) -->
+                <button 
+                   class="p-1 px-1.5 rounded-r-lg hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center border-l-0"
+                   @click.stop="showSamSettings = !showSamSettings"
+                   title="Select Model"
+                >
+                   <ArrowDropDownIcon class="ui-svg h-5 w-5 text-slate-500 dark:text-gray-400" />
+                </button>
+
+                <!-- Professional Model Menu -->
+                <div
+                  v-if="showSamSettings"
+                  class="absolute top-full left-0 mt-2 w-72 bg-white dark:bg-gray-900 rounded-lg shadow-xl z-20 border border-slate-200 dark:border-gray-700 overflow-hidden"
+                >
+                   <div class="bg-slate-50 dark:bg-gray-800 px-3 py-2 border-b border-slate-200 dark:border-gray-700">
+                      <div class="text-[10px] font-bold text-slate-500 dark:text-gray-400 uppercase tracking-wider">Active Model</div>
+                   </div>
+                   
+                   <div class="p-1">
+                       <div v-for="(model, id) in samModels" :key="id" 
+                            class="relative group/item flex flex-col gap-1 p-3 rounded-md cursor-pointer transition-all border border-transparent"
+                            :class="{ 
+                                'bg-primary/5 border-primary/20': samStatus.currentModelId === id, 
+                                'hover:bg-slate-50 dark:hover:bg-gray-800': samStatus.currentModelId !== id 
+                            }"
+                            @click="handleSamModelSelect(String(id))"
+                       >
+                          <div class="flex items-center justify-between">
+                             <div class="flex items-center gap-2.5">
+                                <!-- Status Indicator -->
+                                <div class="w-2 h-2 rounded-full" 
+                                     :class="{
+                                        'bg-green-500 shadow-[0_0_4px_rgba(34,197,94,0.4)]': samStatus.currentModelId === id && samStatus.status === 'ready',
+                                        'bg-slate-300 dark:bg-gray-600': samStatus.currentModelId !== id
+                                     }"></div>
+                                <span class="text-sm font-semibold"
+                                      :class="samStatus.currentModelId === id ? 'text-primary' : 'text-slate-700 dark:text-gray-200'"
+                                >{{ model.name }}</span>
+                             </div>
+                             <span 
+                                class="text-[10px] font-mono px-1.5 py-0.5 rounded transition-colors"
+                                :class="samStatus.modelsStatus[id] === 'available' ? 'text-green-600 bg-green-50 dark:bg-green-900/20 dark:text-green-400' : 'text-slate-400 bg-slate-100 dark:bg-gray-800'"
+                             >
+                                {{ samStatus.modelsStatus[id] === 'available' ? 'Downloaded' : model.size }}
+                             </span>
+                          </div>
+                          
+                          <p class="text-[11px] text-slate-500 dark:text-gray-400 pl-4 leading-snug">{{ model.description }}</p>
+
+                          <!-- Download/Progress Area -->
+                          <div v-if="(samDownloading || samPaused) && samDownloadingModelId === id" class="mt-2 pl-4" @click.stop>
+                              <div class="flex items-center justify-between text-[10px] text-slate-500 mb-1">
+                                  <span>{{ samPaused ? 'Paused' : (samDownloadStage === 'encoder' ? 'Downloading Encoder...' : 'Downloading Decoder...') }}</span>
+                                  <span>{{ Math.floor(samDownloadProgress * 100) }}%</span>
+                              </div>
+                              <div class="flex items-center gap-2">
+                                  <!-- Progress Bar Housing -->
+                                  <div class="flex-1 h-1.5 bg-slate-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                                      <div class="h-full bg-primary transition-all duration-300 ease-out"
+                                           :style="{ width: `${Math.max(5, samDownloadProgress * 100)}%` }">
+                                      </div>
+                                  </div>
+                                  
+                                  <!-- Controls -->
+                                  <div class="flex items-center gap-1">
+                                      <button @click="togglePauseDownload(String(id))" class="p-0.5 hover:bg-slate-200 dark:hover:bg-gray-600 rounded">
+                                          <component :is="samPaused ? PlayIcon : PauseIcon" class="w-4 h-4 text-slate-600 dark:text-gray-300"/>
+                                      </button>
+                                      <button @click="cancelDownload(String(id))" class="p-0.5 hover:bg-red-100 dark:hover:bg-red-900/30 rounded group/cancel">
+                                          <CloseIcon class="w-4 h-4 text-slate-400 group-hover/cancel:text-red-500"/>
+                                      </button>
+                                  </div>
+                              </div>
+                          </div>
+                       </div>
+                   </div>
+                </div>
+              </div>
 
               <div class="relative">
                 <button
@@ -1544,7 +1810,11 @@ function goNextTask(): void {
               <div class="h-6 w-px bg-slate-200 dark:bg-gray-700 mx-1"></div>
 
               <!-- Stroke Width Slider -->
-              <div class="flex items-center gap-2 px-2" title="Border Thickness">
+              <div 
+                class="flex items-center gap-2 px-2" 
+                title="Border Thickness (Scroll to adjust)"
+                @wheel.prevent="handleStrokeWidthScroll"
+              >
                 <span class="text-xs font-bold text-slate-500 dark:text-gray-400">Size</span>
                 <input
                   type="range"
@@ -1662,16 +1932,16 @@ function goNextTask(): void {
         </div>
 
         <!-- Sağ paneller -->
-        <div class="w-full lg:w-96 flex flex-col gap-4 pt-0">
+        <div class="w-full lg:w-96 flex flex-col gap-4 pt-0 h-full overflow-hidden">
           <div
-            class="bg-surface/70 dark:bg-background-dark p-4 rounded-lg border border-border dark:border-gray-800"
+            class="bg-surface/70 dark:bg-background-dark p-4 rounded-lg border border-border dark:border-gray-800 flex flex-col min-h-0 flex-1"
           >
             <h3 class="text-lg font-semibold mb-3">Annotations</h3>
-            <div ref="annotationList" class="space-y-3"></div>
+            <div ref="annotationList" class="space-y-3 overflow-y-auto flex-1 min-h-0"></div>
           </div>
-
+          
           <div
-            class="bg-surface/70 dark:bg-background-dark p-4 rounded-lg border border-border dark:border-gray-800 flex flex-col flex-1"
+            class="bg-surface/70 dark:bg-background-dark p-4 rounded-lg border border-border dark:border-gray-800 flex flex-col shrink-0"
           >
             <h3 class="text-lg font-semibold mb-3">Labels</h3>
             <p v-if="showLabelHint" class="text-xs text-amber-500 mb-2">
@@ -1703,6 +1973,34 @@ function goNextTask(): void {
         </div>
       </div>
     </main>
+    
+    <!-- Download Confirmation Modal -->
+    <transition name="fade">
+      <div v-if="downloadConfirmation.show" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+         <div class="bg-surface dark:bg-gray-800 rounded-xl shadow-2xl max-w-sm w-full p-6 border border-slate-200 dark:border-gray-700">
+             <h3 class="text-lg font-bold text-slate-800 dark:text-gray-100 mb-2">Download Model?</h3>
+             <p class="text-sm text-slate-600 dark:text-gray-300 mb-4">
+                You are about to download <strong>{{ downloadConfirmation.modelName }}</strong>.
+                <br><br>
+                Approximate size: <span class="font-mono bg-slate-100 dark:bg-gray-700 px-1 rounded">{{ downloadConfirmation.size }}</span>
+             </p>
+             <div class="flex items-center justify-end gap-3">
+                <button 
+                  @click="confirmDownloadAction(false)"
+                  class="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-700"
+                >
+                  Cancel
+                </button>
+                <button 
+                  @click="confirmDownloadAction(true)"
+                  class="px-4 py-2 rounded-lg text-sm font-medium text-white bg-primary hover:bg-primary-light"
+                >
+                  Download
+                </button>
+             </div>
+         </div>
+      </div>
+    </transition>
   </div>
 </template>
 <style src="@renderer/styles/labeler-view.css"></style>

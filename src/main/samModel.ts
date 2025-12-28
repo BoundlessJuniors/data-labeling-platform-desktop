@@ -8,97 +8,250 @@ import Jimp from 'jimp'
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports
 import type * as Ort from 'onnxruntime-node'
 
-export type SamStatus = 'idle' | 'downloading' | 'ready' | 'error'
+export type SamModelId = 'vit_b' | 'vit_l' | 'vit_h'
+
+export interface SamModelConfig {
+  id: SamModelId
+  name: string
+  description: string
+  size: string
+  encoderUrl: string
+  decoderUrl: string
+  encoderFile: string
+  decoderFile: string
+  quantized: boolean
+}
+
+// Hugging Face URLs for Quantized Models
+export const SAM_MODELS: Record<SamModelId, SamModelConfig> = {
+  vit_b: {
+    id: 'vit_b',
+    name: 'Fast (ViT-B)',
+    description: 'Fastest model, lower memory usage. Good for general use.',
+    size: '~130 MB',
+    encoderUrl: 'https://huggingface.co/visheratin/segment-anything-vit-b/resolve/main/encoder-quant.onnx',
+    decoderUrl: 'https://huggingface.co/visheratin/segment-anything-vit-b/resolve/main/decoder-quant.onnx',
+    encoderFile: 'encoder-quant.onnx',
+    decoderFile: 'decoder-quant.onnx',
+    quantized: true
+  },
+  vit_l: {
+    id: 'vit_l',
+    name: 'Balanced (ViT-L)',
+    description: 'Better accuracy, moderate speed. Recommended for complex images.',
+    size: '~350 MB',
+    encoderUrl: 'https://huggingface.co/visheratin/segment-anything-vit-l/resolve/main/encoder-quant.onnx',
+    decoderUrl: 'https://huggingface.co/visheratin/segment-anything-vit-l/resolve/main/decoder-quant.onnx',
+    encoderFile: 'encoder-quant.onnx',
+    decoderFile: 'decoder-quant.onnx',
+    quantized: true
+  },
+  vit_h: {
+    id: 'vit_h',
+    name: 'High Quality (ViT-H)',
+    description: 'Best accuracy, slowest speed. High memory usage.',
+    size: '~700 MB',
+    encoderUrl: 'https://huggingface.co/visheratin/segment-anything-vit-h/resolve/main/encoder-quant.onnx',
+    decoderUrl: 'https://huggingface.co/visheratin/segment-anything-vit-h/resolve/main/decoder-quant.onnx',
+    encoderFile: 'encoder-quant.onnx',
+    decoderFile: 'decoder-quant.onnx',
+    quantized: true
+  }
+}
+
+export type SamStatus = 'idle' | 'downloading' | 'ready' | 'error' | 'loading'
 
 export interface SamState {
   status: SamStatus
+  currentModelId: SamModelId
+  downloadProgress: Record<SamModelId, number | null> // 0-1 or null if not downloading
+  modelsStatus: Record<SamModelId, 'available' | 'not_downloaded'>
   error: string | null
 }
-
-const SAM_ENCODER_FILE = 'encoder-quant.onnx'
-const SAM_DECODER_FILE = 'decoder-quant.onnx'
-
-// Hugging Face'teki SAM ViT-B ONNX encoder & decoder (quantize) dosyaları.
-const SAM_ENCODER_URL =
-  'https://huggingface.co/visheratin/segment-anything-vit-b/resolve/main/encoder-quant.onnx'
-const SAM_DECODER_URL =
-  'https://huggingface.co/visheratin/segment-anything-vit-b/resolve/main/decoder-quant.onnx'
 
 let ortModule: typeof Ort | null = null
 let samEncoderSession: Ort.InferenceSession | null = null
 let samDecoderSession: Ort.InferenceSession | null = null
 
+// Initialize State
 const samState: SamState = {
   status: 'idle',
+  currentModelId: 'vit_b',
+  downloadProgress: { vit_b: null, vit_l: null, vit_h: null },
+  modelsStatus: { vit_b: 'not_downloaded', vit_l: 'not_downloaded', vit_h: 'not_downloaded' },
   error: null
 }
 
 export interface SamDownloadProgress {
+  modelId: SamModelId
   stage: 'encoder' | 'decoder'
   loaded: number
   total: number | null
 }
 
-function getModelsDir(): string {
+function getModelsRootDir(): string {
   const userData = app.getPath('userData')
-  const dir = join(userData, 'models', 'sam')
+  return join(userData, 'models', 'sam')
+}
+
+function getModelDir(modelId: SamModelId): string {
+  const root = getModelsRootDir()
+  const dir = join(root, modelId)
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true })
   }
   return dir
 }
 
-export function getSamModelPath(): string {
-  // Varsayılan olarak decoder yolunu döndür (hata mesajlarında kullanılmak üzere).
-  return join(getModelsDir(), SAM_DECODER_FILE)
-}
+const activeDownloads = new Map<string, AbortController>()
 
 export function getSamState(): SamState {
+  // Sync existence check
+  for (const key of Object.keys(SAM_MODELS)) {
+    const mId = key as SamModelId
+    const dir = getModelDir(mId)
+    const config = SAM_MODELS[mId]
+    const exists = existsSync(join(dir, config.encoderFile)) && existsSync(join(dir, config.decoderFile))
+    
+    // Check if paused (partial file exists but not downloading)
+    if (!exists && !activeDownloads.has(mId)) {
+        // Simple check: if part file exists, we can consider it "paused" or just "downloading_interrupted"
+        // For UI simplicity, we might just report "not_downloaded" but allow resume which auto-detects.
+        // Or we can explicitly check for .part files to show "Paused" in UI.
+        const encPart = existsSync(join(dir, config.encoderFile + '.part'))
+        const decPart = existsSync(join(dir, config.decoderFile + '.part'))
+        if (encPart || decPart) {
+           // We could add a 'paused' status to modelsStatus if we want to be explicit
+        }
+    }
+    
+    samState.modelsStatus[mId] = exists ? 'available' : 'not_downloaded'
+  }
   return { ...samState }
 }
 
-export async function isSamModelDownloaded(): Promise<boolean> {
-  const dir = getModelsDir()
-  return existsSync(join(dir, SAM_ENCODER_FILE)) && existsSync(join(dir, SAM_DECODER_FILE))
+export async function isModelDownloaded(modelId: SamModelId): Promise<boolean> {
+  const dir = getModelDir(modelId)
+  const config = SAM_MODELS[modelId]
+  return existsSync(join(dir, config.encoderFile)) && existsSync(join(dir, config.decoderFile))
 }
 
-export async function downloadSamModel(onProgress?: (p: SamDownloadProgress) => void): Promise<void> {
-  if (samState.status === 'downloading') return
+export async function pauseSamDownload(modelId: SamModelId): Promise<void> {
+    const controller = activeDownloads.get(modelId)
+    if (controller) {
+        controller.abort('paused') // Pass reason
+        activeDownloads.delete(modelId)
+        samState.status = 'idle'
+        samState.downloadProgress[modelId] = null // Clear progress to stop UI spinner, or keep it?
+        // Let's keep last known progress? No, state refresh will clear it.
+        // We will need to re-calc progress on resume.
+    }
+}
+
+export async function cancelSamDownload(modelId: SamModelId): Promise<void> {
+    const controller = activeDownloads.get(modelId)
+    if (controller) {
+        controller.abort('cancelled')
+        activeDownloads.delete(modelId)
+    }
+    
+    // Cleanup partial files
+    const dir = getModelDir(modelId)
+    const config = SAM_MODELS[modelId]
+    try {
+        const fs = await import('fs/promises')
+        await fs.rm(join(dir, config.encoderFile + '.part'), { force: true })
+        await fs.rm(join(dir, config.decoderFile + '.part'), { force: true })
+        // Also remove completed files if any, to ensure clean slate?
+        // Maybe yes if "Cancel" means "I don't want this".
+        await fs.rm(join(dir, config.encoderFile), { force: true })
+        await fs.rm(join(dir, config.decoderFile), { force: true })
+    } catch (e) {
+        console.error("Error cleaning up cancelled download:", e)
+    }
+
+    samState.status = 'idle'
+    samState.downloadProgress[modelId] = null
+    samState.modelsStatus[modelId] = 'not_downloaded'
+}
+
+export async function downloadSamModel(
+  modelId: SamModelId,
+  onProgress?: (p: SamDownloadProgress) => void
+): Promise<void> {
+  if (activeDownloads.has(modelId)) return // Already downloading
+
+  const controller = new AbortController()
+  activeDownloads.set(modelId, controller)
 
   samState.status = 'downloading'
+  samState.downloadProgress[modelId] = 0 // Start/Reset
   samState.error = null
 
   try {
-    const dir = getModelsDir()
+    const config = SAM_MODELS[modelId]
+    const dir = getModelDir(modelId)
 
     const downloadOne = async (
       url: string,
-      file: string,
+      finalFileName: string,
       stage: SamDownloadProgress['stage']
     ): Promise<void> => {
-      const res = await net.fetch(url)
+      if (controller.signal.aborted) return
+
+      const partFile = finalFileName + '.part'
+      const partPath = join(dir, partFile)
+      const finalPath = join(dir, finalFileName)
+
+      if (existsSync(finalPath)) {
+        // Already done
+        onProgress?.({ modelId, stage, loaded: 1, total: 1 })
+        return
+      }
+
+      // Check for partial
+      let startByte = 0
+      if (existsSync(partPath)) {
+         const importFs = await import('fs')
+         const stats = importFs.statSync(partPath)
+         startByte = stats.size
+      }
+
+      const headers: Record<string, string> = {}
+      if (startByte > 0) {
+          headers['Range'] = `bytes=${startByte}-`
+      }
+
+      console.log(`Downloading ${stage} for ${modelId} starting at ${startByte}`)
+
+      const res = await net.fetch(url, {
+          headers,
+          signal: controller.signal
+      })
+      
       if (!res.ok) {
         throw new Error(`HTTP ${res.status} ${res.statusText} for ${url}`)
       }
 
       const totalHeader = res.headers.get('content-length')
-      const total = totalHeader ? Number.parseInt(totalHeader, 10) || null : null
+      // If Range used, content-length is remaining. Total is start + remaining.
+      // If not, content-length is total.
+      const contentLength = totalHeader ? Number.parseInt(totalHeader, 10) : 0
+      const total = startByte + contentLength
 
-      const targetPath = join(dir, file)
-      const fileStream = createWriteStream(targetPath)
+      const flags = startByte > 0 ? 'a' : 'w' // Append or Write
+      const fileStream = createWriteStream(partPath, { flags })
 
       const body = res.body
       if (!body) {
-        // Fallback: body stream yoksa tek seferde indir.
-        const arrayBuffer = await res.arrayBuffer()
-        fileStream.write(Buffer.from(arrayBuffer))
-        fileStream.end()
-        onProgress?.({ stage, loaded: total ?? 1, total })
-        return
+        throw new Error("No response body")
       }
 
       const reader = body.getReader()
-      let loaded = 0
+      let loaded = startByte
+
+      // Initial progress report
+      onProgress?.({ modelId, stage, loaded, total: total || null })
 
       while (true) {
         const { done, value } = await reader.read()
@@ -106,28 +259,83 @@ export async function downloadSamModel(onProgress?: (p: SamDownloadProgress) => 
         if (value) {
           loaded += value.byteLength
           fileStream.write(Buffer.from(value))
-          onProgress?.({ stage, loaded, total })
+          // Throttle progress updates?
+          onProgress?.({ modelId, stage, loaded, total: total || null })
+          
+          // Update global state for UI polling if needed
+          if (total) {
+              // Average progress if we want a single number, but current structure supports per-model
+              // We just update the callback mostly.
+          }
         }
       }
 
       fileStream.end()
+      
+      // Rename .part to final
+      const fsPromises = await import('fs/promises')
+      await fsPromises.rename(partPath, finalPath)
     }
 
-    await downloadOne(SAM_ENCODER_URL, SAM_ENCODER_FILE, 'encoder')
-    await downloadOne(SAM_DECODER_URL, SAM_DECODER_FILE, 'decoder')
+    // Download Encoder
+    await downloadOne(config.encoderUrl, config.encoderFile, 'encoder')
+    // Download Decoder
+    await downloadOne(config.decoderUrl, config.decoderFile, 'decoder')
 
-    samState.status = 'idle'
+    activeDownloads.delete(modelId)
+    samState.downloadProgress[modelId] = null
+    samState.modelsStatus[modelId] = 'available'
+    
+    // If this is the current model, ensure it's loaded
+    if (samState.currentModelId === modelId) {
+       samState.status = 'idle' 
+    } else {
+       samState.status = 'idle'
+    }
+
   } catch (err) {
-    console.error('[SAM] model download failed:', err)
-    samState.status = 'error'
-    samState.error = err instanceof Error ? err.message : String(err)
-    throw err
+    activeDownloads.delete(modelId)
+    const isAborted = (err as any).name === 'AbortError' || controller.signal.aborted
+    
+    if (isAborted) {
+        console.log(`Download for ${modelId} paused/cancelled.`)
+        samState.status = 'idle'
+        // Do not set error state for pause/cancel
+    } else {
+        console.error(`[SAM] model ${modelId} download failed:`, err)
+        samState.status = 'error'
+        samState.downloadProgress[modelId] = null
+        samState.error = err instanceof Error ? err.message : String(err)
+        throw err
+    }
   }
+}
+
+export async function switchSamModel(modelId: SamModelId): Promise<void> {
+  if (modelId === samState.currentModelId && samState.status === 'ready') return
+  
+  // Unload current sessions to free memory
+  if (samEncoderSession) {
+    try { (samEncoderSession as any).release() } catch (e) { /* ignore */ }
+    samEncoderSession = null
+  }
+  if (samDecoderSession) {
+    try { (samDecoderSession as any).release() } catch (e) { /* ignore */ }
+    samDecoderSession = null
+  }
+
+  // Clear cache as embeddings are model-specific
+  embeddingCache.clear()
+
+  samState.currentModelId = modelId
+  samState.status = 'idle'
+  
+  // If downloaded, load immediately? Or wait for first inference?
+  // Let's wait for inference or explicit load call to invoke ensureSamSessionLoaded
 }
 
 async function ensureOrtLoaded(): Promise<typeof Ort> {
   if (ortModule) return ortModule
-  // Dinamik import: build sırasında tree-shaking ile uyumlu, açılışta gecikme yaratmaz.
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const mod = (await import('onnxruntime-node')) as typeof Ort
   ortModule = mod
@@ -137,19 +345,33 @@ async function ensureOrtLoaded(): Promise<typeof Ort> {
 export async function ensureSamSessionLoaded(): Promise<void> {
   if (samEncoderSession && samDecoderSession) return
 
-  const hasModel = await isSamModelDownloaded()
-  if (!hasModel) {
-    throw new Error('SAM model file not found. Please download it first.')
+  const modelId = samState.currentModelId
+  const downloaded = await isModelDownloaded(modelId)
+  
+  if (!downloaded) {
+    throw new Error(`SAM model ${modelId} not found. Please download it first.`)
   }
 
-  const ort = await ensureOrtLoaded()
-  const dir = getModelsDir()
-  const encoderPath = join(dir, SAM_ENCODER_FILE)
-  const decoderPath = join(dir, SAM_DECODER_FILE)
+  samState.status = 'loading'
+  try {
+    const ort = await ensureOrtLoaded()
+    const dir = getModelDir(modelId)
+    const config = SAM_MODELS[modelId]
+    
+    const encoderPath = join(dir, config.encoderFile)
+    const decoderPath = join(dir, config.decoderFile)
 
-  samEncoderSession = await ort.InferenceSession.create(encoderPath)
-  samDecoderSession = await ort.InferenceSession.create(decoderPath)
-  samState.status = 'ready'
+    // Create sessions
+    // Using CPU by default. For GPU support, options would need to be passed here.
+    samEncoderSession = await ort.InferenceSession.create(encoderPath)
+    samDecoderSession = await ort.InferenceSession.create(decoderPath)
+    
+    samState.status = 'ready'
+  } catch (e) {
+    samState.status = 'error'
+    samState.error = e instanceof Error ? e.message : String(e)
+    throw e
+  }
 }
 
 export interface SamPoint {
@@ -158,7 +380,6 @@ export interface SamPoint {
 }
 
 export interface SamMaskResult {
-  // SAM çıktısından üretilen polygon maske sonucu.
   points: { x: number; y: number }[]
 }
 
@@ -168,6 +389,7 @@ interface ImageEmbeddingCacheEntry {
   embedding: Ort.Tensor
   origWidth: number
   origHeight: number
+  modelId: SamModelId // Ensure cache is valid for current model
 }
 
 const embeddingCache = new Map<string, ImageEmbeddingCacheEntry>()
@@ -190,7 +412,6 @@ async function computeImageEmbedding(imagePath: string): Promise<ImageEmbeddingC
   const resizedW = Math.round(origWidth * scale)
   const resizedH = Math.round(origHeight * scale)
 
-  // SAM, en uzun kenarı 1024 olacak şekilde resmi ölçekliyor.
   img.resize(resizedW, resizedH)
 
   const canvas = new Jimp(SAM_IMAGE_SIZE, SAM_IMAGE_SIZE, 0)
@@ -226,7 +447,8 @@ async function computeImageEmbedding(imagePath: string): Promise<ImageEmbeddingC
   const entry: ImageEmbeddingCacheEntry = {
     embedding,
     origWidth,
-    origHeight
+    origHeight,
+    modelId: samState.currentModelId
   }
 
   embeddingCache.set(imagePath, entry)
@@ -261,7 +483,7 @@ function buildPointLabels(numPoints: number): Float32Array {
   const total = numPoints + 1
   const labels = new Float32Array(total)
   for (let i = 0; i < numPoints; i++) {
-    labels[i] = 1 // tüm noktalar pozitif kabul ediliyor
+    labels[i] = 1 // all points positive
   }
   labels[total - 1] = -1 // padding point label
   return labels
@@ -338,12 +560,15 @@ export async function runSamInference(
   if (points.length === 0) {
     throw new Error('At least one point is required for SAM inference.')
   }
+  
+  // Ensure session is loaded (active model)
   await ensureSamSessionLoaded()
 
   const ort = ortModule as typeof Ort
 
   let entry = embeddingCache.get(imagePath)
-  if (!entry) {
+  // Check if cache entry exists AND belongs to the current model
+  if (!entry || entry.modelId !== samState.currentModelId) {
     entry = await computeImageEmbedding(imagePath)
   }
 
@@ -380,7 +605,6 @@ export async function runSamInference(
   const data = masksTensor.data as Float32Array | number[]
   const floatData = data instanceof Float32Array ? data : new Float32Array(data)
 
-  // Çoğu SAM decoder çıktısı [1, 1, H, W] şeklindedir.
   const shape = masksTensor.dims
   const h = shape[shape.length - 2]
   const w = shape[shape.length - 1]
