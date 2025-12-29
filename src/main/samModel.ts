@@ -912,6 +912,9 @@ export function updatePrefetchPlan(currentIndex: number, totalTasks: number, tas
     }
   }
 
+  // Queue current task (HIGH priority) - ensures startup/jump to task is handled
+  queueTask(plan.current, 'high')
+
   // Queue backward images (last one MEDIUM, others LOW)
   plan.backward.forEach((idx, i) => {
     const priority = i === plan.backward.length - 1 ? 'medium' : 'low'
