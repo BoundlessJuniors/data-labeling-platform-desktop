@@ -614,6 +614,63 @@ async function handleSamClickFromKonva(payload: { imgX: number; imgY: number }):
   }
 }
 
+async function handleSamDrawFromKonva(payload: { points: {x: number; y: number}[]; labels: number[] }): Promise<void> {
+  if (!tasks.value.length) return
+
+  // Ensure tool is ready
+  if (!samReady.value) {
+       try {
+         await window.api.sam.ensureReady()
+         const s = await window.api.sam.status()
+         samReady.value = s.status === 'ready'
+         if (!samReady.value) return
+       } catch(e) {
+         console.error("Auto-ensure ready failed", e)
+         return
+       }
+  }
+
+  const current = tasks.value[currentTaskIndex.value]
+  if (!current) return
+
+  try {
+    const res = await window.api.sam.run({
+      imagePath: current.image,
+      points: payload.points,
+      labels: payload.labels
+    })
+
+    if (!res.ok || !res.mask || !Array.isArray(res.mask.points) || res.mask.points.length < 3) {
+      console.warn('[SAM] invalid mask result:', res)
+      return
+    }
+
+    const polygonAnn: Annotation = {
+      id: Date.now(),
+      type: 'polygon',
+      label: state.activeLabel,
+      points: res.mask.points.map((p) => ({ x: p.x, y: p.y }))
+    } as Annotation
+
+    state.annotations.push(polygonAnn)
+    state.selectedAnnotationId = polygonAnn.id
+    recordHistory()
+    renderAnnotations()
+    updateDeleteButton()
+
+    if (!editHintDismissed.value) {
+      showEditHint.value = true
+      if (editHintTimer != null) window.clearTimeout(editHintTimer)
+      editHintTimer = window.setTimeout(() => {
+        showEditHint.value = false
+        editHintTimer = null
+      }, 2600)
+    }
+  } catch (e) {
+    console.error('[SAM] run failed:', e)
+  }
+}
+
 function handleEditRequestFromKonva(id: number): void {
   const ann = state.annotations.find((a) => a.id === id)
   if (!ann) return
@@ -1915,6 +1972,7 @@ function confirmDownloadAction(accept: boolean): void {
                 @pointer-move="handlePointerMove"
                 @pointer-leave="handlePointerLeave"
                 @sam-click="handleSamClickFromKonva"
+                @sam-draw="handleSamDrawFromKonva"
                 @edit-request="handleEditRequestFromKonva"
                 @update-annotation-state="handleUpdateAnnotationStateFromKonva"
                 @annotation-transform-end="handleAnnotationTransformEndFromKonva"

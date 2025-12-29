@@ -1133,14 +1133,15 @@ function transformPointsToOnnxCoords(
   return arr
 }
 
-function buildPointLabels(numPoints: number): Float32Array {
+function buildPointLabels(numPoints: number, labels?: number[]): Float32Array {
   const total = numPoints + 1
-  const labels = new Float32Array(total)
+  const arr = new Float32Array(total)
   for (let i = 0; i < numPoints; i++) {
-    labels[i] = 1 // all points positive
+    // If labels provided, use them. Otherwise default to 1 (foreground)
+    arr[i] = labels && labels[i] !== undefined ? labels[i] : 1
   }
-  labels[total - 1] = -1 // padding point label
-  return labels
+  arr[total - 1] = -1 // padding point label
+  return arr
 }
 
 interface XY {
@@ -1281,7 +1282,8 @@ export async function warmupGPU(): Promise<void> {
 
 export async function runSamInference(
   imagePath: string,
-  points: SamPoint[]
+  points: SamPoint[],
+  labels?: number[]
 ): Promise<SamMaskResult> {
   if (points.length === 0) {
     throw new Error('At least one point is required for SAM inference.')
@@ -1315,7 +1317,7 @@ export async function runSamInference(
   }
 
   const coordsArr = transformPointsToOnnxCoords(points, origWidth, origHeight)
-  const labelsArr = buildPointLabels(points.length)
+  const labelsArr = buildPointLabels(points.length, labels)
 
   const pointCoords = new ort.Tensor('float32', coordsArr, [1, points.length + 1, 2])
   const pointLabels = new ort.Tensor('float32', labelsArr, [1, points.length + 1])

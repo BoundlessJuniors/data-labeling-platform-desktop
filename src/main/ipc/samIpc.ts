@@ -105,9 +105,10 @@ export function registerSamIpc(): void {
       payload: {
         imagePath: string
         points: SamPoint[]
+        labels?: number[]
       }
     ) => {
-      const res = await runSamInference(payload.imagePath, payload.points)
+      const res = await runSamInference(payload.imagePath, payload.points, payload.labels)
       return {
         ok: true,
         mask: res
