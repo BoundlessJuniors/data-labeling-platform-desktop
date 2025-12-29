@@ -834,11 +834,48 @@ const { attachKeyboardShortcuts, detachKeyboardShortcuts } = useKeyboardShortcut
    Lifecycle: onMounted / onBeforeUnmount
    ============================= */
 onMounted(async (): Promise<void> => {
-  // Seçilen dataset’ten görevleri yükle
+  // Seçilen dataset'ten görevleri yükle
   try {
+    console.log('[UI] 🔄 Calling initFromDb...')
+    console.log('[UI] Dataset ID:', props.datasetId)
+    
     await initFromDb(props.datasetId)
+    
+    console.log(`[UI] ✅ initFromDb done!`)
+    console.log(`[UI] Tasks count: ${tasks.value.length}`)
+    console.log(`[UI] Current task index: ${currentTaskIndex.value}`)
+    
+    if (tasks.value.length === 0) {
+      console.warn('[UI] ⚠️ NO TASKS FOUND! Dataset might be empty.')
+      console.warn('[UI] ⚠️ Prefetch will NOT initialize (no tasks to cache)')
+    }
+    
+    // ⚡ PREFETCH: Start AFTER tasks are loaded
+    console.log(`[UI] Tasks loaded: ${tasks.value.length} tasks`)
+    
+    // WAIT for SAM to be ready before starting prefetch
+    console.log('[UI] Waiting for SAM session to be ready...')
+    await window.electron.ipcRenderer.invoke('sam:ensureReady')
+    console.log('[UI] SAM session ready!')
+    
+    // Start background processing
+    await window.electron.ipcRenderer.invoke('sam:startPrefetch')
+    console.log('[UI] Prefetch background processing started')
+    
+    // Initialize plan for first task
+    if (tasks.value.length > 0 && currentTaskIndex.value >= 0) {
+      const timestamp = new Date().toISOString().split('T')[1].slice(0, -1)
+      console.log(`[${timestamp}] [UI] ✅ Initializing prefetch plan for task ${currentTaskIndex.value}`)
+      // Send simplified task data (only serializable properties)
+      const simplifiedTasks = tasks.value.map(task => ({ image: task.image }))
+      await window.electron.ipcRenderer.invoke('sam:updatePrefetchPlan', currentTaskIndex.value, tasks.value.length, simplifiedTasks)
+    } else {
+      console.warn('[UI] ⚠️ Skipping prefetch initialization:')
+      console.warn(`[UI]    - Tasks count: ${tasks.value.length}`)
+      console.warn(`[UI]    - Current index: ${currentTaskIndex.value}`)
+    }
   } catch (e) {
-    console.error('[DB] initFromDb failed:', e)
+    console.error('[UI] ❌ initFromDb failed:', e)
   }
 
   // === THEME INIT (light/dark) ===
@@ -848,8 +885,10 @@ onMounted(async (): Promise<void> => {
   document.documentElement.classList.toggle('dark', shouldDark)
 
   // SAM edit ipucu daha önce kapatıldıysa tekrar gösterme
-  const samHintFlag = localStorage.getItem('editHintDismissed')
-  editHintDismissed.value = samHintFlag === '1'
+  const dismissed = localStorage.getItem('editHintDismissed')
+  if (dismissed === '1') {
+    editHintDismissed.value = true
+  }
 
   // === THEME TOGGLE BUTTON ===
   onThemeToggleClick = (): void => {
@@ -1325,17 +1364,36 @@ async function loadTaskByIndex(i: number): Promise<void> {
 
       active.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
     })
+    
+    
+    // ⚡ PREFETCH: Record user activity and update cache plan
+    const timestamp = new Date().toISOString().split('T')[1].slice(0, -1)
+    const taskImage = t.image.split(/[\\/]/).pop() || t.image
+    console.log(`\n[${timestamp}] [UI] 📄 Task ${i} loaded: ${taskImage}`)
+    
+    window.electron.ipcRenderer.invoke('sam:recordPrefetchActivity')
+    // Send simplified task data (only serializable properties)
+    const simplifiedTasks = tasks.value.map(task => ({ image: task.image }))
+    window.electron.ipcRenderer.invoke('sam:updatePrefetchPlan', i, tasks.value.length, simplifiedTasks)
   } catch (err) {
     console.error('Image load failed:', err)
   }
 }
 
+function handleTaskNavigation(idx: number): void {
+  if (editingAnnotationId.value !== null) {
+    alert('⚠️ Finish editing first! Press ESC to cancel or Enter to save.')
+    return
+  }
+  loadTaskByIndex(idx)
+}
+
 function goPrevTask(): void {
-  loadTaskByIndex((currentTaskIndex.value - 1 + tasks.value.length) % tasks.value.length)
+  handleTaskNavigation((currentTaskIndex.value - 1 + tasks.value.length) % tasks.value.length)
 }
 
 function goNextTask(): void {
-  loadTaskByIndex((currentTaskIndex.value + 1) % tasks.value.length)
+  handleTaskNavigation((currentTaskIndex.value + 1) % tasks.value.length)
 }
 
 function handleStrokeWidthScroll(e: WheelEvent): void {
@@ -1500,7 +1558,7 @@ function confirmDownloadAction(accept: boolean): void {
                   ? 'border-primary dark:border-primary/80 bg-primary/5'
                   : 'border-transparent hover:border-primary/50'
               ]"
-              @click.prevent="loadTaskByIndex(idx)"
+              @click.prevent="handleTaskNavigation(idx)"
             >
               <div
                 class="h-24 bg-background-light dark:bg-background-dark flex items-center justify-center"

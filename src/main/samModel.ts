@@ -1,7 +1,7 @@
 import { app, net } from 'electron'
 import { join } from 'path'
 import { existsSync, mkdirSync, createWriteStream } from 'fs'
-import Jimp from 'jimp'
+import { Worker } from 'worker_threads'
 
 // Tip import'u için dinamik import kullanacağız; böylece uygulama açılırken
 // native modül hemen yüklenmek zorunda kalmaz.
@@ -85,7 +85,7 @@ export interface SamState {
 }
 
 let ortModule: typeof Ort | null = null
-let samEncoderSession: Ort.InferenceSession | null = null
+// samEncoderSession removed, handled by worker
 let samDecoderSession: Ort.InferenceSession | null = null
 
 // Initialize State
@@ -331,10 +331,9 @@ export async function switchSamModel(modelId: SamModelId): Promise<void> {
   if (modelId === samState.currentModelId && samState.status === 'ready') return
   
   // Unload current sessions to free memory
-  if (samEncoderSession) {
-    try { (samEncoderSession as any).release() } catch (e) { /* ignore */ }
-    samEncoderSession = null
-  }
+  // Unload current sessions to free memory
+  // samEncoderSession is in worker, handled by re-init or we can send 'release' message if needed
+  // For now, next init will release old one in worker.
   if (samDecoderSession) {
     try { (samDecoderSession as any).release() } catch (e) { /* ignore */ }
     samDecoderSession = null
@@ -398,7 +397,7 @@ async function detectAvailableProviders(): Promise<ProviderInfo[]> {
       providers.push({
         name: 'cuda',
         available: true, // Will be tested during session creation
-        priority: 1,
+        priority: 5,
         options: getCudaOptions()
       })
       console.log('[SAM-GPU] CUDA provider added to candidate list')
@@ -413,9 +412,9 @@ async function detectAvailableProviders(): Promise<ProviderInfo[]> {
     try {
       // DirectML can be named 'directml', 'DML', or 'DirectML' depending on version
       const directMLVariants = [
-        { name: 'directml', priority: 2 },
-        { name: 'DML', priority: 3 },
-        { name: 'DirectML', priority: 4 }
+        { name: 'directml', priority: 6 },
+        { name: 'DML', priority: 7 },
+        { name: 'DirectML', priority: 8 }
       ]
       
       for (const variant of directMLVariants) {
@@ -439,7 +438,7 @@ async function detectAvailableProviders(): Promise<ProviderInfo[]> {
       providers.push({
         name: 'webgpu',
         available: true,
-        priority: 5, // After DirectML variants, before CPU
+        priority: 1, // First priority - fastest to detect and works great
         options: {}
       })
       console.log('[SAM-GPU] WebGPU provider added to candidate list (experimental)')
@@ -499,7 +498,7 @@ function buildSessionOptions(providers: ProviderInfo[], useDirectML: boolean): a
 }
 
 export async function ensureSamSessionLoaded(): Promise<void> {
-  if (samEncoderSession && samDecoderSession) return
+  if (samDecoderSession && samWorker) return
 
   const modelId = samState.currentModelId
   const downloaded = await isModelDownloaded(modelId)
@@ -548,15 +547,15 @@ export async function ensureSamSessionLoaded(): Promise<void> {
           enableMemPattern: sessionOptions.enableMemPattern
         })
         
-        // Create encoder session
-        samEncoderSession = await ort.InferenceSession.create(encoderPath, sessionOptions)
-        
-        // Create decoder session
+        // Create decoder session (Main thread)
         samDecoderSession = await ort.InferenceSession.create(decoderPath, sessionOptions)
         
-        // Log actual providers used
-        console.log('[SAM-GPU] Encoder session providers:', (samEncoderSession as any).executionProviders || provider.name)
         console.log('[SAM-GPU] Decoder session providers:', (samDecoderSession as any).executionProviders || provider.name)
+        
+        // Init Encoder in Worker
+        console.log('[SAM-GPU] Initializing Encoder Worker...')
+        await initWorker(modelId)
+        
         console.log(`[SAM-GPU] ✓ Successfully loaded sessions with provider: ${provider.name}`)
         
         activeProvider = provider.name
@@ -565,10 +564,8 @@ export async function ensureSamSessionLoaded(): Promise<void> {
         
       } catch (error) {
         // Clean up any partially created sessions
-        if (samEncoderSession) {
-          try { (samEncoderSession as any).release?.() } catch (e) { /* ignore */ }
-          samEncoderSession = null
-        }
+        // Clean up any partially created sessions
+        // samEncoderSession handled by worker
         if (samDecoderSession) {
           try { (samDecoderSession as any).release?.() } catch (e) { /* ignore */ }
           samDecoderSession = null
@@ -633,70 +630,480 @@ interface ImageEmbeddingCacheEntry {
   embedding: Ort.Tensor
   origWidth: number
   origHeight: number
-  modelId: SamModelId // Ensure cache is valid for current model
+  modelId: SamModelId
+  lastUsed: number // Timestamp for LRU
 }
 
 const embeddingCache = new Map<string, ImageEmbeddingCacheEntry>()
+const MAX_CACHE_SIZE = 10 // Keep last 10 embeddings to prevent memory leak
 
+/**
+ * LRU Cache cleanup - removes least recently used entries
+ */
+function cleanupEmbeddingCache(): void {
+  if (embeddingCache.size <= MAX_CACHE_SIZE) return
+  
+  // Sort by lastUsed timestamp and remove oldest
+  const entries = Array.from(embeddingCache.entries())
+  entries.sort((a, b) => a[1].lastUsed - b[1].lastUsed)
+  
+  const toRemove = entries.length - MAX_CACHE_SIZE
+  for (let i = 0; i < toRemove; i++) {
+    embeddingCache.delete(entries[i][0])
+    console.log(`[SAM-GPU] Removed old embedding from cache: ${entries[i][0]}`)
+  }
+}
+
+/* ========================================
+   SMART PREFETCH CACHE SYSTEM
+   ======================================== */
+
+interface CacheJob {
+  imagePath: string
+  taskIndex: number
+  priority: 'high' | 'medium' | 'low'
+  timestamp: number
+}
+
+interface CachePlan {
+  backward: number[]
+  current: number
+  forward: number[]
+}
+
+class SmartCacheQueue {
+  private queue: CacheJob[] = []
+  private processing: boolean = false
+  private paused: boolean = false
+  private lastUserActivity: number = Date.now()
+  private processingTaskIndex: number | null = null
+  private processingInterval: NodeJS.Timeout | null = null
+
+  recordUserActivity(): void {
+    this.lastUserActivity = Date.now()
+  }
+
+  isUserIdle(): boolean {
+    return Date.now() - this.lastUserActivity > 500
+  }
+
+  isRapidSwitching(): boolean {
+    return Date.now() - this.lastUserActivity < 200
+  }
+
+  isGpuBusy(): boolean {
+    return samState.status === 'loading' || this.processingTaskIndex !== null
+  }
+
+  queueJob(job: CacheJob): void {
+    const timestamp = new Date().toISOString().split('T')[1].slice(0, -1)
+    
+    // Check if already cached
+    const cached = embeddingCache.get(job.imagePath)
+    if (cached && cached.modelId === samState.currentModelId) {
+      console.log(`[${timestamp}] [Prefetch] ⏭️  Task ${job.taskIndex} already cached, skipping`)
+      return
+    }
+
+    // Check if already queued
+    const exists = this.queue.find(j => j.imagePath === job.imagePath)
+    if (exists) {
+      // Update priority if higher
+      if (this.getPriorityValue(job.priority) < this.getPriorityValue(exists.priority)) {
+        console.log(`[${timestamp}] [Prefetch] 🔼 Task ${job.taskIndex} priority updated: ${exists.priority} → ${job.priority}`)
+        exists.priority = job.priority
+      }
+      return
+    }
+
+    this.queue.push(job)
+    this.sortQueue()
+    const imageName = job.imagePath.split(/[\\/]/).pop() || job.imagePath
+    console.log(`[${timestamp}] [Prefetch] ➕ Queued task ${job.taskIndex} (${job.priority}): ${imageName} | Queue size: ${this.queue.length}`)
+  }
+
+  removeJobs(predicate: (job: CacheJob) => boolean): number {
+    const before = this.queue.length
+    this.queue = this.queue.filter(j => !predicate(j))
+    return before - this.queue.length
+  }
+
+  clear(): void {
+    this.queue = []
+  }
+
+  pause(): void {
+    this.paused = true
+  }
+
+  resume(): void {
+    this.paused = false
+    void this.processNext()
+  }
+
+  private getNextJob(): CacheJob | null {
+    return this.queue.length > 0 ? this.queue[0] : null
+  }
+
+  private getPriorityValue(priority: string): number {
+    return { high: 1, medium: 2, low: 3 }[priority] || 99
+  }
+
+  private sortQueue(): void {
+    this.queue.sort((a, b) => {
+      const diff = this.getPriorityValue(a.priority) - this.getPriorityValue(b.priority)
+      if (diff !== 0) return diff
+      return a.timestamp - b.timestamp
+    })
+  }
+
+  async processNext(): Promise<void> {
+    const timestamp = new Date().toISOString().split('T')[1].slice(0, -1)
+    
+    if (this.processing) {
+      return
+    }
+    if (this.paused) {
+      console.log(`[${timestamp}] [Prefetch] ⏸️  Queue paused, skipping process`)
+      return
+    }
+    if (!this.isUserIdle()) {
+      return // Silent when user active
+    }
+    if (this.isGpuBusy()) {
+      return // Silent when GPU busy
+    }
+
+    const job = this.getNextJob()
+    if (!job) {
+      return // Silent when queue empty
+    }
+
+    this.processing = true
+    this.processingTaskIndex = job.taskIndex
+
+    const imageName = job.imagePath.split(/[\\/]/).pop() || job.imagePath
+    console.log(`[${timestamp}] [Prefetch] 🚀 START encoding task ${job.taskIndex} (${job.priority}): ${imageName}`)
+    const startTime = performance.now()
+    
+    try {
+      await computeImageEmbedding(job.imagePath)
+      
+      const elapsed = performance.now() - startTime
+      // Remove from queue
+      this.queue = this.queue.filter(j => j !== job)
+      console.log(`[${timestamp}] [Prefetch] ✅ DONE task ${job.taskIndex} in ${elapsed.toFixed(0)}ms | Remaining queue: ${this.queue.length}`)
+    } catch (e) {
+      const elapsed = performance.now() - startTime
+      console.error(`[${timestamp}] [Prefetch] ❌ FAILED task ${job.taskIndex} after ${elapsed.toFixed(0)}ms:`, (e as Error).message)
+    } finally {
+      this.processing = false
+      this.processingTaskIndex = null
+
+      // Continue after longer throttle (2s instead of 100ms) to avoid overwhelming system
+      setTimeout(() => {
+        void this.processNext()
+      }, 2000) // 2 second delay between jobs
+    }
+  }
+
+  startProcessing(): void {
+    if (this.processingInterval) {
+      console.log('[Prefetch] ⚠️  Processing already started, skipping')
+      return
+    }
+
+    // Slower interval to avoid UI lag (500ms instead of 200ms)
+    this.processingInterval = setInterval(() => {
+      if (this.isRapidSwitching()) {
+        if (!this.paused) {
+          const timestamp = new Date().toISOString().split('T')[1].slice(0, -1)
+          console.log(`[${timestamp}] [Prefetch] ⏸️  Rapid switching detected, pausing queue for 1s`)
+          this.pause()
+          setTimeout(() => {
+            const ts2 = new Date().toISOString().split('T')[1].slice(0, -1)
+            console.log(`[${ts2}] [Prefetch] ▶️  Resuming queue after pause`)
+            this.resume()
+          }, 1000)
+        }
+      } else {
+        void this.processNext()
+      }
+    }, 500) // 500ms interval instead of 200ms - less aggressive
+    
+    const timestamp = new Date().toISOString().split('T')[1].slice(0, -1)
+    console.log(`[${timestamp}] [Prefetch] 🎬 Background processing STARTED (checking every 500ms)`)
+  }
+
+  stopProcessing(): void {
+    if (this.processingInterval) {
+      clearInterval(this.processingInterval)
+      this.processingInterval = null
+    }
+  }
+}
+
+// Global prefetch queue instance
+const prefetchQueue = new SmartCacheQueue()
+
+/**
+ * Calculate cache plan: 1 backward + current + 2 forward = 4 total (less aggressive)
+ */
+function getCachePlan(currentIndex: number, totalTasks: number): CachePlan {
+  const plan: CachePlan = {
+    backward: [],
+    current: currentIndex,
+    forward: []
+  }
+
+  // Backward 1 (reduced from 3)
+  const backIdx = currentIndex - 1
+  if (backIdx >= 0) {
+    plan.backward.push(backIdx)
+  }
+
+  // Forward 2 (reduced from 6)
+  for (let i = 1; i <= 2; i++) {
+    const idx = currentIndex + i
+    if (idx < totalTasks) {
+      plan.forward.push(idx)
+    }
+  }
+
+  const timestamp = new Date().toISOString().split('T')[1].slice(0, -1)
+  console.log(`[${timestamp}] [Prefetch] 📋 Cache plan for task ${currentIndex}/${totalTasks-1}:`)
+  console.log(`[${timestamp}] [Prefetch]    Backward (${plan.backward.length}): [${plan.backward.join(', ')}]`)
+  console.log(`[${timestamp}] [Prefetch]    Current: ${plan.current}`)
+  console.log(`[${timestamp}] [Prefetch]    Forward (${plan.forward.length}): [${plan.forward.join(', ')}]`)
+  
+  return plan
+}
+
+/**
+ * Update prefetch plan based on current task navigation
+ */
+export function updatePrefetchPlan(currentIndex: number, totalTasks: number, tasks: any[]): void {
+  const timestamp = new Date().toISOString().split('T')[1].slice(0, -1)
+  console.log(`\n[${timestamp}] [Prefetch] ═══════════════════════════════════════`)
+  console.log(`[${timestamp}] [Prefetch] 🎯 UPDATE PLAN: Navigated to task ${currentIndex}`)
+  
+  const plan = getCachePlan(currentIndex, totalTasks)
+  
+  // Remove old entries (4+ back)
+  const oldThreshold = currentIndex - 4
+  const removedCount = prefetchQueue.removeJobs(job => job.taskIndex < oldThreshold)
+  
+  if (removedCount > 0) {
+    console.log(`[${timestamp}] [Prefetch] 🗑️  Removed ${removedCount} old jobs (< task ${oldThreshold})`)
+  }
+
+  // Helper to queue a task
+  const queueTask = (idx: number, priority: 'high' | 'medium' | 'low') => {
+    if (idx >= 0 && idx < tasks.length && tasks[idx]) {
+      const task = tasks[idx]
+      if (task.image) {
+        prefetchQueue.queueJob({
+          imagePath: task.image,
+          taskIndex: idx,
+          priority,
+          timestamp: Date.now()
+        })
+      }
+    }
+  }
+
+  // Queue backward images (last one MEDIUM, others LOW)
+  plan.backward.forEach((idx, i) => {
+    const priority = i === plan.backward.length - 1 ? 'medium' : 'low'
+    queueTask(idx, priority)
+  })
+
+  // Queue forward images (first 2 MEDIUM, others LOW)
+  plan.forward.forEach((idx, i) => {
+    const priority = i < 2 ? 'medium' : 'low'
+    queueTask(idx, priority)
+  })
+}
+
+/**
+ * Record user activity for prefetch timing
+ */
+export function recordPrefetchActivity(): void {
+  prefetchQueue.recordUserActivity()
+}
+
+/**
+ * Start prefetch background processing
+ */
+export function startPrefetchProcessing(): void {
+  prefetchQueue.startProcessing()
+}
+
+/**
+ * Stop prefetch background processing
+ */
+export function stopPrefetchProcessing(): void {
+  prefetchQueue.stopProcessing()
+}
+
+/**
+ * Clear prefetch queue (e.g., on model change)
+ */
+export function clearPrefetchQueue(): void {
+  prefetchQueue.clear()
+  console.log('[Prefetch] Queue cleared')
+}
+
+// Restore helper needed for coordinates
 function getResizeScale(width: number, height: number): number {
   const longSide = Math.max(width, height)
   return SAM_IMAGE_SIZE / longSide
 }
 
-async function computeImageEmbedding(imagePath: string): Promise<ImageEmbeddingCacheEntry> {
-  if (!samEncoderSession || !ortModule) {
-    throw new Error('SAM encoder session is not ready.')
-  }
 
-  const img = await Jimp.read(imagePath)
-  const origWidth = img.getWidth()
-  const origHeight = img.getHeight()
+interface PendingRequest {
+  resolve: (res: ImageEmbeddingCacheEntry) => void
+  reject: (err: Error) => void
+  imagePath: string // Needed for caching
+}
 
-  const scale = getResizeScale(origWidth, origHeight)
-  const resizedW = Math.round(origWidth * scale)
-  const resizedH = Math.round(origHeight * scale)
+const pendingRequests = new Map<string, PendingRequest>()
+let samWorker: Worker | null = null
 
-  img.resize(resizedW, resizedH)
+function getWorkerPath(): string {
+  // In production/dev, the worker should be a sibling of index.js
+  // entry 'samWorker' -> samWorker.js
+  return join(__dirname, 'samWorker.js')
+}
 
-  const canvas = new Jimp(SAM_IMAGE_SIZE, SAM_IMAGE_SIZE, 0)
-  canvas.composite(img, 0, 0)
-
-  const mean = [123.675, 116.28, 103.53]
-  const std = [58.395, 57.12, 57.375]
-
-  const chw = new Float32Array(3 * SAM_IMAGE_SIZE * SAM_IMAGE_SIZE)
-
-  let idxR = 0
-  let idxG = SAM_IMAGE_SIZE * SAM_IMAGE_SIZE
-  let idxB = 2 * SAM_IMAGE_SIZE * SAM_IMAGE_SIZE
-
-  for (let y = 0; y < SAM_IMAGE_SIZE; y++) {
-    for (let x = 0; x < SAM_IMAGE_SIZE; x++) {
-      const { r, g, b } = Jimp.intToRGBA(canvas.getPixelColor(x, y))
-
-      chw[idxR++] = (r - mean[0]) / std[0]
-      chw[idxG++] = (g - mean[1]) / std[1]
-      chw[idxB++] = (b - mean[2]) / std[2]
+function initWorker(modelId: SamModelId): Promise<void> {
+  return new Promise((resolveResult, rejectResult) => {
+    if (samWorker) {
+        // If worker exists, just re-init with new model?
+        // Or if we want fresh worker:
+        // samWorker.terminate()
+        // For now, let's reuse and send 'init' message
+    } else {
+        const workerPath = getWorkerPath()
+        if (!existsSync(workerPath)) {
+            // Fallback for dev if structure is different?
+            // But we configured it to be there.
+            console.warn('[SAM] Worker file not found at', workerPath)
+        }
+        samWorker = new Worker(workerPath)
+        
+        samWorker.on('message', (msg) => {
+            if (msg.type === 'init_result') {
+                if (msg.success) {
+                   // resolve handled by specific promise? 
+                   // We need to track who asked for init. 
+                   // Since init is sequential globally for us:
+                   // We could treat it as a request.
+                } 
+            } else if (msg.type === 'result') {
+                const req = pendingRequests.get(msg.id)
+                if (req) {
+                    pendingRequests.delete(msg.id)
+                    // Reconstruct tensor
+                    const { embedding, dims, origWidth, origHeight } = msg
+                    // embedding is Float32Array (transfered)
+                    // We need to wrap it in Ort.Tensor
+                    try {
+                        // We must interpret the data as float32
+                        const floatData = embedding instanceof Float32Array ? embedding : new Float32Array(embedding)
+                        // Note: Ort might need the specific float32 array instance
+                        
+                        // We can't verify 'Ort' here easily if not imported or used just for types
+                        // But samModel has 'import type * as Ort'
+                        // We need the Value, so we use 'ortModule' which is loaded dynamically
+                        if (ortModule) {
+                             const tensor = new ortModule.Tensor('float32', floatData, dims)
+                             
+                             const entry: ImageEmbeddingCacheEntry = {
+                                embedding: tensor,
+                                origWidth,
+                                origHeight,
+                                modelId: samState.currentModelId,
+                                lastUsed: Date.now()
+                             }
+                             embeddingCache.set(req.imagePath, entry)
+                             cleanupEmbeddingCache() // Maintain LRU
+                             req.resolve(entry)
+                        } else {
+                            req.reject(new Error("ORT module not loaded in main thread"))
+                        }
+                    } catch (e) {
+                        req.reject(e as Error)
+                    }
+                }
+            } else if (msg.type === 'error') {
+                 const req = pendingRequests.get(msg.id)
+                 if (req) {
+                     pendingRequests.delete(msg.id)
+                     req.reject(new Error(msg.error))
+                 }
+            }
+        })
+        
+        samWorker.on('error', (err) => {
+            console.error('[SAM-Worker] Error:', err)
+        })
     }
+    
+    // Send init
+    const config = SAM_MODELS[modelId]
+    const dir = getModelDir(modelId)
+    // We pass absolute path to encoder
+    const encoderPath = join(dir, config.encoderFile)
+    
+    // We need to wait for init result. 
+    // Simplified: Just fire and assume success? 
+    // No, we should wait.
+    // Hack: use a temporary listener or just trust the next 'init_result' is for us.
+    // Or better, add ID to init message? 
+    // The worker code I wrote doesn't echo ID for init.
+    // Let's rely on event based wrapper for init.
+    
+    const onInit = (msg: any) => {
+        if (msg.type === 'init_result') {
+            samWorker?.off('message', onInit)
+            if (msg.success) resolveResult()
+            else rejectResult(new Error(msg.error))
+        }
+    }
+    samWorker.on('message', onInit)
+    
+    samWorker.postMessage({
+        type: 'init',
+        config: {
+            modelId,
+            modelPath: encoderPath
+        }
+    })
+  })
+}
+
+async function computeImageEmbedding(imagePath: string): Promise<ImageEmbeddingCacheEntry> {
+  // Ensure worker is ready? calling ensureSamSessionLoaded handles init.
+  // But ensureSamSessionLoaded calls worker init.
+  
+  if (!samWorker) {
+    throw new Error('SAM worker not initialized')
   }
+  
+  // Ensure ORT is loaded for Tensor creation
+  await ensureOrtLoaded()
 
-  const inputName = samEncoderSession.inputNames[0]
-  const ort = ortModule as typeof Ort
-  const input = new ort.Tensor('float32', chw, [1, 3, SAM_IMAGE_SIZE, SAM_IMAGE_SIZE])
-  const outputs = await samEncoderSession.run({ [inputName]: input })
-
-  const firstOutputName = samEncoderSession.outputNames[0]
-  const embedding = outputs[firstOutputName] as Ort.Tensor
-
-  const entry: ImageEmbeddingCacheEntry = {
-    embedding,
-    origWidth,
-    origHeight,
-    modelId: samState.currentModelId
-  }
-
-  embeddingCache.set(imagePath, entry)
-  return entry
+  return new Promise((resolve, reject) => {
+      const id = Date.now().toString() + Math.random().toString()
+      pendingRequests.set(id, { resolve, reject, imagePath })
+      
+      samWorker?.postMessage({
+          type: 'encode',
+          id,
+          imagePath
+      })
+  })
 }
 
 function transformPointsToOnnxCoords(
@@ -832,6 +1239,43 @@ function maskToPolygon(
   return traceBoundary(maskData, maskWidth, maskHeight, scaleX, scaleY)
 }
 
+/**
+ * Warm up GPU on app start to eliminate first-run initialization delay
+ */
+export async function warmupGPU(): Promise<void> {
+  try {
+    console.log('[SAM-GPU] Warming up GPU...')
+    await ensureSamSessionLoaded()
+    
+    // Run a minimal inference to initialize GPU
+    if (samDecoderSession && ortModule) {
+      const ort = ortModule as typeof Ort
+      
+      // Create minimal dummy tensors
+      const dummyEmbedding = new ort.Tensor('float32', new Float32Array(256 * 64 * 64), [1, 256, 64, 64])
+      const dummyCoords = new ort.Tensor('float32', new Float32Array([512, 512, 0, 0]), [1, 2, 2])
+      const dummyLabels = new ort.Tensor('float32', new Float32Array([1, -1]), [1, 2])
+      const dummyMask = new ort.Tensor('float32', new Float32Array(1 * 1 * 256 * 256), [1, 1, 256, 256])
+      const dummyHasMask = new ort.Tensor('float32', new Float32Array([0]), [1])
+      const dummyOrigSize = new ort.Tensor('float32', new Float32Array([1024, 1024]), [2])
+      
+      const warmupInputs = {
+        image_embeddings: dummyEmbedding,
+        point_coords: dummyCoords,
+        point_labels: dummyLabels,
+        mask_input: dummyMask,
+        has_mask_input: dummyHasMask,
+        orig_im_size: dummyOrigSize
+      }
+      
+      await samDecoderSession.run(warmupInputs)
+      console.log('[SAM-GPU] ✓ GPU warm-up complete')
+    }
+  } catch (e) {
+    console.warn('[SAM-GPU] Warm-up failed (not critical):', (e as Error).message)
+  }
+}
+
 export async function runSamInference(
   imagePath: string,
   points: SamPoint[]
@@ -853,12 +1297,17 @@ export async function runSamInference(
     const embeddingTime = performance.now() - embeddingStart
     console.log(`[SAM-GPU] Image embedding computed in ${embeddingTime.toFixed(2)}ms`)
   } else {
+    // Update LRU timestamp on cache hit
+    entry.lastUsed = Date.now()
+    embeddingCache.set(imagePath, entry)
     console.log('[SAM-GPU] Using cached image embedding')
   }
 
   const { embedding, origWidth, origHeight } = entry
 
-  if (!samDecoderSession) {
+  // samEncoderSession removed
+  const decoder = samDecoderSession
+  if (!decoder) {
     throw new Error('SAM decoder session is not ready.')
   }
 
@@ -884,11 +1333,11 @@ export async function runSamInference(
 
   // Measure decoder inference time (where GPU makes the biggest difference)
   const inferenceStart = performance.now()
-  const outputs = await samDecoderSession.run(decoderInputs)
+  const outputs = await decoder.run(decoderInputs)
   const inferenceTime = performance.now() - inferenceStart
   console.log(`[SAM-GPU] Decoder inference completed in ${inferenceTime.toFixed(2)}ms (Provider: ${samState.gpuInfo?.provider || 'unknown'})`)
   
-  const firstOutputName = samDecoderSession.outputNames[0]
+  const firstOutputName = decoder.outputNames[0]
   const masksTensor = outputs[firstOutputName] as Ort.Tensor
 
   const data = masksTensor.data as Float32Array | number[]

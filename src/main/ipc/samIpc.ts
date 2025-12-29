@@ -8,6 +8,10 @@ import {
   switchSamModel,
   pauseSamDownload,
   cancelSamDownload,
+  warmupGPU,
+  recordPrefetchActivity,
+  updatePrefetchPlan,
+  startPrefetchProcessing,
   SAM_MODELS,
   type SamPoint,
   type SamModelId
@@ -64,6 +68,23 @@ export function registerSamIpc(): void {
 
   ipcMain.handle('sam:getModels', () => {
      return SAM_MODELS
+  })
+
+  ipcMain.handle('sam:warmup', async () => {
+    await warmupGPU()
+    return { ok: true }
+  })
+
+  ipcMain.handle('sam:recordPrefetchActivity', () => {
+    recordPrefetchActivity()
+  })
+
+  ipcMain.handle('sam:updatePrefetchPlan', (_event, currentIndex: number, totalTasks: number, tasks: any[]) => {
+    updatePrefetchPlan(currentIndex, totalTasks, tasks)
+  })
+
+  ipcMain.handle('sam:startPrefetch', () => {
+    startPrefetchProcessing()
   })
 
   ipcMain.handle(

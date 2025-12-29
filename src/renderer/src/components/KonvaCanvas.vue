@@ -60,7 +60,10 @@ const imageObj = ref<HTMLImageElement | null>(null)
 
 const hoverCursor = ref<string | null>(null)
 
-const containerStyle = computed(() => {
+const stageStyle = computed<Record<string, string>>(() => {
+  // SAM mode should always show crosshair
+  if (props.activeTool === 'sam') return { cursor: 'crosshair' }
+  
   if (hoverCursor.value) return { cursor: hoverCursor.value }
   if (isPanning.value) return { cursor: 'grabbing' }
   if (props.activeTool === 'select') return { cursor: 'grab' }
@@ -1031,7 +1034,7 @@ watch(
 </script>
 
 <template>
-  <div ref="containerRef" class="w-full h-full" :style="containerStyle" @contextmenu.prevent>
+  <div ref="containerRef" class="w-full h-full" :style="stageStyle" @contextmenu.prevent>
     <v-stage
       v-if="stageWidth && stageHeight && imageConfig"
       :config="{
