@@ -356,9 +356,10 @@ const handleMouseDown = (e: KonvaEventObject<MouseEvent>): void => {
     // Arka plandaki image dışındaki bir şekle (polygon, bbox, vb.) tıklıyorsak
     // SAM isteği üretmeyelim. Bu durumlarda ya seçim ya da uzun basma ile edit beklenir.
     const targetNode = e.target as unknown as Konva.Node | null
-    const className = targetNode && typeof (targetNode as any).getClassName === 'function'
-      ? (targetNode as any).getClassName()
-      : ''
+    const className =
+      targetNode && typeof (targetNode as any).getClassName === 'function'
+        ? (targetNode as any).getClassName()
+        : ''
 
     if (className && className !== 'Image') {
       // Örneğin polygon veya bbox; SAM tıklaması yapma.
@@ -833,15 +834,11 @@ defineExpose({
           :key="ann.id"
           :points="ann.points.flatMap((p) => [p.x, p.y])"
           :closed="true"
-          :stroke="
-            ann.id === editingId
-              ? '#db2777'
-              : ann.id === selectedId
-                ? '#ea580c'
-                : '#f97316'
-          "
+          :stroke="ann.id === editingId ? '#db2777' : ann.id === selectedId ? '#ea580c' : '#f97316'"
           :stroke-width="ann.id === editingId ? 2.5 : ann.id === selectedId ? 2 : 0.75"
-          :shadow-color="ann.id === editingId ? '#db2777' : ann.id === selectedId ? '#ea580c' : undefined"
+          :shadow-color="
+            ann.id === editingId ? '#db2777' : ann.id === selectedId ? '#ea580c' : undefined
+          "
           :shadow-blur="ann.id === editingId || ann.id === selectedId ? 8 : 0"
           :shadow-opacity="ann.id === editingId || ann.id === selectedId ? 0.7 : 0"
           :shadow-offset-x="0"

@@ -62,7 +62,9 @@ export async function isSamModelDownloaded(): Promise<boolean> {
   return existsSync(join(dir, SAM_ENCODER_FILE)) && existsSync(join(dir, SAM_DECODER_FILE))
 }
 
-export async function downloadSamModel(onProgress?: (p: SamDownloadProgress) => void): Promise<void> {
+export async function downloadSamModel(
+  onProgress?: (p: SamDownloadProgress) => void
+): Promise<void> {
   if (samState.status === 'downloading') return
 
   samState.status = 'downloading'
