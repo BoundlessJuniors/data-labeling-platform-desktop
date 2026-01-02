@@ -31,6 +31,7 @@ export type KeypointAnn = {
   label: string | null
   x: number
   y: number
+  r?: number
 }
 
 export type CircleAnn = {

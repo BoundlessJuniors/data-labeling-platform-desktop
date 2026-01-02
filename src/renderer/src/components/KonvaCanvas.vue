@@ -12,43 +12,34 @@ import type {
 import type Konva from 'konva'
 import type { KonvaEventObject } from 'konva/lib/Node'
 
-const props = defineProps<{
-  imageSrc: string | null
-  annotations: Annotation[]
-  activeTool: 'select' | 'sam' | 'shapes'
-  activeShape: 'bbox' | 'polygon' | 'polyline' | 'keypoint' | 'circle'
-  activeLabel: string | null
-  selectedId: number | null
-  // Düzenleme modu için, şu an düzenlenen polygon id'si (yoksa null)
-  editingId?: number | null
-}>()
+const props = withDefaults(
+  defineProps<{
+    imageSrc: string | null
+    annotations: Annotation[]
+    activeTool: 'select' | 'sam' | 'shapes'
+    activeShape: 'bbox' | 'polygon' | 'polyline' | 'keypoint' | 'circle'
+    activeLabel: string | null
+    selectedId: number | null
+    // Düzenleme modu için, şu an düzenlenen polygon id'si (yoksa null)
+    editingId?: number | null
+    // Kullanıcı tarafından UI'dan seçilen kalınlık (default: 2)
+    strokeWidth?: number
+  }>(),
+  {
+    strokeWidth: 2
+  }
+)
 
-const emit = defineEmits<{
-  (e: 'create-annotation', ann: Annotation): void
-  (e: 'select-annotation', id: number | null): void
-  (
-    e: 'pointer-move',
-    payload: {
-      screenX: number
-      screenY: number
-      imgX: number | null
-      imgY: number | null
-    }
-  ): void
-  (e: 'pointer-leave'): void
-  (
-    e: 'sam-click',
-    payload: {
-      imgX: number
-      imgY: number
-    }
-  ): void
-  (e: 'sam-edit-request', id: number): void
-  (
-    e: 'update-annotation-geometry',
-    payload: { id: number; points: { x: number; y: number }[] }
-  ): void
-}>()
+const emit = defineEmits([
+  'create-annotation',
+  'select-annotation',
+  'pointer-move',
+  'pointer-leave',
+  'sam-click',
+  'edit-request',
+  'update-annotation-state',
+  'annotation-transform-end'
+])
 
 const containerRef = ref<HTMLDivElement | null>(null)
 const stageWidth = ref(0)
@@ -70,12 +61,26 @@ const tempCircle = ref<{ cx: number; cy: number; r: number } | null>(null)
 
 const imageObj = ref<HTMLImageElement | null>(null)
 
+const hoverCursor = ref<string | null>(null)
+
+const containerStyle = computed(() => {
+  if (hoverCursor.value) return { cursor: hoverCursor.value }
+  if (isPanning.value) return { cursor: 'grabbing' }
+  if (props.activeTool === 'select') return { cursor: 'grab' }
+  return {}
+})
+
 const LONG_PRESS_MS = 400
 let longPressTimer: number | null = null
 let longPressTargetId: number | null = null
+const didTriggerLongPress = ref(false)
 
 // SAM düzenleme modunda, hangi vertex'in sürüklendiğini takip etmek için
 const activeEditVertex = ref<{ annId: number; idx: number } | null>(null)
+// Keypoint/Circle radius düzenleme
+const activeEditRadius = ref<{ annId: number } | null>(null)
+// Sürüklenen şekil (transparanlık için)
+const dragTargetId = ref<number | null>(null)
 
 let resizeObserver: ResizeObserver | null = null
 let keydownHandler: ((e: KeyboardEvent) => void) | null = null
@@ -93,6 +98,11 @@ const keypointAnnotations = computed(
 const circleAnnotations = computed(
   () => props.annotations.filter((a) => a.type === 'circle') as CircleAnn[]
 )
+
+const activeEditingAnnotation = computed(() => {
+  if (props.editingId == null) return null
+  return props.annotations.find((a) => a.id === props.editingId) || null
+})
 
 const MIN_SCALE = 0.05
 const minScale = ref(MIN_SCALE)
@@ -232,6 +242,28 @@ const imageConfig = computed(() => {
   }
 })
 
+const computedStyles = computed(() => {
+  if (!imageObj.value) return { keypointRadius: 4 }
+  const w = imageObj.value.naturalWidth
+  const h = imageObj.value.naturalHeight
+  const maxDim = Math.max(w, h)
+  // Kullanıcının belirttiği formül: max(W, H) / 200
+  // Ancak çok küçük görsellerde minik kalmasın diye alt limit (örn: 3px) koyuyoruz.
+  const kpRadius = Math.max(3, maxDim / 200)
+  return {
+    keypointRadius: kpRadius
+  }
+})
+
+watch(
+  () => props.strokeWidth,
+  (val) => {
+    console.log('[KonvaCanvas] strokeWidth prop changed:', val, typeof val)
+  }
+)
+
+const computedStrokeWidth = computed(() => props.strokeWidth || 2)
+
 // Konva wheel event
 const handleWheel = (e: KonvaEventObject<WheelEvent>): void => {
   const stage = e.target?.getStage?.()
@@ -346,12 +378,15 @@ const handleMouseDown = (e: KonvaEventObject<MouseEvent>): void => {
   // Sol tık dışındaki her şeyi yok say
   if (evt.button !== 0) return
 
+  // Eğer herhangi bir polygon düzenleniyorsa (SAM veya Shapes),
+  // sahneye tıklanması yeni bir çizim başlatmamalıdır.
+  // Sadece vertex handle'ları (drag) çalışmalı.
+  if (props.editingId != null) return
+
   // SAM aracı aktifken: tek tıklamada imaj koordinatını dışarı bildir,
   // pan veya shapes çizimine geçme.
   if (props.activeTool === 'sam') {
-    // Düzenleme modundayken (editingId doluyken) sahneye tıklayınca yeni SAM etiketi üretme.
-    // Bu durumda sadece vertex handle'ları (drag) aktif kalmalı.
-    if (props.editingId != null) return
+    // (editingId kontrolü yukarı taşındı)
 
     // Arka plandaki image dışındaki bir şekle (polygon, bbox, vb.) tıklıyorsak
     // SAM isteği üretmeyelim. Bu durumlarda ya seçim ya da uzun basma ile edit beklenir.
@@ -461,16 +496,20 @@ const handleMouseMove = (e: KonvaEventObject<MouseEvent>): void => {
     return
   }
 
-  // SAM polygon düzenleme modunda: aktif bir vertex sürükleniyorsa, sadece
+  // Polygon düzenleme modunda: aktif bir vertex sürükleniyorsa, sadece
   // bu vertex'in konumunu güncelle.
-  if (activeEditVertex.value && props.editingId != null && props.activeTool === 'sam') {
+  // Polygon/Polyline düzenleme modunda: aktif bir vertex sürükleniyorsa
+  if (activeEditVertex.value && props.editingId != null) {
     const imgPoint = getClampedImagePoint(stage)
     if (!imgPoint) return
 
     const annId = activeEditVertex.value.annId
     const idx = activeEditVertex.value.idx
-    const ann = polygonAnnotations.value.find((a) => a.id === annId)
-    if (!ann) return
+    const ann = props.annotations.find((a) => a.id === annId) as
+      | PolygonAnn
+      | PolylineAnn
+      | undefined
+    if (!ann || (ann.type !== 'polygon' && ann.type !== 'polyline')) return
 
     const nextPoints = ann.points.map((p, i) =>
       i === idx
@@ -481,7 +520,36 @@ const handleMouseMove = (e: KonvaEventObject<MouseEvent>): void => {
         : p
     )
 
-    emit('update-annotation-geometry', { id: annId, points: nextPoints })
+    emit('update-annotation-state', { id: annId, patch: { points: nextPoints } })
+    return
+  }
+
+  // Yarıçap düzenleme modunda (Keypoint/Circle)
+  if (activeEditRadius.value && props.editingId != null) {
+    const imgPoint = getClampedImagePoint(stage)
+    if (!imgPoint) return
+
+    const annId = activeEditRadius.value.annId
+    const ann = props.annotations.find((a) => a.id === annId) as CircleAnn | KeypointAnn | undefined
+    if (!ann) return
+
+    let cx = 0
+    let cy = 0
+    if (ann.type === 'circle') {
+      cx = ann.cx
+      cy = ann.cy
+    } else if (ann.type === 'keypoint') {
+      cx = ann.x
+      cy = ann.y
+    } else {
+      return
+    }
+
+    const dx = imgPoint.x - cx
+    const dy = imgPoint.y - cy
+    const newR = Math.sqrt(dx * dx + dy * dy)
+
+    emit('update-annotation-state', { id: annId, patch: { r: newR } })
     return
   }
 
@@ -595,10 +663,26 @@ const handleMouseUp = (e: KonvaEventObject<MouseEvent>): void => {
   }
   isPanning.value = false
   panStart.value = null
+
+  // Eğer bir vertex düzenliyorsak, işlem bittiğinde state'i haber ver
+  if (activeEditVertex.value) {
+    emit('annotation-transform-end')
+  }
+  if (activeEditRadius.value) {
+    emit('annotation-transform-end')
+  }
   activeEditVertex.value = null
+  activeEditRadius.value = null
+  if (containerRef.value) {
+    containerRef.value.style.cursor = ''
+  }
+  hoverCursor.value = null
 }
 
 const handleMouseLeave = (): void => {
+  if (containerRef.value) {
+    containerRef.value.style.cursor = ''
+  }
   isPanning.value = false
   panStart.value = null
   activeEditVertex.value = null
@@ -618,26 +702,159 @@ const clearLongPress = (): void => {
   }
 }
 
-const handlePolygonMouseDown = (id: number, e: KonvaEventObject<MouseEvent>): void => {
+const getDistToSegment = (
+  p: { x: number; y: number },
+  v: { x: number; y: number },
+  w: { x: number; y: number }
+): { dist: number; proj: { x: number; y: number } } => {
+  const l2 = (v.x - w.x) ** 2 + (v.y - w.y) ** 2
+  if (l2 === 0) return { dist: Math.hypot(p.x - v.x, p.y - v.y), proj: v }
+  let t = ((p.x - v.x) * (w.x - v.x) + (p.y - v.y) * (w.y - v.y)) / l2
+  t = Math.max(0, Math.min(1, t))
+  const proj = { x: v.x + t * (w.x - v.x), y: v.y + t * (w.y - v.y) }
+  return { dist: Math.hypot(p.x - proj.x, p.y - proj.y), proj }
+}
+
+const handleVertexShapeMouseDown = (
+  id: number,
+  points: { x: number; y: number }[],
+  e: KonvaEventObject<MouseEvent>
+): void => {
   const evt = e.evt
   if (evt.button !== 0) return
 
-  // SAM modundayken: uzun basma ile düzenleme isteği gönder
-  if (props.activeTool === 'sam') {
-    // Bu tıklamanın stage @mousedown handler'ına gitmesini engelle ki
-    // aynı noktada yeni SAM etiketi üretilmesin.
+  // SAM veya Shapes modundayken edit moduna geçişi destekle
+  if (props.activeTool === 'sam' || props.activeTool === 'shapes') {
+    didTriggerLongPress.value = false
     e.cancelBubble = true
-    // Bu tıklamanın stage @mousedown handler'ına gitmesini engelle ki
-    // SAM yeni bir maske üretmesin.
+
+    // EĞER bu polygon zaten düzenleniyorsa (editingId === id), tıklanan yere nokta ekle
+    if (props.editingId === id) {
+      const stage = e.target?.getStage?.()
+      if (!stage) return
+      const imgPoint = getClampedImagePoint(stage)
+      if (!imgPoint) return
+
+      // En uygun ekleme noktasını bul (en yakın segment)
+      let minDist = Infinity
+      let insertIndex = -1
+      // Varsayılan olarak tıklanan noktayı alacağız, ama proje edilmiş noktayı (çizgi üstü) kullanmak daha şık olur.
+      let newPoint = { x: imgPoint.x, y: imgPoint.y }
+
+      for (let i = 0; i < points.length; i++) {
+        const p1 = points[i]
+        const p2 = points[(i + 1) % points.length] // Döngüsel
+
+        const { dist, proj } = getDistToSegment(imgPoint, p1, p2)
+        if (dist < minDist) {
+          minDist = dist
+          insertIndex = i + 1
+          newPoint = proj
+        }
+      }
+
+      if (insertIndex !== -1) {
+        const newPoints = [...points.slice(0, insertIndex), newPoint, ...points.slice(insertIndex)]
+
+        emit('update-annotation-state', { id, patch: { points: newPoints } })
+
+        // Eklediğimiz noktayı hemen düzenlemeye (drag) başla
+        activeEditVertex.value = { annId: id, idx: insertIndex }
+      }
+      return
+    }
+
+    // EĞER düzenlenmiyorsa, uzun basma ile düzenleme modu isteği gönder
     clearLongPress()
     longPressTargetId = id
     longPressTimer = window.setTimeout(() => {
       if (longPressTargetId === id) {
-        emit('sam-edit-request', id)
+        didTriggerLongPress.value = true
+        emit('edit-request', id)
       }
       clearLongPress()
     }, LONG_PRESS_MS)
   }
+}
+
+const handleGenericShapeMouseDown = (id: number, e: KonvaEventObject<MouseEvent>): void => {
+  const evt = e.evt
+  if (evt.button !== 0) return
+
+  if (props.activeTool === 'sam' || props.activeTool === 'shapes') {
+    didTriggerLongPress.value = false
+
+    // Edit modundaysak işlem yapma (Konva halleder)
+    if (props.editingId === id) {
+      return
+    }
+
+    clearLongPress()
+    longPressTargetId = id
+    longPressTimer = window.setTimeout(() => {
+      if (longPressTargetId === id) {
+        didTriggerLongPress.value = true
+        emit('edit-request', id)
+      }
+      clearLongPress()
+    }, LONG_PRESS_MS)
+  }
+}
+
+const handleTransformEnd = (id: number, e: KonvaEventObject<Event>): void => {
+  const node = e.target
+  const scaleX = node.scaleX()
+  const scaleY = node.scaleY()
+
+  // Reset scale, apply to diff props
+  node.scaleX(1)
+  node.scaleY(1)
+
+  // BBox (Rect)
+  if (node.getClassName() === 'Rect') {
+    const width = node.width() * scaleX
+    const height = node.height() * scaleY
+    emit('update-annotation-state', {
+      id,
+      patch: {
+        x: node.x(),
+        y: node.y(),
+        width: Math.abs(width), // Negatif scale koruması
+        height: Math.abs(height)
+      }
+    })
+  }
+  // Circle (radius)
+  else if (node.getClassName() === 'Circle') {
+    // Radius scale
+    const oldR = node.attrs.radius || 0
+    // ortalama scale
+    const s = (Math.abs(scaleX) + Math.abs(scaleY)) / 2
+    emit('update-annotation-state', {
+      id,
+      patch: {
+        x: node.x(), // Keypoint ise circle render ediyoruz, x/y merkez
+        y: node.y(),
+        cx: node.x(), // Circle ise cx/cy
+        cy: node.y(),
+        r: oldR * s
+      }
+    })
+  }
+}
+
+const handleDragEnd = (id: number, e: KonvaEventObject<DragEvent>): void => {
+  dragTargetId.value = null
+  const node = e.target
+  emit('update-annotation-state', {
+    id,
+    patch: {
+      x: node.x(),
+      y: node.y(),
+      cx: node.x(),
+      cy: node.y()
+    }
+  })
 }
 
 const handlePolygonMouseUp = (): void => {
@@ -713,6 +930,37 @@ const handleVertexMouseDown = (
   activeEditVertex.value = { annId, idx }
 }
 
+const handleRadiusMouseDown = (annId: number, e: KonvaEventObject<MouseEvent>): void => {
+  const evt = e.evt
+  if (evt.button !== 0) return
+  e.cancelBubble = true
+  activeEditRadius.value = { annId }
+}
+
+const handleGenericShapeDragMove = (annId: number, e: KonvaEventObject<DragEvent>): void => {
+  const node = e.target
+  const stage = node.getStage()
+  if (!stage) return
+
+  // Keypoint handle logic removed (visuals deleted)
+
+  // Update Circle Radius Handle
+  const circleHandle = stage.findOne(`.circle-radius-handle-${annId}`)
+  if (circleHandle) {
+    const ann = props.annotations.find((a) => a.id === annId) as CircleAnn
+    if (ann) {
+      circleHandle.position({
+        x: node.x() + ann.r,
+        y: node.y()
+      })
+    }
+  }
+}
+
+const handleGenericShapeDragStart = (annId: number): void => {
+  dragTargetId.value = annId
+}
+
 defineExpose({
   fitToContainer,
   zoomBy,
@@ -746,10 +994,57 @@ defineExpose({
     panStart.value = null
   }
 })
+
+// Transformer Attachment Logic
+const transformerRef = ref<any>(null)
+
+watch(
+  () => props.editingId,
+  (newId) => {
+    const tr = transformerRef.value?.getNode()
+    if (!tr) return
+
+    if (!newId) {
+      tr.nodes([])
+      tr.getLayer()?.batchDraw()
+      return
+    }
+
+    setTimeout(() => {
+      const stage = tr.getStage()
+      const node = stage?.findOne(`.ann-${newId}`)
+
+      if (node) {
+        if (node.getClassName() === 'Rect') {
+          // BBox
+          tr.keepRatio(false)
+          tr.enabledAnchors([
+            'top-left',
+            'top-center',
+            'top-right',
+            'middle-right',
+            'middle-left',
+            'bottom-left',
+            'bottom-center',
+            'bottom-right'
+          ])
+          tr.nodes([node])
+          tr.getLayer()?.batchDraw()
+        } else {
+          // Keypoint ve Circle için artık Transformer kullanmıyoruz, custom handle var.
+          tr.nodes([])
+        }
+      } else {
+        tr.nodes([])
+      }
+    }, 50)
+  },
+  { immediate: true }
+)
 </script>
 
 <template>
-  <div ref="containerRef" class="w-full h-full" @contextmenu.prevent>
+  <div ref="containerRef" class="w-full h-full" :style="containerStyle" @contextmenu.prevent>
     <v-stage
       v-if="stageWidth && stageHeight && imageConfig"
       :config="{
@@ -773,19 +1068,34 @@ defineExpose({
         <v-rect
           v-for="ann in bboxAnnotations"
           :key="ann.id"
+          :name="`ann-${ann.id}`"
           :x="ann.x"
           :y="ann.y"
           :width="ann.width"
           :height="ann.height"
           :stroke="ann.id === selectedId ? '#1d4ed8' : '#2563eb'"
-          :stroke-width="ann.id === selectedId ? 2 : 0.75"
+          :stroke-width="computedStrokeWidth"
+          :config="{
+            strokeScaleEnabled: false
+          }"
           :shadow-color="ann.id === selectedId ? '#1d4ed8' : undefined"
           :shadow-blur="ann.id === selectedId ? 8 : 0"
           :shadow-opacity="ann.id === selectedId ? 0.7 : 0"
           :shadow-offset-x="0"
           :shadow-offset-y="0"
-          :fill="ann.id === selectedId ? 'rgba(37,99,235,0.18)' : 'rgba(37,99,235,0.1)'"
+          :fill="
+            ann.id === editingId
+              ? 'rgba(236,72,153,0.15)'
+              : ann.id === selectedId
+                ? 'rgba(37,99,235,0.18)'
+                : 'rgba(37,99,235,0.1)'
+          "
+          :draggable="ann.id === editingId"
           @click="(e) => handleAnnClick(ann.id, e)"
+          @mousedown="(e) => handleGenericShapeMouseDown(ann.id, e)"
+          @mouseup="handlePolygonMouseUp"
+          @transformend="(e) => handleTransformEnd(ann.id, e)"
+          @dragend="(e) => handleDragEnd(ann.id, e)"
         />
 
         <v-rect
@@ -794,10 +1104,13 @@ defineExpose({
           :y="tempBBox.y"
           :width="tempBBox.width"
           :height="tempBBox.height"
-          stroke="#60a5fa"
-          :stroke-width="0.75"
-          :dash="[6, 4]"
-          fill="rgba(37,99,235,0.08)"
+          :config="{
+            stroke: '#60a5fa',
+            strokeWidth: computedStrokeWidth,
+            strokeScaleEnabled: false,
+            dash: [6, 4],
+            fill: 'rgba(37,99,235,0.08)'
+          }"
         />
 
         <!-- Circle geçici çizim -->
@@ -806,10 +1119,13 @@ defineExpose({
           :x="tempCircle.cx"
           :y="tempCircle.cy"
           :radius="tempCircle.r"
-          stroke="#60a5fa"
-          :stroke-width="0.75"
-          :dash="[6, 4]"
-          fill="rgba(37,99,235,0.08)"
+          :config="{
+            stroke: '#60a5fa',
+            strokeWidth: computedStrokeWidth,
+            strokeScaleEnabled: false,
+            dash: [6, 4],
+            fill: 'rgba(37,99,235,0.08)'
+          }"
         />
 
         <!-- Polygon / Polyline geçici çizim -->
@@ -823,10 +1139,13 @@ defineExpose({
             [...polyPoints, ...(tempPolyPoint ? [tempPolyPoint] : [])].flatMap((p) => [p.x, p.y])
           "
           :closed="drawingShape === 'polygon'"
-          stroke="#60a5fa"
-          :stroke-width="0.75"
-          :dash="[6, 4]"
-          :fill="drawingShape === 'polygon' ? 'rgba(96,165,250,0.15)' : 'transparent'"
+          :config="{
+            stroke: '#60a5fa',
+            strokeWidth: computedStrokeWidth,
+            strokeScaleEnabled: false,
+            dash: [6, 4],
+            fill: drawingShape === 'polygon' ? 'rgba(96,165,250,0.15)' : 'transparent'
+          }"
         />
 
         <v-line
@@ -835,7 +1154,11 @@ defineExpose({
           :points="ann.points.flatMap((p) => [p.x, p.y])"
           :closed="true"
           :stroke="ann.id === editingId ? '#db2777' : ann.id === selectedId ? '#ea580c' : '#f97316'"
-          :stroke-width="ann.id === editingId ? 2.5 : ann.id === selectedId ? 2 : 0.75"
+          :config="{
+            strokeWidth: computedStrokeWidth,
+            strokeScaleEnabled: false,
+            hitStrokeWidth: 40
+          }"
           :shadow-color="
             ann.id === editingId ? '#db2777' : ann.id === selectedId ? '#ea580c' : undefined
           "
@@ -851,23 +1174,23 @@ defineExpose({
                 : 'rgba(249,115,22,0.15)'
           "
           @click="(e) => handlePolygonClick(ann.id, e)"
-          @mousedown="(e) => handlePolygonMouseDown(ann.id, e)"
+          @mousedown="(e) => handleVertexShapeMouseDown(ann.id, ann.points, e)"
           @mouseup="handlePolygonMouseUp"
         />
 
         <!-- Polygon düzenleme modu: vertex handle'ları (her zaman polygonların ÜSTÜNDE) -->
-        <template v-for="ann in polygonAnnotations" :key="`edit-${ann.id}`">
+        <template v-if="activeEditingAnnotation?.type === 'polygon'">
           <v-circle
-            v-if="editingId === ann.id"
-            v-for="(p, idx) in ann.points"
-            :key="`edit-handle-${ann.id}-${idx}`"
+            v-for="(p, idx) in activeEditingAnnotation.points"
+            :key="`edit-handle-${activeEditingAnnotation.id}-${idx}`"
             :x="p.x"
             :y="p.y"
-            :radius="5"
             fill="#ffffff"
             stroke="#ec4899"
             :stroke-width="1.5"
-            @mousedown="(e) => handleVertexMouseDown(ann.id, idx, e)"
+            :strokeScaleEnabled="false"
+            :radius="5 / (stageScale || 1)"
+            @mousedown="(e) => handleVertexMouseDown(activeEditingAnnotation.id, idx, e)"
           />
         </template>
 
@@ -876,46 +1199,133 @@ defineExpose({
           :key="ann.id"
           :points="ann.points.flatMap((p) => [p.x, p.y])"
           :closed="false"
-          :stroke="ann.id === selectedId ? '#16a34a' : '#22c55e'"
-          :stroke-width="ann.id === selectedId ? 2 : 0.75"
-          :shadow-color="ann.id === selectedId ? '#16a34a' : undefined"
-          :shadow-blur="ann.id === selectedId ? 8 : 0"
-          :shadow-opacity="ann.id === selectedId ? 0.7 : 0"
+          :stroke="ann.id === editingId ? '#db2777' : ann.id === selectedId ? '#ea580c' : '#7c3aed'"
+          :config="{
+            strokeWidth: computedStrokeWidth,
+            strokeScaleEnabled: false,
+            hitStrokeWidth: 40
+          }"
+          :shadow-color="
+            ann.id === editingId ? '#db2777' : ann.id === selectedId ? '#ea580c' : undefined
+          "
+          :shadow-blur="ann.id === editingId || ann.id === selectedId ? 8 : 0"
+          :shadow-opacity="ann.id === editingId || ann.id === selectedId ? 0.7 : 0"
           :shadow-offset-x="0"
           :shadow-offset-y="0"
-          @click="(e) => handleAnnClick(ann.id, e)"
+          @click="(e) => handlePolygonClick(ann.id, e)"
+          @mousedown="(e) => handleVertexShapeMouseDown(ann.id, ann.points, e)"
+          @mouseup="handlePolygonMouseUp"
         />
+
+        <!-- Polyline edit handles -->
+        <template v-if="activeEditingAnnotation?.type === 'polyline'">
+          <v-circle
+            v-for="(p, idx) in activeEditingAnnotation.points"
+            :key="`edit-handle-line-${activeEditingAnnotation.id}-${idx}`"
+            :x="p.x"
+            :y="p.y"
+            fill="#ffffff"
+            stroke="#ec4899"
+            :stroke-width="1.5"
+            :strokeScaleEnabled="false"
+            :radius="5 / (stageScale || 1)"
+            @mousedown="(e) => handleVertexMouseDown(activeEditingAnnotation.id, idx, e)"
+          />
+        </template>
 
         <v-circle
           v-for="ann in keypointAnnotations"
           :key="ann.id"
+          :name="`ann-${ann.id}`"
           :x="ann.x"
           :y="ann.y"
-          :radius="ann.id === selectedId ? 4.5 : 3.5"
-          :fill="ann.id === selectedId ? '#facc15' : '#eab308'"
-          :shadow-color="ann.id === selectedId ? '#facc15' : undefined"
-          :shadow-blur="ann.id === selectedId ? 8 : 0"
-          :shadow-opacity="ann.id === selectedId ? 0.8 : 0"
+          :radius="
+            ann.id === selectedId ? computedStyles.keypointRadius : computedStyles.keypointRadius
+          "
+          :fill="ann.id === editingId ? '#db2777' : ann.id === selectedId ? '#facc15' : '#eab308'"
+          :shadow-color="
+            ann.id === editingId ? '#db2777' : ann.id === selectedId ? '#facc15' : undefined
+          "
+          :shadow-blur="ann.id === editingId || ann.id === selectedId ? 8 : 0"
+          :shadow-opacity="ann.id === editingId || ann.id === selectedId ? 0.6 : 0"
           :shadow-offset-x="0"
           :shadow-offset-y="0"
+          :opacity="dragTargetId === ann.id ? 0.5 : 1"
+          :draggable="ann.id === editingId"
           @click="(e) => handleAnnClick(ann.id, e)"
+          @mousedown="(e) => handleGenericShapeMouseDown(ann.id, e)"
+          @mouseup="handlePolygonMouseUp"
+          @transformend="(e) => handleTransformEnd(ann.id, e)"
+          @dragend="(e) => handleDragEnd(ann.id, e)"
+          @dragstart="() => handleGenericShapeDragStart(ann.id)"
+          @dragmove="(e) => handleGenericShapeDragMove(ann.id, e)"
         />
 
         <v-circle
           v-for="ann in circleAnnotations"
           :key="ann.id"
+          :name="`ann-${ann.id}`"
           :x="ann.cx"
           :y="ann.cy"
           :radius="ann.r"
-          :stroke="ann.id === selectedId ? '#db2777' : '#ec4899'"
-          :stroke-width="ann.id === selectedId ? 2 : 0.75"
+          :stroke="ann.id === editingId ? '#db2777' : ann.id === selectedId ? '#ea580c' : '#eab308'"
+          :config="{
+            strokeWidth: computedStrokeWidth,
+            strokeScaleEnabled: false
+          }"
           :shadow-color="ann.id === selectedId ? '#db2777' : undefined"
           :shadow-blur="ann.id === selectedId ? 8 : 0"
           :shadow-opacity="ann.id === selectedId ? 0.7 : 0"
           :shadow-offset-x="0"
           :shadow-offset-y="0"
-          :fill="ann.id === selectedId ? 'rgba(236,72,153,0.22)' : 'rgba(236,72,153,0.15)'"
+          :fill="ann.id === editingId ? 'rgba(236,72,153,0.22)' : 'rgba(236,72,153,0.15)'"
+          :draggable="ann.id === editingId"
           @click="(e) => handleAnnClick(ann.id, e)"
+          @mousedown="(e) => handleGenericShapeMouseDown(ann.id, e)"
+          @mouseup="handlePolygonMouseUp"
+          @transformend="(e) => handleTransformEnd(ann.id, e)"
+          @dragend="(e) => handleDragEnd(ann.id, e)"
+          @dragmove="(e) => handleGenericShapeDragMove(ann.id, e)"
+        />
+
+        <!-- Circle Radius Visual + Handle (Edit Mode) (Circle kendi radiusuyla render olduğu için extra circle gerek yok, sadece handle) -->
+        <template v-if="activeEditingAnnotation?.type === 'circle'">
+          <v-circle
+            :key="`circle-radius-handle-${activeEditingAnnotation.id}`"
+            :name="`circle-radius-handle-${activeEditingAnnotation.id}`"
+            :x="activeEditingAnnotation.cx + activeEditingAnnotation.r"
+            :y="activeEditingAnnotation.cy"
+            :radius="6 / (stageScale || 1)"
+            fill="#ffffff"
+            stroke="#ec4899"
+            :stroke-width="1.5"
+            :strokeScaleEnabled="false"
+            @mousedown="(e) => handleRadiusMouseDown(activeEditingAnnotation.id, e)"
+            @mouseenter="
+              () => {
+                hoverCursor = 'ew-resize'
+              }
+            "
+            @mouseleave="
+              () => {
+                hoverCursor = null
+              }
+            "
+          />
+        </template>
+
+        <!-- Generic Transformer (Sadece BBox için) -->
+        <v-transformer
+          ref="transformerRef"
+          :config="{
+            rotateEnabled: false,
+            keepRatio: false,
+            anchorSize: 10,
+            borderStroke: '#ec4899',
+            anchorStroke: '#ec4899',
+            anchorFill: '#ffffff',
+            ignoreStroke: true
+          }"
         />
       </v-layer>
     </v-stage>
