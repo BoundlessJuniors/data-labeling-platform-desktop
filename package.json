@@ -24,12 +24,15 @@
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "@popperjs/core": "^2.11.8",
+    "axios": "^1.13.6",
+    "axios-cookiejar-support": "^6.0.5",
     "better-sqlite3": "^12.5.0",
     "electron-updater": "^6.3.9",
-      "konva": "^9.3.22",
-      "onnxruntime-node": "^1.23.2",
-      "jimp": "^0.22.12",
-      "vue-konva": "^3.2.6"
+    "jimp": "^0.22.12",
+    "konva": "^9.3.22",
+    "onnxruntime-node": "^1.23.2",
+    "tough-cookie": "^6.0.0",
+    "vue-konva": "^3.2.6"
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config-prettier": "3.0.0",

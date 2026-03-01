@@ -23,7 +23,7 @@ export default defineConfig({
           plugins: [
             // ikon içindeki sabit fill/stroke’ları kaldır ki currentColor çalışsın
             { name: 'removeAttrs', params: { attrs: '(fill|stroke)' } },
-            { name: 'removeDimensions', active: true }
+            { name: 'removeDimensions' }
           ]
         }
       })]

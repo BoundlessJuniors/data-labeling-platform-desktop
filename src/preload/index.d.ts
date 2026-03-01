@@ -11,6 +11,7 @@ declare global {
             id: string
             name: string
             folder_path?: string | null
+            cloud_contract_id?: string | null
           }) => Promise<{ ok: true }>
           list: () => Promise<
             Array<{ id: string; name: string; created_at: number; folder_path?: string | null }>
@@ -81,10 +82,7 @@ declare global {
             error: string | null
           }
         }>
-        run: (payload: {
-          imagePath: string
-          points: { x: number; y: number }[]
-        }) => Promise<{
+        run: (payload: { imagePath: string; points: { x: number; y: number }[] }) => Promise<{
           ok: boolean
           mask: { points: { x: number; y: number }[] }
         }>
@@ -101,6 +99,26 @@ declare global {
           folder: string
           images: string[]
         } | null>
+      }
+      auth: {
+        login: (credentials: { email: string; password: string }) => Promise<{
+          id: string
+          email: string
+          role: string
+          [key: string]: unknown
+        }>
+        logout: () => Promise<void>
+      }
+      cloud: {
+        fetchContracts: () => Promise<
+          Array<{ id: string; title: string; status: string; [key: string]: unknown }>
+        >
+        syncContractTasks: (
+          contractId: string,
+          datasetId: string
+        ) => Promise<{ synced: number; skipped: number; failed: number }>
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        submitContract: (contractId: string) => Promise<any>
       }
       window: {
         minimize: () => Promise<void>

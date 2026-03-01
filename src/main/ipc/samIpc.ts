@@ -34,16 +34,13 @@ export function registerSamIpc(): void {
     }
   })
 
-  ipcMain.handle(
-    'sam:ensureReady',
-    async () => {
-      await ensureSamSessionLoaded()
-      return {
-        ok: true,
-        state: getSamState()
-      }
+  ipcMain.handle('sam:ensureReady', async () => {
+    await ensureSamSessionLoaded()
+    return {
+      ok: true,
+      state: getSamState()
     }
-  )
+  })
 
   ipcMain.handle(
     'sam:run',

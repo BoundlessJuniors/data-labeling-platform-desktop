@@ -1,6 +1,3 @@
-// Electron tip deklarasyonları CommonJS tarzında olduğu için TS burada modül uyarısı verebiliyor.
-// Bunu bilerek bastırıyoruz; runtime tarafı electron-vite tarafından doğru bundle ediliyor.
-// @ts-expect-error Electron is declared as a CommonJS export in electron.d.ts
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 
@@ -52,11 +49,7 @@ const api = {
       }) => void
     ): (() => void) => {
       const listener = (_event: unknown, payload: unknown): void => {
-        handler(payload as {
-          stage: 'encoder' | 'decoder'
-          loaded: number
-          total: number | null
-        })
+        handler(payload as { stage: 'encoder' | 'decoder'; loaded: number; total: number | null })
       }
       ipcRenderer.on('sam:download-progress', listener)
       return () => {
@@ -66,6 +59,17 @@ const api = {
   },
   dataset: {
     pickFolder: () => ipcRenderer.invoke('dataset:pickFolder')
+  },
+  auth: {
+    login: (credentials: { email: string; password: string }) =>
+      ipcRenderer.invoke('auth:login', credentials),
+    logout: () => ipcRenderer.invoke('auth:logout')
+  },
+  cloud: {
+    fetchContracts: () => ipcRenderer.invoke('cloud:fetchContracts'),
+    syncContractTasks: (contractId: string, datasetId: string) =>
+      ipcRenderer.invoke('cloud:syncContractTasks', contractId, datasetId),
+    submitContract: (contractId: string) => ipcRenderer.invoke('cloud:submitContract', contractId)
   },
   window: {
     minimize: () => ipcRenderer.invoke('window:minimize'),

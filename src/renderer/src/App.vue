@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import LabelerView from './views/LabelerView.vue'
+import CloudPanel from './components/CloudPanel.vue'
 
 type DatasetRow = { id: string; name: string; created_at: number; folder_path?: string | null }
 
+const activeTab = ref<'local' | 'cloud'>('local')
 const datasets = ref<DatasetRow[]>([])
 
 // Son seçilen dataset'i localStorage'dan geri yükle
@@ -122,14 +124,46 @@ const onClose = (): void => {
 
     <!-- Main content -->
     <main class="flex-1 min-h-0">
-      <!-- Dataset selection screen -->
+      <!-- Dataset selection screen with Tabs -->
       <div
         v-if="!selectedDatasetId"
-        class="h-full flex items-center justify-center p-6 overflow-auto"
+        class="h-full flex flex-col items-center p-6 overflow-auto bg-gray-50 dark:bg-gray-900 transition-colors"
       >
-        <div class="w-full max-w-xl rounded-lg border border-gray-200 p-6 bg-white">
-          <h1 class="text-2xl font-bold mb-2">Dataset Selection</h1>
-          <p class="text-sm text-gray-600 mb-4">
+        <!-- Sekme Butonları -->
+        <div class="flex justify-center space-x-4 mb-8">
+          <button
+            class="px-6 py-2 rounded-md font-semibold transition-all duration-200"
+            :class="
+              activeTab === 'local'
+                ? 'bg-blue-600 text-white shadow-md'
+                : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
+            "
+            @click="activeTab = 'local'"
+          >
+            Yerel Çalışma Alanı
+          </button>
+          <button
+            class="px-6 py-2 rounded-md font-semibold transition-all duration-200"
+            :class="
+              activeTab === 'cloud'
+                ? 'bg-blue-600 text-white shadow-md'
+                : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
+            "
+            @click="activeTab = 'cloud'"
+          >
+            Bulut Çalışma Alanı
+          </button>
+        </div>
+
+        <!-- YEREL İÇERİK -->
+        <div
+          v-if="activeTab === 'local'"
+          class="w-full max-w-xl rounded-lg border border-gray-200 dark:border-gray-700 p-6 bg-white dark:bg-gray-800 shadow-sm transition-colors"
+        >
+          <h1 class="text-2xl font-bold mb-2 text-gray-900 dark:text-gray-100">
+            Dataset Selection
+          </h1>
+          <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
             Select a dataset to continue or import a new folder.
           </p>
 
@@ -145,11 +179,11 @@ const onClose = (): void => {
             <li
               v-for="d in datasets"
               :key="d.id"
-              class="flex items-center justify-between border rounded p-3"
+              class="flex items-center justify-between border dark:border-gray-700 rounded p-3 bg-gray-50 dark:bg-gray-700/50"
             >
               <div>
-                <div class="font-semibold">{{ d.name }}</div>
-                <div class="text-xs text-gray-500">id: {{ d.id }}</div>
+                <div class="font-semibold text-gray-900 dark:text-gray-100">{{ d.name }}</div>
+                <div class="text-xs text-gray-500 dark:text-gray-400">id: {{ d.id }}</div>
               </div>
               <div class="flex gap-2">
                 <button
@@ -168,6 +202,11 @@ const onClose = (): void => {
               </div>
             </li>
           </ul>
+        </div>
+
+        <!-- BULUT İÇERİK -->
+        <div v-else-if="activeTab === 'cloud'" class="w-full max-w-2xl px-2">
+          <CloudPanel />
         </div>
       </div>
 

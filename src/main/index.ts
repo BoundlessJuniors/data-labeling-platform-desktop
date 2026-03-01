@@ -8,6 +8,9 @@ import icon from '../../resources/icon.png?asset'
 import { initDb } from './db/sqlite'
 import { registerDbIpc } from './ipc/dbIpc'
 import { registerSamIpc } from './ipc/samIpc'
+import { registerAuthIpc } from './api/authIpc'
+import { registerCloudTasksIpc } from './api/cloudTasksIpc'
+import { startSync } from './sync/syncManager'
 
 const IMAGE_EXTS = ['.jpg', '.jpeg', '.png', '.bmp', '.webp']
 // local:// protokolünü renderer'da "güvenli/standard" gibi kullanabilmek için
@@ -120,6 +123,9 @@ app.whenReady().then(() => {
   initDb()
   registerDbIpc()
   registerSamIpc()
+  registerAuthIpc()
+  registerCloudTasksIpc()
+  startSync()
 
   // === Dataset folder picker ===
   ipcMain.handle('dataset:pickFolder', async () => {

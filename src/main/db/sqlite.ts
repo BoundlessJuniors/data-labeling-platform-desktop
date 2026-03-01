@@ -25,6 +25,7 @@ export function initDb(): void {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       folder_path TEXT,
+      cloud_contract_id TEXT,
       created_at INTEGER NOT NULL
     );
 
@@ -36,6 +37,9 @@ export function initDb(): void {
       width INTEGER,
       height INTEGER,
       status TEXT NOT NULL DEFAULT 'in_progress',
+      cloud_task_id TEXT,
+      cloud_asset_url TEXT,
+      sync_status TEXT NOT NULL DEFAULT 'synced',
       created_at INTEGER NOT NULL,
       updated_at INTEGER,
       FOREIGN KEY(dataset_id) REFERENCES datasets(id)
@@ -48,6 +52,7 @@ export function initDb(): void {
       category TEXT,               -- şimdilik string, sonra categories tablosu eklenir
       data_json TEXT NOT NULL,     -- JSON string
       updated_at INTEGER NOT NULL,
+      sync_status TEXT NOT NULL DEFAULT 'pending_insert',
       FOREIGN KEY(media_id) REFERENCES media_items(id)
     );
 
@@ -55,8 +60,9 @@ export function initDb(): void {
     CREATE INDEX IF NOT EXISTS idx_ann_media ON annotations(media_id);
   `)
   // --- Lightweight migrations (kolon ekleme) ---
-  migrateMediaItems()
   migrateDatasets()
+  migrateMediaItems()
+  migrateAnnotations()
 }
 
 function hasColumn(table: string, col: string): boolean {
@@ -75,9 +81,17 @@ function migrateMediaItems(): void {
   }
   // Her media için etiketleme süresi (saniye cinsinden)
   if (!hasColumn('media_items', 'annotation_seconds')) {
-    db.exec(
-      `ALTER TABLE media_items ADD COLUMN annotation_seconds INTEGER NOT NULL DEFAULT 0;`
-    )
+    db.exec(`ALTER TABLE media_items ADD COLUMN annotation_seconds INTEGER NOT NULL DEFAULT 0;`)
+  }
+  // Bulut senkronizasyon kolonları
+  if (!hasColumn('media_items', 'cloud_task_id')) {
+    db.exec(`ALTER TABLE media_items ADD COLUMN cloud_task_id TEXT;`)
+  }
+  if (!hasColumn('media_items', 'cloud_asset_url')) {
+    db.exec(`ALTER TABLE media_items ADD COLUMN cloud_asset_url TEXT;`)
+  }
+  if (!hasColumn('media_items', 'sync_status')) {
+    db.exec(`ALTER TABLE media_items ADD COLUMN sync_status TEXT NOT NULL DEFAULT 'synced';`)
   }
   // Var olan satırlarda NULL kalmışsa normalize et
   db.prepare(`UPDATE media_items SET status='in_progress' WHERE status IS NULL`).run()
@@ -87,6 +101,16 @@ function migrateDatasets(): void {
   if (!hasColumn('datasets', 'folder_path')) {
     db.exec(`ALTER TABLE datasets ADD COLUMN folder_path TEXT;`)
   }
+  if (!hasColumn('datasets', 'cloud_contract_id')) {
+    db.exec(`ALTER TABLE datasets ADD COLUMN cloud_contract_id TEXT;`)
+  }
   // folder_path kolonu garanti olduktan sonra index güvenle oluşturulur
   db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS ux_datasets_folder_path ON datasets(folder_path);`)
+}
+
+function migrateAnnotations(): void {
+  const db = getDb()
+  if (!hasColumn('annotations', 'sync_status')) {
+    db.exec(`ALTER TABLE annotations ADD COLUMN sync_status TEXT NOT NULL DEFAULT 'pending_insert';`)
+  }
 }
