@@ -24,7 +24,8 @@ export default defineConfig({
         '@renderer': resolve('src/renderer/src')
       }
     },
-    plugins: [vue(),
+    plugins: [
+      vue(),
       svgLoader({
         svgo: true,
         svgoConfig: {
@@ -34,6 +35,7 @@ export default defineConfig({
             { name: 'removeDimensions' }
           ]
         }
-      })]
+      })
+    ]
   }
 })

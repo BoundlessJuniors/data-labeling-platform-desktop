@@ -54,12 +54,14 @@ const api = {
       }) => void
     ): (() => void) => {
       const listener = (_event: unknown, payload: unknown): void => {
-        handler(payload as {
-          modelId?: string
-          stage: 'encoder' | 'decoder'
-          loaded: number
-          total: number | null
-        })
+        handler(
+          payload as {
+            modelId?: string
+            stage: 'encoder' | 'decoder'
+            loaded: number
+            total: number | null
+          }
+        )
       }
       ipcRenderer.on('sam:download-progress', listener)
       return () => {

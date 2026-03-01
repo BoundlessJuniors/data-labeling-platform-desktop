@@ -54,7 +54,9 @@ export function registerCloudTasksIpc(): void {
   // ----------------------------------------------------------------------
   ipcMain.handle('cloud:fetchContracts', async (): Promise<ContractItem[]> => {
     // API'nin gerçek yanıt formatına uygun tip tanımlıyoruz
-    const response = await apiClient.get<{ success: boolean; data: ContractItem[] }>('/api/v1/contracts')
+    const response = await apiClient.get<{ success: boolean; data: ContractItem[] }>(
+      '/api/v1/contracts'
+    )
     // response.data (axios objesi) -> içindeki data (bizim API'nin listesi)
     return response.data.data ?? []
   })
@@ -71,11 +73,10 @@ export function registerCloudTasksIpc(): void {
       contractId: string,
       datasetId: string
     ): Promise<{ synced: number; skipped: number; failed: number }> => {
-      
       console.log(`[cloud:syncContractTasks] Sözleşme görevleri çekiliyor. ID: ${contractId}`)
-      
+
       let tasks: TaskItem[] = []
-      
+
       // 1. Görevleri API'den çek (Hata yakalamalı)
       try {
         const tasksResp = await apiClient.get<{ success: boolean; data: TaskItem[] }>(
@@ -115,17 +116,19 @@ export function registerCloudTasksIpc(): void {
         try {
           // 3A. Asset detayını çek (Backend büyük ihtimalle JSON dönüp Signed URL veriyor)
           console.log(`[cloud:syncContractTasks] Asset çekiliyor: ${task.assetId}`)
-          const assetDetailResp = await apiClient.get<{ success: boolean; data: any }>(`/api/v1/assets/${task.assetId}`)
-          
+          const assetDetailResp = await apiClient.get<{ success: boolean; data: any }>(
+            `/api/v1/assets/${task.assetId}`
+          )
+
           // Signed URL'i backend'den al
           const downloadUrl = assetDetailResp.data.data?.url || assetDetailResp.data.data?.signedUrl
-          
+
           if (!downloadUrl) throw new Error("İndirme URL'i bulunamadı!")
 
           // 3B. Gerçek resmi internetten indir (Axios ile Stream olarak)
           import('axios').then(async (axiosModule) => {
-             const imageResp = await axiosModule.default.get(downloadUrl, { responseType: 'stream' })
-             await streamToFile(imageResp.data, localPath)
+            const imageResp = await axiosModule.default.get(downloadUrl, { responseType: 'stream' })
+            await streamToFile(imageResp.data, localPath)
           })
 
           // 4. media_items tablosuna INSERT

@@ -5,7 +5,7 @@ import { Worker } from 'worker_threads'
 
 // Tip import'u için dinamik import kullanacağız; böylece uygulama açılırken
 // native modül hemen yüklenmek zorunda kalmaz.
-// eslint-disable-next-line @typescript-eslint/consistent-type-imports
+
 import type * as Ort from 'onnxruntime-node'
 
 export type SamModelId = 'vit_b' | 'vit_l' | 'vit_h'
@@ -29,8 +29,10 @@ export const SAM_MODELS: Record<SamModelId, SamModelConfig> = {
     name: 'Fast (ViT-B)',
     description: 'Fastest model, lower memory usage. Good for general use.',
     size: '~130 MB',
-    encoderUrl: 'https://huggingface.co/visheratin/segment-anything-vit-b/resolve/main/encoder-quant.onnx',
-    decoderUrl: 'https://huggingface.co/visheratin/segment-anything-vit-b/resolve/main/decoder-quant.onnx',
+    encoderUrl:
+      'https://huggingface.co/visheratin/segment-anything-vit-b/resolve/main/encoder-quant.onnx',
+    decoderUrl:
+      'https://huggingface.co/visheratin/segment-anything-vit-b/resolve/main/decoder-quant.onnx',
     encoderFile: 'encoder-quant.onnx',
     decoderFile: 'decoder-quant.onnx',
     quantized: true
@@ -40,8 +42,10 @@ export const SAM_MODELS: Record<SamModelId, SamModelConfig> = {
     name: 'Balanced (ViT-L)',
     description: 'Better accuracy, moderate speed. Recommended for complex images.',
     size: '~350 MB',
-    encoderUrl: 'https://huggingface.co/visheratin/segment-anything-vit-l/resolve/main/encoder-quant.onnx',
-    decoderUrl: 'https://huggingface.co/visheratin/segment-anything-vit-l/resolve/main/decoder-quant.onnx',
+    encoderUrl:
+      'https://huggingface.co/visheratin/segment-anything-vit-l/resolve/main/encoder-quant.onnx',
+    decoderUrl:
+      'https://huggingface.co/visheratin/segment-anything-vit-l/resolve/main/decoder-quant.onnx',
     encoderFile: 'encoder-quant.onnx',
     decoderFile: 'decoder-quant.onnx',
     quantized: true
@@ -51,8 +55,10 @@ export const SAM_MODELS: Record<SamModelId, SamModelConfig> = {
     name: 'High Quality (ViT-H)',
     description: 'Best accuracy, slowest speed. High memory usage.',
     size: '~700 MB',
-    encoderUrl: 'https://huggingface.co/visheratin/segment-anything-vit-h/resolve/main/encoder-quant.onnx',
-    decoderUrl: 'https://huggingface.co/visheratin/segment-anything-vit-h/resolve/main/decoder-quant.onnx',
+    encoderUrl:
+      'https://huggingface.co/visheratin/segment-anything-vit-h/resolve/main/encoder-quant.onnx',
+    decoderUrl:
+      'https://huggingface.co/visheratin/segment-anything-vit-h/resolve/main/decoder-quant.onnx',
     encoderFile: 'encoder-quant.onnx',
     decoderFile: 'decoder-quant.onnx',
     quantized: true
@@ -66,7 +72,7 @@ export interface ProviderInfo {
   name: string
   available: boolean
   priority: number
-  options?: Record<string, any>
+  options?: Record<string, unknown>
 }
 
 export interface GpuInfo {
@@ -127,20 +133,21 @@ export function getSamState(): SamState {
     const mId = key as SamModelId
     const dir = getModelDir(mId)
     const config = SAM_MODELS[mId]
-    const exists = existsSync(join(dir, config.encoderFile)) && existsSync(join(dir, config.decoderFile))
-    
+    const exists =
+      existsSync(join(dir, config.encoderFile)) && existsSync(join(dir, config.decoderFile))
+
     // Check if paused (partial file exists but not downloading)
     if (!exists && !activeDownloads.has(mId)) {
-        // Simple check: if part file exists, we can consider it "paused" or just "downloading_interrupted"
-        // For UI simplicity, we might just report "not_downloaded" but allow resume which auto-detects.
-        // Or we can explicitly check for .part files to show "Paused" in UI.
-        const encPart = existsSync(join(dir, config.encoderFile + '.part'))
-        const decPart = existsSync(join(dir, config.decoderFile + '.part'))
-        if (encPart || decPart) {
-           // We could add a 'paused' status to modelsStatus if we want to be explicit
-        }
+      // Simple check: if part file exists, we can consider it "paused" or just "downloading_interrupted"
+      // For UI simplicity, we might just report "not_downloaded" but allow resume which auto-detects.
+      // Or we can explicitly check for .part files to show "Paused" in UI.
+      const encPart = existsSync(join(dir, config.encoderFile + '.part'))
+      const decPart = existsSync(join(dir, config.decoderFile + '.part'))
+      if (encPart || decPart) {
+        // We could add a 'paused' status to modelsStatus if we want to be explicit
+      }
     }
-    
+
     samState.modelsStatus[mId] = exists ? 'available' : 'not_downloaded'
   }
   return { ...samState }
@@ -153,42 +160,42 @@ export async function isModelDownloaded(modelId: SamModelId): Promise<boolean> {
 }
 
 export async function pauseSamDownload(modelId: SamModelId): Promise<void> {
-    const controller = activeDownloads.get(modelId)
-    if (controller) {
-        controller.abort('paused') // Pass reason
-        activeDownloads.delete(modelId)
-        samState.status = 'idle'
-        samState.downloadProgress[modelId] = null // Clear progress to stop UI spinner, or keep it?
-        // Let's keep last known progress? No, state refresh will clear it.
-        // We will need to re-calc progress on resume.
-    }
+  const controller = activeDownloads.get(modelId)
+  if (controller) {
+    controller.abort('paused') // Pass reason
+    activeDownloads.delete(modelId)
+    samState.status = 'idle'
+    samState.downloadProgress[modelId] = null // Clear progress to stop UI spinner, or keep it?
+    // Let's keep last known progress? No, state refresh will clear it.
+    // We will need to re-calc progress on resume.
+  }
 }
 
 export async function cancelSamDownload(modelId: SamModelId): Promise<void> {
-    const controller = activeDownloads.get(modelId)
-    if (controller) {
-        controller.abort('cancelled')
-        activeDownloads.delete(modelId)
-    }
-    
-    // Cleanup partial files
-    const dir = getModelDir(modelId)
-    const config = SAM_MODELS[modelId]
-    try {
-        const fs = await import('fs/promises')
-        await fs.rm(join(dir, config.encoderFile + '.part'), { force: true })
-        await fs.rm(join(dir, config.decoderFile + '.part'), { force: true })
-        // Also remove completed files if any, to ensure clean slate?
-        // Maybe yes if "Cancel" means "I don't want this".
-        await fs.rm(join(dir, config.encoderFile), { force: true })
-        await fs.rm(join(dir, config.decoderFile), { force: true })
-    } catch (e) {
-        console.error("Error cleaning up cancelled download:", e)
-    }
+  const controller = activeDownloads.get(modelId)
+  if (controller) {
+    controller.abort('cancelled')
+    activeDownloads.delete(modelId)
+  }
 
-    samState.status = 'idle'
-    samState.downloadProgress[modelId] = null
-    samState.modelsStatus[modelId] = 'not_downloaded'
+  // Cleanup partial files
+  const dir = getModelDir(modelId)
+  const config = SAM_MODELS[modelId]
+  try {
+    const fs = await import('fs/promises')
+    await fs.rm(join(dir, config.encoderFile + '.part'), { force: true })
+    await fs.rm(join(dir, config.decoderFile + '.part'), { force: true })
+    // Also remove completed files if any, to ensure clean slate?
+    // Maybe yes if "Cancel" means "I don't want this".
+    await fs.rm(join(dir, config.encoderFile), { force: true })
+    await fs.rm(join(dir, config.decoderFile), { force: true })
+  } catch (e) {
+    console.error('Error cleaning up cancelled download:', e)
+  }
+
+  samState.status = 'idle'
+  samState.downloadProgress[modelId] = null
+  samState.modelsStatus[modelId] = 'not_downloaded'
 }
 
 export async function downloadSamModel(
@@ -228,23 +235,23 @@ export async function downloadSamModel(
       // Check for partial
       let startByte = 0
       if (existsSync(partPath)) {
-         const importFs = await import('fs')
-         const stats = importFs.statSync(partPath)
-         startByte = stats.size
+        const importFs = await import('fs')
+        const stats = importFs.statSync(partPath)
+        startByte = stats.size
       }
 
       const headers: Record<string, string> = {}
       if (startByte > 0) {
-          headers['Range'] = `bytes=${startByte}-`
+        headers['Range'] = `bytes=${startByte}-`
       }
 
       console.log(`Downloading ${stage} for ${modelId} starting at ${startByte}`)
 
       const res = await net.fetch(url, {
-          headers,
-          signal: controller.signal
+        headers,
+        signal: controller.signal
       })
-      
+
       if (!res.ok) {
         throw new Error(`HTTP ${res.status} ${res.statusText} for ${url}`)
       }
@@ -260,7 +267,7 @@ export async function downloadSamModel(
 
       const body = res.body
       if (!body) {
-        throw new Error("No response body")
+        throw new Error('No response body')
       }
 
       const reader = body.getReader()
@@ -277,17 +284,17 @@ export async function downloadSamModel(
           fileStream.write(Buffer.from(value))
           // Throttle progress updates?
           onProgress?.({ modelId, stage, loaded, total: total || null })
-          
+
           // Update global state for UI polling if needed
           if (total) {
-              // Average progress if we want a single number, but current structure supports per-model
-              // We just update the callback mostly.
+            // Average progress if we want a single number, but current structure supports per-model
+            // We just update the callback mostly.
           }
         }
       }
 
       fileStream.end()
-      
+
       // Rename .part to final
       const fsPromises = await import('fs/promises')
       await fsPromises.rename(partPath, finalPath)
@@ -301,41 +308,44 @@ export async function downloadSamModel(
     activeDownloads.delete(modelId)
     samState.downloadProgress[modelId] = null
     samState.modelsStatus[modelId] = 'available'
-    
+
     // If this is the current model, ensure it's loaded
     if (samState.currentModelId === modelId) {
-       samState.status = 'idle' 
+      samState.status = 'idle'
     } else {
-       samState.status = 'idle'
+      samState.status = 'idle'
     }
-
   } catch (err) {
     activeDownloads.delete(modelId)
-    const isAborted = (err as any).name === 'AbortError' || controller.signal.aborted
-    
+    const isAborted = (err as Error).name === 'AbortError' || controller.signal.aborted
+
     if (isAborted) {
-        console.log(`Download for ${modelId} paused/cancelled.`)
-        samState.status = 'idle'
-        // Do not set error state for pause/cancel
+      console.log(`Download for ${modelId} paused/cancelled.`)
+      samState.status = 'idle'
+      // Do not set error state for pause/cancel
     } else {
-        console.error(`[SAM] model ${modelId} download failed:`, err)
-        samState.status = 'error'
-        samState.downloadProgress[modelId] = null
-        samState.error = err instanceof Error ? err.message : String(err)
-        throw err
+      console.error(`[SAM] model ${modelId} download failed:`, err)
+      samState.status = 'error'
+      samState.downloadProgress[modelId] = null
+      samState.error = err instanceof Error ? err.message : String(err)
+      throw err
     }
   }
 }
 
 export async function switchSamModel(modelId: SamModelId): Promise<void> {
   if (modelId === samState.currentModelId && samState.status === 'ready') return
-  
+
   // Unload current sessions to free memory
   // Unload current sessions to free memory
   // samEncoderSession is in worker, handled by re-init or we can send 'release' message if needed
   // For now, next init will release old one in worker.
   if (samDecoderSession) {
-    try { (samDecoderSession as any).release() } catch (e) { /* ignore */ }
+    try {
+      ;(samDecoderSession as { release?: () => void }).release?.()
+    } catch {
+      /* ignore */
+    }
     samDecoderSession = null
   }
 
@@ -344,14 +354,14 @@ export async function switchSamModel(modelId: SamModelId): Promise<void> {
 
   samState.currentModelId = modelId
   samState.status = 'idle'
-  
+
   // If downloaded, load immediately? Or wait for first inference?
   // Let's wait for inference or explicit load call to invoke ensureSamSessionLoaded
 }
 
 async function ensureOrtLoaded(): Promise<typeof Ort> {
   if (ortModule) return ortModule
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
+
   const mod = (await import('onnxruntime-node')) as typeof Ort
   ortModule = mod
   return mod
@@ -361,7 +371,7 @@ async function ensureOrtLoaded(): Promise<typeof Ort> {
  * GPU Provider Detection and Configuration
  */
 
-function getCudaOptions(): Record<string, any> {
+function getCudaOptions(): Record<string, unknown> {
   return {
     deviceId: 0,
     cudnnConvAlgoSearch: 'DEFAULT',
@@ -371,14 +381,14 @@ function getCudaOptions(): Record<string, any> {
   }
 }
 
-function getDirectMLOptions(): Record<string, any> {
+function getDirectMLOptions(): Record<string, unknown> {
   return {
     deviceId: 0,
     enableGraphCapture: true
   }
 }
 
-function getCoreMLOptions(): Record<string, any> {
+function getCoreMLOptions(): Record<string, unknown> {
   return {
     // CoreML default options
   }
@@ -416,7 +426,7 @@ async function detectAvailableProviders(): Promise<ProviderInfo[]> {
         { name: 'DML', priority: 7 },
         { name: 'DirectML', priority: 8 }
       ]
-      
+
       for (const variant of directMLVariants) {
         providers.push({
           name: variant.name,
@@ -425,8 +435,11 @@ async function detectAvailableProviders(): Promise<ProviderInfo[]> {
           options: getDirectMLOptions()
         })
       }
-      
-      console.log('[SAM-GPU] DirectML provider variants added to candidate list:', directMLVariants.map(v => v.name).join(', '))
+
+      console.log(
+        '[SAM-GPU] DirectML provider variants added to candidate list:',
+        directMLVariants.map((v) => v.name).join(', ')
+      )
     } catch (e) {
       console.log('[SAM-GPU] DirectML provider not available:', (e as Error).message)
     }
@@ -474,17 +487,20 @@ async function detectAvailableProviders(): Promise<ProviderInfo[]> {
   return providers.sort((a, b) => a.priority - b.priority)
 }
 
-function buildSessionOptions(providers: ProviderInfo[], useDirectML: boolean): any {
+function buildSessionOptions(
+  providers: ProviderInfo[],
+  useDirectML: boolean
+): Ort.InferenceSession.SessionOptions {
   const executionProviders = providers
-    .filter(p => p.available)
-    .map(p => {
+    .filter((p) => p.available)
+    .map((p) => {
       if (p.options && Object.keys(p.options).length > 0) {
         return { name: p.name, ...p.options }
       }
       return p.name
     })
 
-  const sessionOptions: any = {
+  const sessionOptions: Ort.InferenceSession.SessionOptions = {
     executionProviders,
     executionMode: 'sequential', // Required for DirectML and recommended for large models
     graphOptimizationLevel: 'all',
@@ -502,111 +518,121 @@ export async function ensureSamSessionLoaded(): Promise<void> {
 
   const modelId = samState.currentModelId
   const downloaded = await isModelDownloaded(modelId)
-  
+
   if (!downloaded) {
     throw new Error(`SAM model ${modelId} not found. Please download it first.`)
   }
 
   samState.status = 'loading'
-  
+
   try {
     console.log('[SAM-GPU] Initializing sessions...')
-    
+
     const ort = await ensureOrtLoaded()
     const dir = getModelDir(modelId)
     const config = SAM_MODELS[modelId]
-    
-    const encoderPath = join(dir, config.encoderFile)
+
     const decoderPath = join(dir, config.decoderFile)
-    
+
     // Detect available GPU providers
     const providers = await detectAvailableProviders()
-    const availableProviderNames = providers.map(p => p.name)
-    
+    const availableProviderNames = providers.map((p) => p.name)
+
     console.log('[SAM-GPU] Available providers:', availableProviderNames)
-    
+
     // Try each provider in priority order
     let sessionCreated = false
     let activeProvider: string | null = null
-    
+
     for (const provider of providers) {
       if (!provider.available) continue
-      
+
       try {
         console.log(`[SAM-GPU] Attempting to load sessions with provider: ${provider.name}`)
-        
+
         // Check if DirectML is in the providers list for special config
         const useDirectML = provider.name === 'directml'
-        
+
         // Build session options for this provider attempt
         const sessionOptions = buildSessionOptions([provider], useDirectML)
-        
+
         console.log(`[SAM-GPU] Session options:`, {
           executionProviders: sessionOptions.executionProviders,
           executionMode: sessionOptions.executionMode,
           enableMemPattern: sessionOptions.enableMemPattern
         })
-        
+
         // Create decoder session (Main thread)
         samDecoderSession = await ort.InferenceSession.create(decoderPath, sessionOptions)
-        
-        console.log('[SAM-GPU] Decoder session providers:', (samDecoderSession as any).executionProviders || provider.name)
-        
+
+        console.log(
+          '[SAM-GPU] Decoder session providers:',
+          (samDecoderSession as { executionProviders?: string[] }).executionProviders ||
+            provider.name
+        )
+
         // Init Encoder in Worker
         console.log('[SAM-GPU] Initializing Encoder Worker...')
         await initWorker(modelId)
-        
+
         console.log(`[SAM-GPU] ✓ Successfully loaded sessions with provider: ${provider.name}`)
-        
+
         activeProvider = provider.name
         sessionCreated = true
         break
-        
       } catch (error) {
         // Clean up any partially created sessions
         // Clean up any partially created sessions
         // samEncoderSession handled by worker
         if (samDecoderSession) {
-          try { (samDecoderSession as any).release?.() } catch (e) { /* ignore */ }
+          try {
+            ;(samDecoderSession as { release?: () => void }).release?.()
+          } catch {
+            /* ignore */
+          }
           samDecoderSession = null
         }
-        
+
         const errorMsg = error instanceof Error ? error.message : String(error)
         const errorStack = error instanceof Error ? error.stack : ''
-        
+
         console.warn(`[SAM-GPU] ❌ Failed to load with ${provider.name}`)
         console.warn(`[SAM-GPU]    Error: ${errorMsg}`)
-        
+
         // Detailed diagnostics for DirectML failures
         if (provider.name.toLowerCase().includes('directml') || provider.name === 'DML') {
           console.warn('[SAM-GPU]    DirectML Diagnostics:')
-          console.warn('[SAM-GPU]      - DirectML.dll should be in node_modules/onnxruntime-node/bin/napi-v6/win32/x64/')
+          console.warn(
+            '[SAM-GPU]      - DirectML.dll should be in node_modules/onnxruntime-node/bin/napi-v6/win32/x64/'
+          )
           console.warn('[SAM-GPU]      - Windows 10 1903+ or Windows 11 required')
           console.warn('[SAM-GPU]      - Try alternative provider names: directml, DML, DirectML')
           if (errorStack) {
-            console.warn('[SAM-GPU]      Stack trace:', errorStack.split('\n').slice(0, 3).join('\n'))
+            console.warn(
+              '[SAM-GPU]      Stack trace:',
+              errorStack.split('\n').slice(0, 3).join('\n')
+            )
           }
         }
-        
+
         // Continue to next provider
       }
     }
-    
+
     if (!sessionCreated) {
       throw new Error('Failed to create SAM sessions with any available provider')
     }
-    
+
     // Update state with GPU info
     samState.gpuInfo = {
       provider: activeProvider,
       platform: process.platform,
       availableProviders: availableProviderNames
     }
-    
+
     samState.status = 'ready'
-    
+
     console.log('[SAM-GPU] Sessions ready. Active provider:', activeProvider)
-    
   } catch (e) {
     samState.status = 'error'
     samState.error = e instanceof Error ? e.message : String(e)
@@ -642,11 +668,11 @@ const MAX_CACHE_SIZE = 10 // Keep last 10 embeddings to prevent memory leak
  */
 function cleanupEmbeddingCache(): void {
   if (embeddingCache.size <= MAX_CACHE_SIZE) return
-  
+
   // Sort by lastUsed timestamp and remove oldest
   const entries = Array.from(embeddingCache.entries())
   entries.sort((a, b) => a[1].lastUsed - b[1].lastUsed)
-  
+
   const toRemove = entries.length - MAX_CACHE_SIZE
   for (let i = 0; i < toRemove; i++) {
     embeddingCache.delete(entries[i][0])
@@ -697,7 +723,7 @@ class SmartCacheQueue {
 
   queueJob(job: CacheJob): void {
     const timestamp = new Date().toISOString().split('T')[1].slice(0, -1)
-    
+
     // Check if already cached
     const cached = embeddingCache.get(job.imagePath)
     if (cached && cached.modelId === samState.currentModelId) {
@@ -706,11 +732,13 @@ class SmartCacheQueue {
     }
 
     // Check if already queued
-    const exists = this.queue.find(j => j.imagePath === job.imagePath)
+    const exists = this.queue.find((j) => j.imagePath === job.imagePath)
     if (exists) {
       // Update priority if higher
       if (this.getPriorityValue(job.priority) < this.getPriorityValue(exists.priority)) {
-        console.log(`[${timestamp}] [Prefetch] 🔼 Task ${job.taskIndex} priority updated: ${exists.priority} → ${job.priority}`)
+        console.log(
+          `[${timestamp}] [Prefetch] 🔼 Task ${job.taskIndex} priority updated: ${exists.priority} → ${job.priority}`
+        )
         exists.priority = job.priority
       }
       return
@@ -719,12 +747,14 @@ class SmartCacheQueue {
     this.queue.push(job)
     this.sortQueue()
     const imageName = job.imagePath.split(/[\\/]/).pop() || job.imagePath
-    console.log(`[${timestamp}] [Prefetch] ➕ Queued task ${job.taskIndex} (${job.priority}): ${imageName} | Queue size: ${this.queue.length}`)
+    console.log(
+      `[${timestamp}] [Prefetch] ➕ Queued task ${job.taskIndex} (${job.priority}): ${imageName} | Queue size: ${this.queue.length}`
+    )
   }
 
   removeJobs(predicate: (job: CacheJob) => boolean): number {
     const before = this.queue.length
-    this.queue = this.queue.filter(j => !predicate(j))
+    this.queue = this.queue.filter((j) => !predicate(j))
     return before - this.queue.length
   }
 
@@ -759,7 +789,7 @@ class SmartCacheQueue {
 
   async processNext(): Promise<void> {
     const timestamp = new Date().toISOString().split('T')[1].slice(0, -1)
-    
+
     if (this.processing) {
       return
     }
@@ -783,19 +813,26 @@ class SmartCacheQueue {
     this.processingTaskIndex = job.taskIndex
 
     const imageName = job.imagePath.split(/[\\/]/).pop() || job.imagePath
-    console.log(`[${timestamp}] [Prefetch] 🚀 START encoding task ${job.taskIndex} (${job.priority}): ${imageName}`)
+    console.log(
+      `[${timestamp}] [Prefetch] 🚀 START encoding task ${job.taskIndex} (${job.priority}): ${imageName}`
+    )
     const startTime = performance.now()
-    
+
     try {
       await computeImageEmbedding(job.imagePath)
-      
+
       const elapsed = performance.now() - startTime
       // Remove from queue
-      this.queue = this.queue.filter(j => j !== job)
-      console.log(`[${timestamp}] [Prefetch] ✅ DONE task ${job.taskIndex} in ${elapsed.toFixed(0)}ms | Remaining queue: ${this.queue.length}`)
+      this.queue = this.queue.filter((j) => j !== job)
+      console.log(
+        `[${timestamp}] [Prefetch] ✅ DONE task ${job.taskIndex} in ${elapsed.toFixed(0)}ms | Remaining queue: ${this.queue.length}`
+      )
     } catch (e) {
       const elapsed = performance.now() - startTime
-      console.error(`[${timestamp}] [Prefetch] ❌ FAILED task ${job.taskIndex} after ${elapsed.toFixed(0)}ms:`, (e as Error).message)
+      console.error(
+        `[${timestamp}] [Prefetch] ❌ FAILED task ${job.taskIndex} after ${elapsed.toFixed(0)}ms:`,
+        (e as Error).message
+      )
     } finally {
       this.processing = false
       this.processingTaskIndex = null
@@ -818,7 +855,9 @@ class SmartCacheQueue {
       if (this.isRapidSwitching()) {
         if (!this.paused) {
           const timestamp = new Date().toISOString().split('T')[1].slice(0, -1)
-          console.log(`[${timestamp}] [Prefetch] ⏸️  Rapid switching detected, pausing queue for 1s`)
+          console.log(
+            `[${timestamp}] [Prefetch] ⏸️  Rapid switching detected, pausing queue for 1s`
+          )
           this.pause()
           setTimeout(() => {
             const ts2 = new Date().toISOString().split('T')[1].slice(0, -1)
@@ -830,7 +869,7 @@ class SmartCacheQueue {
         void this.processNext()
       }
     }, 500) // 500ms interval instead of 200ms - less aggressive
-    
+
     const timestamp = new Date().toISOString().split('T')[1].slice(0, -1)
     console.log(`[${timestamp}] [Prefetch] 🎬 Background processing STARTED (checking every 500ms)`)
   }
@@ -871,34 +910,44 @@ function getCachePlan(currentIndex: number, totalTasks: number): CachePlan {
   }
 
   const timestamp = new Date().toISOString().split('T')[1].slice(0, -1)
-  console.log(`[${timestamp}] [Prefetch] 📋 Cache plan for task ${currentIndex}/${totalTasks-1}:`)
-  console.log(`[${timestamp}] [Prefetch]    Backward (${plan.backward.length}): [${plan.backward.join(', ')}]`)
+  console.log(`[${timestamp}] [Prefetch] 📋 Cache plan for task ${currentIndex}/${totalTasks - 1}:`)
+  console.log(
+    `[${timestamp}] [Prefetch]    Backward (${plan.backward.length}): [${plan.backward.join(', ')}]`
+  )
   console.log(`[${timestamp}] [Prefetch]    Current: ${plan.current}`)
-  console.log(`[${timestamp}] [Prefetch]    Forward (${plan.forward.length}): [${plan.forward.join(', ')}]`)
-  
+  console.log(
+    `[${timestamp}] [Prefetch]    Forward (${plan.forward.length}): [${plan.forward.join(', ')}]`
+  )
+
   return plan
 }
 
 /**
  * Update prefetch plan based on current task navigation
  */
-export function updatePrefetchPlan(currentIndex: number, totalTasks: number, tasks: any[]): void {
+export function updatePrefetchPlan(
+  currentIndex: number,
+  totalTasks: number,
+  tasks: { image?: string }[]
+): void {
   const timestamp = new Date().toISOString().split('T')[1].slice(0, -1)
   console.log(`\n[${timestamp}] [Prefetch] ═══════════════════════════════════════`)
   console.log(`[${timestamp}] [Prefetch] 🎯 UPDATE PLAN: Navigated to task ${currentIndex}`)
-  
+
   const plan = getCachePlan(currentIndex, totalTasks)
-  
+
   // Remove old entries (4+ back)
   const oldThreshold = currentIndex - 4
-  const removedCount = prefetchQueue.removeJobs(job => job.taskIndex < oldThreshold)
-  
+  const removedCount = prefetchQueue.removeJobs((job) => job.taskIndex < oldThreshold)
+
   if (removedCount > 0) {
-    console.log(`[${timestamp}] [Prefetch] 🗑️  Removed ${removedCount} old jobs (< task ${oldThreshold})`)
+    console.log(
+      `[${timestamp}] [Prefetch] 🗑️  Removed ${removedCount} old jobs (< task ${oldThreshold})`
+    )
   }
 
   // Helper to queue a task
-  const queueTask = (idx: number, priority: 'high' | 'medium' | 'low') => {
+  const queueTask = (idx: number, priority: 'high' | 'medium' | 'low'): void => {
     if (idx >= 0 && idx < tasks.length && tasks[idx]) {
       const task = tasks[idx]
       if (task.image) {
@@ -963,7 +1012,6 @@ function getResizeScale(width: number, height: number): number {
   return SAM_IMAGE_SIZE / longSide
 }
 
-
 interface PendingRequest {
   resolve: (res: ImageEmbeddingCacheEntry) => void
   reject: (err: Error) => void
@@ -982,106 +1030,107 @@ function getWorkerPath(): string {
 function initWorker(modelId: SamModelId): Promise<void> {
   return new Promise((resolveResult, rejectResult) => {
     if (samWorker) {
-        // If worker exists, just re-init with new model?
-        // Or if we want fresh worker:
-        // samWorker.terminate()
-        // For now, let's reuse and send 'init' message
+      // If worker exists, just re-init with new model?
+      // Or if we want fresh worker:
+      // samWorker.terminate()
+      // For now, let's reuse and send 'init' message
     } else {
-        const workerPath = getWorkerPath()
-        if (!existsSync(workerPath)) {
-            // Fallback for dev if structure is different?
-            // But we configured it to be there.
-            console.warn('[SAM] Worker file not found at', workerPath)
-        }
-        samWorker = new Worker(workerPath)
-        
-        samWorker.on('message', (msg) => {
-            if (msg.type === 'init_result') {
-                if (msg.success) {
-                   // resolve handled by specific promise? 
-                   // We need to track who asked for init. 
-                   // Since init is sequential globally for us:
-                   // We could treat it as a request.
-                } 
-            } else if (msg.type === 'result') {
-                const req = pendingRequests.get(msg.id)
-                if (req) {
-                    pendingRequests.delete(msg.id)
-                    // Reconstruct tensor
-                    const { embedding, dims, origWidth, origHeight } = msg
-                    // embedding is Float32Array (transfered)
-                    // We need to wrap it in Ort.Tensor
-                    try {
-                        // We must interpret the data as float32
-                        const floatData = embedding instanceof Float32Array ? embedding : new Float32Array(embedding)
-                        // Note: Ort might need the specific float32 array instance
-                        
-                        // We can't verify 'Ort' here easily if not imported or used just for types
-                        // But samModel has 'import type * as Ort'
-                        // We need the Value, so we use 'ortModule' which is loaded dynamically
-                        if (ortModule) {
-                             const tensor = new ortModule.Tensor('float32', floatData, dims)
-                             
-                             const entry: ImageEmbeddingCacheEntry = {
-                                embedding: tensor,
-                                origWidth,
-                                origHeight,
-                                modelId: samState.currentModelId,
-                                lastUsed: Date.now()
-                             }
-                             embeddingCache.set(req.imagePath, entry)
-                             cleanupEmbeddingCache() // Maintain LRU
-                             req.resolve(entry)
-                        } else {
-                            req.reject(new Error("ORT module not loaded in main thread"))
-                        }
-                    } catch (e) {
-                        req.reject(e as Error)
-                    }
+      const workerPath = getWorkerPath()
+      if (!existsSync(workerPath)) {
+        // Fallback for dev if structure is different?
+        // But we configured it to be there.
+        console.warn('[SAM] Worker file not found at', workerPath)
+      }
+      samWorker = new Worker(workerPath)
+
+      samWorker.on('message', (msg) => {
+        if (msg.type === 'init_result') {
+          if (msg.success) {
+            // resolve handled by specific promise?
+            // We need to track who asked for init.
+            // Since init is sequential globally for us:
+            // We could treat it as a request.
+          }
+        } else if (msg.type === 'result') {
+          const req = pendingRequests.get(msg.id)
+          if (req) {
+            pendingRequests.delete(msg.id)
+            // Reconstruct tensor
+            const { embedding, dims, origWidth, origHeight } = msg
+            // embedding is Float32Array (transfered)
+            // We need to wrap it in Ort.Tensor
+            try {
+              // We must interpret the data as float32
+              const floatData =
+                embedding instanceof Float32Array ? embedding : new Float32Array(embedding)
+              // Note: Ort might need the specific float32 array instance
+
+              // We can't verify 'Ort' here easily if not imported or used just for types
+              // But samModel has 'import type * as Ort'
+              // We need the Value, so we use 'ortModule' which is loaded dynamically
+              if (ortModule) {
+                const tensor = new ortModule.Tensor('float32', floatData, dims)
+
+                const entry: ImageEmbeddingCacheEntry = {
+                  embedding: tensor,
+                  origWidth,
+                  origHeight,
+                  modelId: samState.currentModelId,
+                  lastUsed: Date.now()
                 }
-            } else if (msg.type === 'error') {
-                 const req = pendingRequests.get(msg.id)
-                 if (req) {
-                     pendingRequests.delete(msg.id)
-                     req.reject(new Error(msg.error))
-                 }
+                embeddingCache.set(req.imagePath, entry)
+                cleanupEmbeddingCache() // Maintain LRU
+                req.resolve(entry)
+              } else {
+                req.reject(new Error('ORT module not loaded in main thread'))
+              }
+            } catch (e) {
+              req.reject(e as Error)
             }
-        })
-        
-        samWorker.on('error', (err) => {
-            console.error('[SAM-Worker] Error:', err)
-        })
+          }
+        } else if (msg.type === 'error') {
+          const req = pendingRequests.get(msg.id)
+          if (req) {
+            pendingRequests.delete(msg.id)
+            req.reject(new Error(msg.error))
+          }
+        }
+      })
+
+      samWorker.on('error', (err) => {
+        console.error('[SAM-Worker] Error:', err)
+      })
     }
-    
+
     // Send init
     const config = SAM_MODELS[modelId]
     const dir = getModelDir(modelId)
     // We pass absolute path to encoder
     const encoderPath = join(dir, config.encoderFile)
-    
-    // We need to wait for init result. 
-    // Simplified: Just fire and assume success? 
+
+    // We need to wait for init result.
+    // Simplified: Just fire and assume success?
     // No, we should wait.
     // Hack: use a temporary listener or just trust the next 'init_result' is for us.
-    // Or better, add ID to init message? 
+    // Or better, add ID to init message?
     // The worker code I wrote doesn't echo ID for init.
     // Let's rely on event based wrapper for init.
-    
-    const onInit = (msg: any) => {
-        if (msg.type === 'init_result') {
-            samWorker?.off('message', onInit)
-            if (msg.success) resolveResult()
-            else rejectResult(new Error(msg.error))
-        }
+
+    const onInit = (msg: { type: string; success?: boolean; error?: string }): void => {
+      if (msg.type === 'init_result') {
+        samWorker?.off('message', onInit)
+        if (msg.success) resolveResult()
+        else rejectResult(new Error(msg.error))
+      }
     }
     samWorker.on('message', onInit)
-    
+
     samWorker.postMessage({
-        type: 'init',
-        config: {
-            modelId,
-            modelPath: encoderPath
-        }
+      type: 'init',
+      config: {
+        modelId,
+        modelPath: encoderPath
+      }
     })
   })
 }
@@ -1089,23 +1138,23 @@ function initWorker(modelId: SamModelId): Promise<void> {
 async function computeImageEmbedding(imagePath: string): Promise<ImageEmbeddingCacheEntry> {
   // Ensure worker is ready? calling ensureSamSessionLoaded handles init.
   // But ensureSamSessionLoaded calls worker init.
-  
+
   if (!samWorker) {
     throw new Error('SAM worker not initialized')
   }
-  
+
   // Ensure ORT is loaded for Tensor creation
   await ensureOrtLoaded()
 
   return new Promise((resolve, reject) => {
-      const id = Date.now().toString() + Math.random().toString()
-      pendingRequests.set(id, { resolve, reject, imagePath })
-      
-      samWorker?.postMessage({
-          type: 'encode',
-          id,
-          imagePath
-      })
+    const id = Date.now().toString() + Math.random().toString()
+    pendingRequests.set(id, { resolve, reject, imagePath })
+
+    samWorker?.postMessage({
+      type: 'encode',
+      id,
+      imagePath
+    })
   })
 }
 
@@ -1160,73 +1209,77 @@ function traceBoundary(
   scaleX: number,
   scaleY: number
 ): XY[] {
-    const getPixel = (x: number, y: number) => {
-        if (x < 0 || x >= maskWidth || y < 0 || y >= maskHeight) return 0
-        return maskData[y * maskWidth + x] > 0 ? 1 : 0
+  const getPixel = (x: number, y: number): number => {
+    if (x < 0 || x >= maskWidth || y < 0 || y >= maskHeight) return 0
+    return maskData[y * maskWidth + x] > 0 ? 1 : 0
+  }
+
+  // 1. Find start
+  let sx = -1,
+    sy = -1
+  for (let y = 0; y < maskHeight; y++) {
+    for (let x = 0; x < maskWidth; x++) {
+      if (getPixel(x, y)) {
+        sx = x
+        sy = y
+        break
+      }
+    }
+    if (sx !== -1) break
+  }
+  if (sx === -1) return []
+
+  const points: XY[] = []
+  let cx = sx,
+    cy = sy
+
+  // Direction offsets: E, SE, S, SW, W, NW, N, NE (Clockwise)
+  const dx = [1, 1, 0, -1, -1, -1, 0, 1]
+  const dy = [0, 1, 1, 1, 0, -1, -1, -1]
+
+  // We arrive from North (virtual), so we start looking from West?
+  // (sx, sy-1) is neighbor 6 (North) relative to P
+  // Search start index = 6.
+  // Wait, if we use the robust rule: enteredFrom = 6 (North)
+  let enteredFrom = 6
+
+  let loops = 0
+  while (true) {
+    points.push({ x: cx * scaleX, y: cy * scaleY })
+
+    let found = false
+    for (let i = 0; i < 8; i++) {
+      // Check neighbors clockwise starting from enteredFrom
+      const nd = (enteredFrom + i) % 8
+      const nx = cx + dx[nd]
+      const ny = cy + dy[nd]
+
+      if (getPixel(nx, ny)) {
+        // Found next boundary pixel
+        // New entering direction logic:
+        // If we moved in direction 'nd', we effectively entered the new pixel from the opposite side?
+        // No, Moore-Neighbor tracing rule: B = P_prev_neighbor (backtrack).
+        // Here we simplify by implicitly tracking "where we came from".
+        // If we move East (0), we enter from West (4).
+        // Next search starts from (enteredFrom + 2) % 8 for 4-connected,
+        // or just follow the crawler rule: start from (nd + 4 + 2)?
+        // Let's use the proven: start from (nd + 5) % 8  (Look "Left-ish")
+        const from = (nd + 4) % 8
+        enteredFrom = (from + 2) % 8
+
+        cx = nx
+        cy = ny
+        found = true
+        break
+      }
     }
 
-    // 1. Find start
-    let sx = -1, sy = -1
-    for (let y = 0; y < maskHeight; y++) {
-        for (let x = 0; x < maskWidth; x++) {
-            if (getPixel(x, y)) {
-                sx = x; sy = y; break;
-            }
-        }
-        if (sx !== -1) break
-    }
-    if (sx === -1) return []
+    if (!found) break // Isolated pixel
+    if (cx === sx && cy === sy) break // Back to start
+    if (loops++ > maskWidth * maskHeight) break // Safety
+  }
 
-    const points: XY[] = []
-    let cx = sx, cy = sy
-    
-    // Direction offsets: E, SE, S, SW, W, NW, N, NE (Clockwise)
-    const dx = [1, 1, 0, -1, -1, -1, 0, 1]
-    const dy = [0, 1, 1, 1, 0, -1, -1, -1]
-    
-    // We arrive from North (virtual), so we start looking from West?
-    // (sx, sy-1) is neighbor 6 (North) relative to P
-    // Search start index = 6. 
-    // Wait, if we use the robust rule: enteredFrom = 6 (North)
-    let enteredFrom = 6 
-    
-    let loops = 0
-    while (true) {
-        points.push({ x: cx * scaleX, y: cy * scaleY })
-        
-        let found = false
-        for (let i = 0; i < 8; i++) {
-            // Check neighbors clockwise starting from enteredFrom
-            const nd = (enteredFrom + i) % 8
-            const nx = cx + dx[nd]
-            const ny = cy + dy[nd]
-            
-            if (getPixel(nx, ny)) {
-                // Found next boundary pixel
-                // New entering direction logic:
-                // If we moved in direction 'nd', we effectively entered the new pixel from the opposite side?
-                // No, Moore-Neighbor tracing rule: B = P_prev_neighbor (backtrack).
-                // Here we simplify by implicitly tracking "where we came from".
-                // If we move East (0), we enter from West (4).
-                // Next search starts from (enteredFrom + 2) % 8 for 4-connected, 
-                // or just follow the crawler rule: start from (nd + 4 + 2)?
-                // Let's use the proven: start from (nd + 5) % 8  (Look "Left-ish")
-                const from = (nd + 4) % 8
-                enteredFrom = (from + 2) % 8
-                
-                cx = nx
-                cy = ny
-                found = true
-                break
-            }
-        }
-        
-        if (!found) break // Isolated pixel
-        if (cx === sx && cy === sy) break // Back to start
-        if (loops++ > maskWidth * maskHeight) break // Safety
-    }
-    
-    return points
+  return points
 }
 
 function maskToPolygon(
@@ -1238,7 +1291,7 @@ function maskToPolygon(
 ): { x: number; y: number }[] {
   const scaleX = origWidth / maskWidth
   const scaleY = origHeight / maskHeight
-  
+
   // Use tracing instead of scanning + convex hull
   return traceBoundary(maskData, maskWidth, maskHeight, scaleX, scaleY)
 }
@@ -1250,19 +1303,27 @@ export async function warmupGPU(): Promise<void> {
   try {
     console.log('[SAM-GPU] Warming up GPU...')
     await ensureSamSessionLoaded()
-    
+
     // Run a minimal inference to initialize GPU
     if (samDecoderSession && ortModule) {
       const ort = ortModule as typeof Ort
-      
+
       // Create minimal dummy tensors
-      const dummyEmbedding = new ort.Tensor('float32', new Float32Array(256 * 64 * 64), [1, 256, 64, 64])
+      const dummyEmbedding = new ort.Tensor(
+        'float32',
+        new Float32Array(256 * 64 * 64),
+        [1, 256, 64, 64]
+      )
       const dummyCoords = new ort.Tensor('float32', new Float32Array([512, 512, 0, 0]), [1, 2, 2])
       const dummyLabels = new ort.Tensor('float32', new Float32Array([1, -1]), [1, 2])
-      const dummyMask = new ort.Tensor('float32', new Float32Array(1 * 1 * 256 * 256), [1, 1, 256, 256])
+      const dummyMask = new ort.Tensor(
+        'float32',
+        new Float32Array(1 * 1 * 256 * 256),
+        [1, 1, 256, 256]
+      )
       const dummyHasMask = new ort.Tensor('float32', new Float32Array([0]), [1])
       const dummyOrigSize = new ort.Tensor('float32', new Float32Array([1024, 1024]), [2])
-      
+
       const warmupInputs = {
         image_embeddings: dummyEmbedding,
         point_coords: dummyCoords,
@@ -1271,7 +1332,7 @@ export async function warmupGPU(): Promise<void> {
         has_mask_input: dummyHasMask,
         orig_im_size: dummyOrigSize
       }
-      
+
       await samDecoderSession.run(warmupInputs)
       console.log('[SAM-GPU] ✓ GPU warm-up complete')
     }
@@ -1288,7 +1349,7 @@ export async function runSamInference(
   if (points.length === 0) {
     throw new Error('At least one point is required for SAM inference.')
   }
-  
+
   // Ensure session is loaded (active model)
   await ensureSamSessionLoaded()
 
@@ -1340,8 +1401,10 @@ export async function runSamInference(
   const inferenceStart = performance.now()
   const outputs = await decoder.run(decoderInputs)
   const inferenceTime = performance.now() - inferenceStart
-  console.log(`[SAM-GPU] Decoder inference completed in ${inferenceTime.toFixed(2)}ms (Provider: ${samState.gpuInfo?.provider || 'unknown'})`)
-  
+  console.log(
+    `[SAM-GPU] Decoder inference completed in ${inferenceTime.toFixed(2)}ms (Provider: ${samState.gpuInfo?.provider || 'unknown'})`
+  )
+
   const firstOutputName = decoder.outputNames[0]
   const masksTensor = outputs[firstOutputName] as Ort.Tensor
 

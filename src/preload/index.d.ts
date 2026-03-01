@@ -91,12 +91,17 @@ declare global {
             error: string | null
           }
         }>
-        getModels: () => Promise<Record<string, {
-          id: string
-          name: string
-          description: string
-          quantized: boolean
-        }>>
+        getModels: () => Promise<
+          Record<
+            string,
+            {
+              id: string
+              name: string
+              description: string
+              quantized: boolean
+            }
+          >
+        >
         ensureReady: () => Promise<{
           ok: boolean
           state: {

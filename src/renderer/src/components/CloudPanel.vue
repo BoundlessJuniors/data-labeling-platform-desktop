@@ -169,7 +169,8 @@ onMounted(async (): Promise<void> => {
 
           <button
             class="px-4 py-2 bg-gray-800 dark:bg-gray-200 text-white dark:text-gray-900 hover:bg-gray-700 dark:hover:bg-white rounded-md font-medium disabled:opacity-50 transition-colors shadow-sm"
-            :disabled="cloudFetching" @click="handleDownload(contract.id, contract.listing?.title || 'Bulut_Dataset')"
+            :disabled="cloudFetching"
+            @click="handleDownload(contract.id, contract.listing?.title || 'Bulut_Dataset')"
           >
             <!-- Eğer bu sözleşme indiriliyorsa -->
             <span v-if="processingContractId === contract.id">İndiriliyor...</span>

@@ -44,7 +44,7 @@ export function registerSamIpc(): void {
 
   ipcMain.handle('sam:pauseDownload', async (_event, modelId: SamModelId) => {
     await pauseSamDownload(modelId)
-    return { 
+    return {
       ok: true,
       state: getSamState()
     }
@@ -67,7 +67,7 @@ export function registerSamIpc(): void {
   })
 
   ipcMain.handle('sam:getModels', () => {
-     return SAM_MODELS
+    return SAM_MODELS
   })
 
   ipcMain.handle('sam:warmup', async () => {
@@ -79,24 +79,24 @@ export function registerSamIpc(): void {
     recordPrefetchActivity()
   })
 
-  ipcMain.handle('sam:updatePrefetchPlan', (_event, currentIndex: number, totalTasks: number, tasks: any[]) => {
-    updatePrefetchPlan(currentIndex, totalTasks, tasks)
-  })
+  ipcMain.handle(
+    'sam:updatePrefetchPlan',
+    (_event, currentIndex: number, totalTasks: number, tasks: { image?: string }[]) => {
+      updatePrefetchPlan(currentIndex, totalTasks, tasks)
+    }
+  )
 
   ipcMain.handle('sam:startPrefetch', () => {
     startPrefetchProcessing()
   })
 
-  ipcMain.handle(
-    'sam:ensureReady',
-    async () => {
-      await ensureSamSessionLoaded()
-      return {
-        ok: true,
-        state: getSamState()
-      }
+  ipcMain.handle('sam:ensureReady', async () => {
+    await ensureSamSessionLoaded()
+    return {
+      ok: true,
+      state: getSamState()
     }
-  )
+  })
 
   ipcMain.handle(
     'sam:run',

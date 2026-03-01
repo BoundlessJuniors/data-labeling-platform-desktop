@@ -26,13 +26,13 @@
 
 ### 🖼️ Görüntü Üzerinde Etiketleme (5 Anotasyon Aracı)
 
-| Araç | Açıklama |
-|---|---|
-| **Bounding Box** | Dikdörtgen çerçeve çizerek nesne sınırlama kutusu oluşturma |
-| **Polygon** | Çokgen çizerek karmaşık şekilli nesneleri segmentleme |
-| **Polyline** | Çoklu çizgi çekerek yol, sınır vb. doğrusal yapıları işaretleme |
-| **Circle** | Daire çizerek dairesel nesneleri etiketleme |
-| **Keypoint** | Tekil nokta işaretleyerek önemli konumları belirtme |
+| Araç             | Açıklama                                                        |
+| ---------------- | --------------------------------------------------------------- |
+| **Bounding Box** | Dikdörtgen çerçeve çizerek nesne sınırlama kutusu oluşturma     |
+| **Polygon**      | Çokgen çizerek karmaşık şekilli nesneleri segmentleme           |
+| **Polyline**     | Çoklu çizgi çekerek yol, sınır vb. doğrusal yapıları işaretleme |
+| **Circle**       | Daire çizerek dairesel nesneleri etiketleme                     |
+| **Keypoint**     | Tekil nokta işaretleyerek önemli konumları belirtme             |
 
 ### 🤖 SAM (Segment Anything Model) AI Entegrasyonu
 
@@ -114,20 +114,20 @@
 
 ## 🏗️ Teknoloji Yığını
 
-| Katman | Teknolojiler |
-|---|---|
-| **Desktop Framework** | Electron 38 (Chromium + Node.js) |
-| **Frontend Framework** | Vue 3 (Composition API, `<script setup>`) |
-| **Programlama Dili** | TypeScript 5 (strict) |
-| **Build Sistemi** | Vite 7 + electron-vite 4 |
-| **Canvas Kütüphanesi** | Konva.js 9 + vue-konva 3 |
-| **CSS Framework** | Tailwind CSS 3 + PostCSS + Autoprefixer |
-| **Veritabanı** | SQLite (better-sqlite3 12) |
-| **AI / ML Çıkarım** | ONNX Runtime Node 1.23 (SAM ViT-B) |
-| **Görüntü İşleme** | Jimp 0.22 (resize, normalize, pixel access) |
-| **SVG İkonlar** | vite-svg-loader 5 (SVG → Vue bileşeni) |
-| **Kod Kalitesi** | ESLint 9 + Prettier 3 |
-| **Paketleme** | electron-builder 25 (NSIS / DMG / AppImage / deb / snap) |
+| Katman                 | Teknolojiler                                             |
+| ---------------------- | -------------------------------------------------------- |
+| **Desktop Framework**  | Electron 38 (Chromium + Node.js)                         |
+| **Frontend Framework** | Vue 3 (Composition API, `<script setup>`)                |
+| **Programlama Dili**   | TypeScript 5 (strict)                                    |
+| **Build Sistemi**      | Vite 7 + electron-vite 4                                 |
+| **Canvas Kütüphanesi** | Konva.js 9 + vue-konva 3                                 |
+| **CSS Framework**      | Tailwind CSS 3 + PostCSS + Autoprefixer                  |
+| **Veritabanı**         | SQLite (better-sqlite3 12)                               |
+| **AI / ML Çıkarım**    | ONNX Runtime Node 1.23 (SAM ViT-B)                       |
+| **Görüntü İşleme**     | Jimp 0.22 (resize, normalize, pixel access)              |
+| **SVG İkonlar**        | vite-svg-loader 5 (SVG → Vue bileşeni)                   |
+| **Kod Kalitesi**       | ESLint 9 + Prettier 3                                    |
+| **Paketleme**          | electron-builder 25 (NSIS / DMG / AppImage / deb / snap) |
 
 ---
 
@@ -158,6 +158,7 @@ LabelGun üç ana Electron katmanından oluşur:
 ```
 
 **Veri akışı:**
+
 1. Renderer, `window.api.*` üzerinden IPC çağrıları yapar.
 2. Preload, `ipcRenderer.invoke()` ile main process'e mesaj iletir.
 3. Main process, `ipcMain.handle()` ile DB sorguları veya SAM çıkarımı yapar ve sonuçları döner.
@@ -260,117 +261,124 @@ label_gun/
 Uygulama yerel bir SQLite veritabanı kullanır (`%APPDATA%/label_gun/db/app.sqlite`):
 
 ### `datasets` Tablosu
-| Sütun | Tip | Açıklama |
-|---|---|---|
-| `id` | TEXT (PK) | Dataset benzersiz kimliği |
-| `name` | TEXT | Kullanıcıya görünen isim |
-| `folder_path` | TEXT (UNIQUE) | Kaynak klasör yolu |
-| `created_at` | INTEGER | Oluşturulma zamanı (Unix ms) |
+
+| Sütun         | Tip           | Açıklama                     |
+| ------------- | ------------- | ---------------------------- |
+| `id`          | TEXT (PK)     | Dataset benzersiz kimliği    |
+| `name`        | TEXT          | Kullanıcıya görünen isim     |
+| `folder_path` | TEXT (UNIQUE) | Kaynak klasör yolu           |
+| `created_at`  | INTEGER       | Oluşturulma zamanı (Unix ms) |
 
 ### `media_items` Tablosu
-| Sütun | Tip | Açıklama |
-|---|---|---|
-| `id` | TEXT (PK) | Görselin benzersiz kimliği (tam dosya yolu) |
-| `dataset_id` | TEXT (FK) | Bağlı olduğu dataset |
-| `local_path` | TEXT | Dosyanın yerel yolu |
-| `sha256` | TEXT | Dosya hash'i (opsiyonel) |
-| `width` | INTEGER | Görsel genişliği (px) |
-| `height` | INTEGER | Görsel yüksekliği (px) |
-| `status` | TEXT | Durum: `in_progress` / `completed` |
-| `annotation_seconds` | INTEGER | Bu görselde harcanan toplam süre (saniye) |
-| `created_at` | INTEGER | Oluşturulma zamanı (Unix ms) |
-| `updated_at` | INTEGER | Son güncelleme zamanı (Unix ms) |
+
+| Sütun                | Tip       | Açıklama                                    |
+| -------------------- | --------- | ------------------------------------------- |
+| `id`                 | TEXT (PK) | Görselin benzersiz kimliği (tam dosya yolu) |
+| `dataset_id`         | TEXT (FK) | Bağlı olduğu dataset                        |
+| `local_path`         | TEXT      | Dosyanın yerel yolu                         |
+| `sha256`             | TEXT      | Dosya hash'i (opsiyonel)                    |
+| `width`              | INTEGER   | Görsel genişliği (px)                       |
+| `height`             | INTEGER   | Görsel yüksekliği (px)                      |
+| `status`             | TEXT      | Durum: `in_progress` / `completed`          |
+| `annotation_seconds` | INTEGER   | Bu görselde harcanan toplam süre (saniye)   |
+| `created_at`         | INTEGER   | Oluşturulma zamanı (Unix ms)                |
+| `updated_at`         | INTEGER   | Son güncelleme zamanı (Unix ms)             |
 
 ### `annotations` Tablosu
-| Sütun | Tip | Açıklama |
-|---|---|---|
-| `id` | TEXT (PK) | Anotasyon kimliği (dışa aktarımda `export:MEDIA_ID`) |
-| `media_id` | TEXT (FK) | Bağlı olduğu görsel |
-| `type` | TEXT | Tip: `bbox`, `polygon`, `keypoint`, `circle`, `export` |
-| `category` | TEXT | Kategori/sınıf adı |
-| `data_json` | TEXT | Anotasyon verisinin JSON formatı |
-| `updated_at` | INTEGER | Son güncelleme zamanı (Unix ms) |
+
+| Sütun        | Tip       | Açıklama                                               |
+| ------------ | --------- | ------------------------------------------------------ |
+| `id`         | TEXT (PK) | Anotasyon kimliği (dışa aktarımda `export:MEDIA_ID`)   |
+| `media_id`   | TEXT (FK) | Bağlı olduğu görsel                                    |
+| `type`       | TEXT      | Tip: `bbox`, `polygon`, `keypoint`, `circle`, `export` |
+| `category`   | TEXT      | Kategori/sınıf adı                                     |
+| `data_json`  | TEXT      | Anotasyon verisinin JSON formatı                       |
+| `updated_at` | INTEGER   | Son güncelleme zamanı (Unix ms)                        |
 
 ---
 
 ## 📡 IPC Kanalları
 
 ### Veritabanı Kanalları (`dbIpc.ts`)
-| Kanal | Yön | Açıklama |
-|---|---|---|
-| `db:ping` | invoke | Bağlantı kontrolü |
-| `db:datasets:create` | invoke | Yeni dataset oluşturma |
-| `db:datasets:list` | invoke | Tüm dataset'leri listeleme |
-| `db:datasets:getByFolder` | invoke | Klasör yoluna göre dataset sorgulama |
-| `db:datasets:delete` | invoke | Dataset + ilişkili media + anotasyonları cascade silme |
-| `db:media:upsert` | invoke | Görsel ekleme veya güncelleme (UPSERT) |
-| `db:media:listByDataset` | invoke | Dataset'e ait görselleri listeleme |
-| `db:media:setStatus` | invoke | Görsel durumunu güncelleme |
-| `db:media:setTime` | invoke | Görselde harcanan süreyi kaydetme |
-| `db:annotations:saveExport` | invoke | Dışa aktarılmış JSON anotasyonu kaydetme |
-| `db:annotations:getExport` | invoke | Kaydedilmiş anotasyonu geri yükleme |
+
+| Kanal                       | Yön    | Açıklama                                               |
+| --------------------------- | ------ | ------------------------------------------------------ |
+| `db:ping`                   | invoke | Bağlantı kontrolü                                      |
+| `db:datasets:create`        | invoke | Yeni dataset oluşturma                                 |
+| `db:datasets:list`          | invoke | Tüm dataset'leri listeleme                             |
+| `db:datasets:getByFolder`   | invoke | Klasör yoluna göre dataset sorgulama                   |
+| `db:datasets:delete`        | invoke | Dataset + ilişkili media + anotasyonları cascade silme |
+| `db:media:upsert`           | invoke | Görsel ekleme veya güncelleme (UPSERT)                 |
+| `db:media:listByDataset`    | invoke | Dataset'e ait görselleri listeleme                     |
+| `db:media:setStatus`        | invoke | Görsel durumunu güncelleme                             |
+| `db:media:setTime`          | invoke | Görselde harcanan süreyi kaydetme                      |
+| `db:annotations:saveExport` | invoke | Dışa aktarılmış JSON anotasyonu kaydetme               |
+| `db:annotations:getExport`  | invoke | Kaydedilmiş anotasyonu geri yükleme                    |
 
 ### SAM Model Kanalları (`samIpc.ts`)
-| Kanal | Yön | Açıklama |
-|---|---|---|
-| `sam:status` | invoke | Mevcut model durumunu sorgulama |
-| `sam:isInstalled` | invoke | Model dosyalarının indirilip indirilmediğini kontrol |
-| `sam:download` | invoke | SAM modelini Hugging Face'ten indirme |
-| `sam:ensureReady` | invoke | ONNX session'larını hazırlama |
-| `sam:run` | invoke | Verilen noktalarla SAM çıkarımı yapma |
-| `sam:download-progress` | send (event) | İndirme ilerlemesi bildirimi (encoder/decoder) |
+
+| Kanal                   | Yön          | Açıklama                                             |
+| ----------------------- | ------------ | ---------------------------------------------------- |
+| `sam:status`            | invoke       | Mevcut model durumunu sorgulama                      |
+| `sam:isInstalled`       | invoke       | Model dosyalarının indirilip indirilmediğini kontrol |
+| `sam:download`          | invoke       | SAM modelini Hugging Face'ten indirme                |
+| `sam:ensureReady`       | invoke       | ONNX session'larını hazırlama                        |
+| `sam:run`               | invoke       | Verilen noktalarla SAM çıkarımı yapma                |
+| `sam:download-progress` | send (event) | İndirme ilerlemesi bildirimi (encoder/decoder)       |
 
 ### Auth ve Cloud Kanalları (`authIpc.ts` / `cloudTasksIpc.ts`)
-| Kanal | Yön | Açıklama |
-|---|---|---|
-| `auth:login` | invoke | Bulut hesabına giriş yapar |
-| `auth:logout` | invoke | Bulut hesabından çıkış yapar |
-| `cloud:fetchContracts` | invoke | Kullanıcıya atanmış sözleşmeleri listeler |
-| `cloud:syncContractTasks` | invoke | Sözleşme görevlerini / görsellerini masaüstüne indirir |
-| `cloud:submitContract` | invoke | Görevleri API'ye teslim edildi (submit) olarak bildirir |
+
+| Kanal                     | Yön    | Açıklama                                                |
+| ------------------------- | ------ | ------------------------------------------------------- |
+| `auth:login`              | invoke | Bulut hesabına giriş yapar                              |
+| `auth:logout`             | invoke | Bulut hesabından çıkış yapar                            |
+| `cloud:fetchContracts`    | invoke | Kullanıcıya atanmış sözleşmeleri listeler               |
+| `cloud:syncContractTasks` | invoke | Sözleşme görevlerini / görsellerini masaüstüne indirir  |
+| `cloud:submitContract`    | invoke | Görevleri API'ye teslim edildi (submit) olarak bildirir |
 
 ### Pencere ve Sistem Kanalları
-| Kanal | Yön | Açıklama |
-|---|---|---|
-| `window:minimize` | invoke | Pencereyi küçültme |
-| `window:toggleMaximize` | invoke | Pencereyi büyütme/küçültme |
-| `window:close` | invoke | Pencereyi kapatma |
-| `dataset:pickFolder` | invoke | Klasör seçme diyalogu açma + görselleri filtreleme |
+
+| Kanal                   | Yön    | Açıklama                                           |
+| ----------------------- | ------ | -------------------------------------------------- |
+| `window:minimize`       | invoke | Pencereyi küçültme                                 |
+| `window:toggleMaximize` | invoke | Pencereyi büyütme/küçültme                         |
+| `window:close`          | invoke | Pencereyi kapatma                                  |
+| `dataset:pickFolder`    | invoke | Klasör seçme diyalogu açma + görselleri filtreleme |
 
 ---
 
 ## 🧩 Composable Mimarisi
 
-| Composable | Sorumluluk |
-|---|---|
-| `useAuth` | Kullanıcı oturum yönetimi (login, logout, hata durumları) |
-| `useCloud` | Cloud sözleşme verilerini çekme, indirme görevleri ve sync durumu |
-| `useLabelerState` | Merkezi reaktif durum: anotasyonlar, seçim, çizim bayrakları, araç/etiket bilgisi, zoom/pan parametreleri |
-| `useHistory` | JSON snapshot ile undo/redo geçmişi yönetimi |
-| `useCanvasTransform` | Zoom (min 0.6x – max 10x), pan, fit-to-screen hesaplamaları |
-| `useCanvasInteractions` | Mouse event handler'ları: çizim başlatma/bitirme, pan, contexmenu, wheel zoom |
-| `useAnnotationsRenderer` | SVG şekil render, dışa aktarım (image-space), anotasyon seçimi ve silme |
-| `useKeyboardShortcuts` | `Ctrl+Z/Y`, `Ctrl+S`, `Del`, `Enter`, `Escape`, `←/→` ok tuşları |
-| `useTasks` | Task listesi yönetimi, veritabanı senkronizasyonu (`initFromDb`), task arası navigasyon |
-| `useLabelerActions` | Kullanıcı aksiyonları: undo, redo, delete, draft kaydetme, toplu submit |
-| `useTheme` | Light/dark tema: OS algılama, localStorage kalıcılığı, CSS class toggle |
+| Composable               | Sorumluluk                                                                                                |
+| ------------------------ | --------------------------------------------------------------------------------------------------------- |
+| `useAuth`                | Kullanıcı oturum yönetimi (login, logout, hata durumları)                                                 |
+| `useCloud`               | Cloud sözleşme verilerini çekme, indirme görevleri ve sync durumu                                         |
+| `useLabelerState`        | Merkezi reaktif durum: anotasyonlar, seçim, çizim bayrakları, araç/etiket bilgisi, zoom/pan parametreleri |
+| `useHistory`             | JSON snapshot ile undo/redo geçmişi yönetimi                                                              |
+| `useCanvasTransform`     | Zoom (min 0.6x – max 10x), pan, fit-to-screen hesaplamaları                                               |
+| `useCanvasInteractions`  | Mouse event handler'ları: çizim başlatma/bitirme, pan, contexmenu, wheel zoom                             |
+| `useAnnotationsRenderer` | SVG şekil render, dışa aktarım (image-space), anotasyon seçimi ve silme                                   |
+| `useKeyboardShortcuts`   | `Ctrl+Z/Y`, `Ctrl+S`, `Del`, `Enter`, `Escape`, `←/→` ok tuşları                                          |
+| `useTasks`               | Task listesi yönetimi, veritabanı senkronizasyonu (`initFromDb`), task arası navigasyon                   |
+| `useLabelerActions`      | Kullanıcı aksiyonları: undo, redo, delete, draft kaydetme, toplu submit                                   |
+| `useTheme`               | Light/dark tema: OS algılama, localStorage kalıcılığı, CSS class toggle                                   |
 
 ---
 
 ## ⌨️ Klavye Kısayolları
 
-| Kısayol | İşlem |
-|---|---|
-| `Ctrl + Z` | Geri al (Undo) |
-| `Ctrl + Y` / `Ctrl + Shift + Z` | Yinele (Redo) |
-| `Ctrl + S` | Taslağı kaydet (Save Draft) |
-| `Delete` / `Backspace` | Seçili anotasyonu sil |
-| `Enter` | Polygon/polyline çizimini tamamla veya düzenlemeyi onayla |
-| `Escape` | Çizimi iptal et / seçimi temizle / pan moduna geç |
-| `←` (Sol Ok) | Önceki göreve geç |
-| `→` (Sağ Ok) | Sonraki göreve geç |
-| `Ctrl + Scroll` | Fare pozisyonuna göre zoom in/out |
-| `Sağ Tık + Sürükle` | Görseli kaydırma (Pan) |
+| Kısayol                         | İşlem                                                     |
+| ------------------------------- | --------------------------------------------------------- |
+| `Ctrl + Z`                      | Geri al (Undo)                                            |
+| `Ctrl + Y` / `Ctrl + Shift + Z` | Yinele (Redo)                                             |
+| `Ctrl + S`                      | Taslağı kaydet (Save Draft)                               |
+| `Delete` / `Backspace`          | Seçili anotasyonu sil                                     |
+| `Enter`                         | Polygon/polyline çizimini tamamla veya düzenlemeyi onayla |
+| `Escape`                        | Çizimi iptal et / seçimi temizle / pan moduna geç         |
+| `←` (Sol Ok)                    | Önceki göreve geç                                         |
+| `→` (Sağ Ok)                    | Sonraki göreve geç                                        |
+| `Ctrl + Scroll`                 | Fare pozisyonuna göre zoom in/out                         |
+| `Sağ Tık + Sürükle`             | Görseli kaydırma (Pan)                                    |
 
 ---
 
@@ -402,14 +410,14 @@ Bu komut electron-vite dev sunucusunu başlatır ve uygulamayı HMR (Hot Module 
 
 ### Diğer Scriptler
 
-| Script | Açıklama |
-|---|---|
-| `npm run dev` | Geliştirme modu (HMR) |
-| `npm start` | Üretim build'ini önizleme |
-| `npm run build` | TypeScript kontrol + üretim build |
-| `npm run typecheck` | Sadece TypeScript tip kontrolü |
-| `npm run lint` | ESLint ile kod analizi |
-| `npm run format` | Prettier ile kod biçimlendirme |
+| Script              | Açıklama                          |
+| ------------------- | --------------------------------- |
+| `npm run dev`       | Geliştirme modu (HMR)             |
+| `npm start`         | Üretim build'ini önizleme         |
+| `npm run build`     | TypeScript kontrol + üretim build |
+| `npm run typecheck` | Sadece TypeScript tip kontrolü    |
+| `npm run lint`      | ESLint ile kod analizi            |
+| `npm run format`    | Prettier ile kod biçimlendirme    |
 
 ---
 
@@ -433,12 +441,14 @@ Derleme çıktısı `out/` dizinindeki üretim build dosyalarını kullanarak `e
 ## 📖 Kullanım Rehberi
 
 ### 1. Dataset İçe Aktarma
+
 - Uygulama açıldığında **Dataset Selection** ekranı görünür.
 - **Import Dataset** butonuna tıklayarak görsellerin bulunduğu klasörü seçin.
 - Desteklenen formatlar: JPG, JPEG, PNG, BMP, WebP.
 - Klasördeki tüm görseller otomatik olarak task listesine eklenir.
 
 ### 2. Etiketleme Araçlarını Kullanma
+
 1. Sol paneldeki **Labels** bölümünden bir etiket seçin (ör. "Göz", "Kulak").
 2. Toolbar'dan bir araç seçin:
    - **Select**: Mevcut anotasyonları seçmek ve düzenlemek için.
@@ -447,6 +457,7 @@ Derleme çıktısı `out/` dizinindeki üretim build dosyalarını kullanarak `e
 3. Canvas üzerine çizim yapın.
 
 ### 3. Anotasyon Düzenleme
+
 - **Seçme**: Select modunda bir anotasyona tıklayın.
 - **Taşıma**: Seçili anotasyonu sürükleyip bırakın.
 - **Boyutlandırma**: BBox köşelerini veya daire yarıçapını sürükleyin.
@@ -454,6 +465,7 @@ Derleme çıktısı `out/` dizinindeki üretim build dosyalarını kullanarak `e
 - **Silme**: Seçili anotasyonu `Delete` tuşu veya toolbar'daki silme butonu ile silin.
 
 ### 4. SAM ile Otomatik Segmentasyon
+
 1. Toolbar'dan **SAM** aracını seçin.
 2. İlk kullanımda model otomatik indirilir (~120 MB).
 3. Etiketlemek istediğiniz nesneye tıklayın.
@@ -461,6 +473,7 @@ Derleme çıktısı `out/` dizinindeki üretim build dosyalarını kullanarak `e
 5. Oluşan polygon üzerine uzun basarak düzenleyebilirsiniz.
 
 ### 5. Kaydetme ve Gönderme
+
 - **Ctrl+S** veya **Save Draft**: Mevcut çalışmayı veritabanına kaydeder.
 - **Submit Work**: Tüm görevleri "completed" olarak işaretler (tüm görevlerin incelenmiş olması gerekir).
 - Uygulama her 1 dakikada bir otomatik kaydetme yapar.

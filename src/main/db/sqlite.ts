@@ -111,6 +111,8 @@ function migrateDatasets(): void {
 function migrateAnnotations(): void {
   const db = getDb()
   if (!hasColumn('annotations', 'sync_status')) {
-    db.exec(`ALTER TABLE annotations ADD COLUMN sync_status TEXT NOT NULL DEFAULT 'pending_insert';`)
+    db.exec(
+      `ALTER TABLE annotations ADD COLUMN sync_status TEXT NOT NULL DEFAULT 'pending_insert';`
+    )
   }
 }

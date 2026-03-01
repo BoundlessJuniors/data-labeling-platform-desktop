@@ -158,7 +158,7 @@ html.dark .tasks-scroll::-webkit-scrollbar-thumb {
 @keyframes savePulse {
   0% {
     transform: scale(1);
-    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.0);
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0);
   }
   40% {
     transform: scale(1.05);
@@ -166,7 +166,7 @@ html.dark .tasks-scroll::-webkit-scrollbar-thumb {
   }
   100% {
     transform: scale(1);
-    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.0);
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0);
   }
 }
 
@@ -220,8 +220,8 @@ html.dark .tasks-scroll::-webkit-scrollbar-thumb {
   white-space: nowrap;
   box-shadow: 0 16px 32px rgba(15, 23, 42, 0.22);
   /* Zıplamayı engelleyen anahtar özellikler */
-  min-width: 40px; 
-  max-width: 220px; 
+  min-width: 40px;
+  max-width: 220px;
 }
 
 /* İkon Kutusu */
@@ -260,30 +260,79 @@ html.dark .tasks-scroll::-webkit-scrollbar-thumb {
 
 /* 1. Pill Daralma ve Genişleme (Zıplama yapmaz) */
 @keyframes pillShrink {
-  0% { transform: scale(0.8); opacity: 0; max-width: 40px; }
-  15% { transform: scale(1); opacity: 1; max-width: 220px; }
-  70% { max-width: 220px; }
-  85% { max-width: 40px; transform: scale(1); } /* Yazıyı yuttuğu an */
-  95% { transform: scale(0.9); opacity: 1; }
-  100% { transform: scale(0.8); opacity: 0; max-width: 40px; }
+  0% {
+    transform: scale(0.8);
+    opacity: 0;
+    max-width: 40px;
+  }
+  15% {
+    transform: scale(1);
+    opacity: 1;
+    max-width: 220px;
+  }
+  70% {
+    max-width: 220px;
+  }
+  85% {
+    max-width: 40px;
+    transform: scale(1);
+  } /* Yazıyı yuttuğu an */
+  95% {
+    transform: scale(0.9);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.8);
+    opacity: 0;
+    max-width: 40px;
+  }
 }
 
 /* 2. Yazının İçeri Kayma Efekti */
 @keyframes textSwallow {
-  0% { opacity: 0; transform: translateX(10px); }
-  20% { opacity: 1; transform: translateX(0); }
-  70% { opacity: 1; transform: translateX(0); }
-  85% { opacity: 0; transform: translateX(-40px); } /* Sola, ikonun kalbine doğru */
-  100% { opacity: 0; transform: translateX(-40px); }
+  0% {
+    opacity: 0;
+    transform: translateX(10px);
+  }
+  20% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  70% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  85% {
+    opacity: 0;
+    transform: translateX(-40px);
+  } /* Sola, ikonun kalbine doğru */
+  100% {
+    opacity: 0;
+    transform: translateX(-40px);
+  }
 }
 
 /* 3. İkonun Patlama/Onay Efekti */
 @keyframes iconPulse {
-  0% { transform: scale(0.5); }
-  20% { transform: scale(1); }
-  75% { transform: scale(1); background: #22c55e; box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
-  85% { transform: scale(1.25); background: #2edb6d; box-shadow: 0 0 0 15px rgba(34, 197, 94, 0); }
-  95% { transform: scale(1); }
+  0% {
+    transform: scale(0.5);
+  }
+  20% {
+    transform: scale(1);
+  }
+  75% {
+    transform: scale(1);
+    background: #22c55e;
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0);
+  }
+  85% {
+    transform: scale(1.25);
+    background: #2edb6d;
+    box-shadow: 0 0 0 15px rgba(34, 197, 94, 0);
+  }
+  95% {
+    transform: scale(1);
+  }
 }
 
 /* Tetikleyiciler */

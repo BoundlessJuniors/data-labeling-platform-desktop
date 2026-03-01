@@ -66,13 +66,12 @@ const samPath = ref<{ x: number; y: number }[]>([])
 
 const imageObj = ref<HTMLImageElement | null>(null)
 
-
 const hoverCursor = ref<string | null>(null)
 
 const stageStyle = computed<Record<string, string>>(() => {
   // SAM mode should always show crosshair
   if (props.activeTool === 'sam') return { cursor: 'crosshair' }
-  
+
   if (hoverCursor.value) return { cursor: hoverCursor.value }
   if (isPanning.value) return { cursor: 'grabbing' }
   if (props.activeTool === 'select') return { cursor: 'grab' }
@@ -677,56 +676,62 @@ const handleMouseUp = (e: KonvaEventObject<MouseEvent>): void => {
     isSamDrawing.value = false
     const path = samPath.value
     samPath.value = [] // Clear immediately for visual, process path below
-    
+
     if (path.length > 0) {
-        const first = path[0]
-        const last = path[path.length - 1]
-        
-        let totalDist = 0
-        for(let i=1; i<path.length; i++) {
-            totalDist += Math.hypot(path[i].x - path[i-1].x, path[i].y - path[i-1].y)
-        }
-        
-        const CLICK_THRESHOLD = 5
-        const LOOP_THRESHOLD = 30 
-        
-        if (totalDist < CLICK_THRESHOLD) {
-            emit('sam-click', { imgX: first.x, imgY: first.y })
+      const first = path[0]
+      const last = path[path.length - 1]
+
+      let totalDist = 0
+      for (let i = 1; i < path.length; i++) {
+        totalDist += Math.hypot(path[i].x - path[i - 1].x, path[i].y - path[i - 1].y)
+      }
+
+      const CLICK_THRESHOLD = 5
+      const LOOP_THRESHOLD = 30
+
+      if (totalDist < CLICK_THRESHOLD) {
+        emit('sam-click', { imgX: first.x, imgY: first.y })
+      } else {
+        // Check if Closed Loop (Encircle) -> Box
+        const distStartEnd = Math.hypot(first.x - last.x, first.y - last.y)
+
+        if (distStartEnd < LOOP_THRESHOLD && totalDist > 50) {
+          // Encircle -> Box Prompt
+          let minX = Infinity,
+            minY = Infinity,
+            maxX = -Infinity,
+            maxY = -Infinity
+          for (const p of path) {
+            if (p.x < minX) minX = p.x
+            if (p.y < minY) minY = p.y
+            if (p.x > maxX) maxX = p.x
+            if (p.y > maxY) maxY = p.y
+          }
+          const points = [
+            { x: minX, y: minY },
+            { x: maxX, y: maxY }
+          ]
+          const labels = [2, 3]
+          emit('sam-draw', { points, labels })
         } else {
-            // Check if Closed Loop (Encircle) -> Box
-            const distStartEnd = Math.hypot(first.x - last.x, first.y - last.y)
-            
-            if (distStartEnd < LOOP_THRESHOLD && totalDist > 50) {
-               // Encircle -> Box Prompt
-               let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
-               for(const p of path) {
-                   if (p.x < minX) minX = p.x
-                   if (p.y < minY) minY = p.y
-                   if (p.x > maxX) maxX = p.x
-                   if (p.y > maxY) maxY = p.y
-               }
-               const points = [{x: minX, y: minY}, {x: maxX, y: maxY}]
-               const labels = [2, 3]
-               emit('sam-draw', { points, labels })
-            } else {
-               // Open Line -> Scribble -> Points Prompt
-               const newPoints: {x: number, y: number}[] = [first]
-               let lastAdded = first
-               
-               for(let i=1; i<path.length; i++) {
-                   const p = path[i]
-                   const d = Math.hypot(p.x - lastAdded.x, p.y - lastAdded.y)
-                   if (d > 20) {
-                       newPoints.push(p)
-                       lastAdded = p
-                   }
-               }
-               if (lastAdded !== last) newPoints.push(last)
-               
-               const labels = newPoints.map(() => 1) // Foreground
-               emit('sam-draw', { points: newPoints, labels })
+          // Open Line -> Scribble -> Points Prompt
+          const newPoints: { x: number; y: number }[] = [first]
+          let lastAdded = first
+
+          for (let i = 1; i < path.length; i++) {
+            const p = path[i]
+            const d = Math.hypot(p.x - lastAdded.x, p.y - lastAdded.y)
+            if (d > 20) {
+              newPoints.push(p)
+              lastAdded = p
             }
+          }
+          if (lastAdded !== last) newPoints.push(last)
+
+          const labels = newPoints.map(() => 1) // Foreground
+          emit('sam-draw', { points: newPoints, labels })
         }
+      }
     }
   }
 

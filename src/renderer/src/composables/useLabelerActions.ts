@@ -52,7 +52,9 @@ export function useLabelerActions(opts: UseLabelerActionsOptions): UseLabelerAct
       await window.api.db.annotations.saveExport({ media_id: mediaId, data_json: dataJson })
 
       console.log('--- ANNOTATION DATA (IMAGE SPACE JSON) ---\n', dataJson)
-      alert('Draft saved: Annotation data has been written to the database and logged to the console (F12).')
+      alert(
+        'Draft saved: Annotation data has been written to the database and logged to the console (F12).'
+      )
     })()
   }
 

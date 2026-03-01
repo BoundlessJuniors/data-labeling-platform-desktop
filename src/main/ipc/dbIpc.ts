@@ -105,19 +105,16 @@ export function registerDbIpc(): void {
       .all(datasetId)
   })
 
-  ipcMain.handle(
-    'db:media:setTime',
-    (_evt, payload: { media_id: string; seconds: number }) => {
-      const db = getDb()
-      const now = Date.now()
-      db.prepare(`UPDATE media_items SET annotation_seconds=?, updated_at=? WHERE id=?`).run(
-        payload.seconds,
-        now,
-        payload.media_id
-      )
-      return { ok: true }
-    }
-  )
+  ipcMain.handle('db:media:setTime', (_evt, payload: { media_id: string; seconds: number }) => {
+    const db = getDb()
+    const now = Date.now()
+    db.prepare(`UPDATE media_items SET annotation_seconds=?, updated_at=? WHERE id=?`).run(
+      payload.seconds,
+      now,
+      payload.media_id
+    )
+    return { ok: true }
+  })
 
   ipcMain.handle('db:datasets:list', () => {
     const db = getDb()
