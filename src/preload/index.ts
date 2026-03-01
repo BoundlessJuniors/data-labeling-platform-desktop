@@ -36,20 +36,30 @@ const api = {
   },
   sam: {
     status: () => ipcRenderer.invoke('sam:status'),
-    isInstalled: () => ipcRenderer.invoke('sam:isInstalled'),
-    download: () => ipcRenderer.invoke('sam:download'),
+    isInstalled: (modelId?: string) => ipcRenderer.invoke('sam:isInstalled', modelId),
+    download: (modelId: string) => ipcRenderer.invoke('sam:download', modelId),
+    pauseDownload: (modelId: string) => ipcRenderer.invoke('sam:pauseDownload', modelId),
+    cancelDownload: (modelId: string) => ipcRenderer.invoke('sam:cancelDownload', modelId),
+    setModel: (modelId: string) => ipcRenderer.invoke('sam:setModel', modelId),
+    getModels: () => ipcRenderer.invoke('sam:getModels'),
     ensureReady: () => ipcRenderer.invoke('sam:ensureReady'),
     run: (payload: { imagePath: string; points: { x: number; y: number }[] }) =>
       ipcRenderer.invoke('sam:run', payload),
     onDownloadProgress: (
       handler: (payload: {
+        modelId?: string
         stage: 'encoder' | 'decoder'
         loaded: number
         total: number | null
       }) => void
     ): (() => void) => {
       const listener = (_event: unknown, payload: unknown): void => {
-        handler(payload as { stage: 'encoder' | 'decoder'; loaded: number; total: number | null })
+        handler(payload as {
+          modelId?: string
+          stage: 'encoder' | 'decoder'
+          loaded: number
+          total: number | null
+        })
       }
       ipcRenderer.on('sam:download-progress', listener)
       return () => {

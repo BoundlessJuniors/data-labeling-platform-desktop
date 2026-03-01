@@ -36,6 +36,7 @@ const emit = defineEmits([
   'pointer-move',
   'pointer-leave',
   'sam-click',
+  'sam-draw',
   'edit-request',
   'update-annotation-state',
   'annotation-transform-end'
@@ -59,11 +60,19 @@ const polyPoints = ref<{ x: number; y: number }[]>([])
 const tempPolyPoint = ref<{ x: number; y: number } | null>(null)
 const tempCircle = ref<{ cx: number; cy: number; r: number } | null>(null)
 
+// SAM Drawing State
+const isSamDrawing = ref(false)
+const samPath = ref<{ x: number; y: number }[]>([])
+
 const imageObj = ref<HTMLImageElement | null>(null)
+
 
 const hoverCursor = ref<string | null>(null)
 
-const containerStyle = computed(() => {
+const stageStyle = computed<Record<string, string>>(() => {
+  // SAM mode should always show crosshair
+  if (props.activeTool === 'sam') return { cursor: 'crosshair' }
+  
   if (hoverCursor.value) return { cursor: hoverCursor.value }
   if (isPanning.value) return { cursor: 'grabbing' }
   if (props.activeTool === 'select') return { cursor: 'grab' }
@@ -403,7 +412,9 @@ const handleMouseDown = (e: KonvaEventObject<MouseEvent>): void => {
 
     const imgPoint = getImagePoint(stage)
     if (imgPoint) {
-      emit('sam-click', { imgX: imgPoint.x, imgY: imgPoint.y })
+      // START SAM DRAWING
+      isSamDrawing.value = true
+      samPath.value = [{ x: imgPoint.x, y: imgPoint.y }]
     }
     return
   }
@@ -493,6 +504,15 @@ const handleMouseMove = (e: KonvaEventObject<MouseEvent>): void => {
     stageX.value = pointer.x - panStart.value.x
     stageY.value = pointer.y - panStart.value.y
     clampStagePosition()
+    return
+  }
+
+  // SAM Drawing Update
+  if (props.activeTool === 'sam' && isSamDrawing.value) {
+    const imgPoint = getClampedImagePoint(stage)
+    if (imgPoint) {
+      samPath.value.push(imgPoint)
+    }
     return
   }
 
@@ -651,6 +671,64 @@ const finishDrawing = (): void => {
 
 const handleMouseUp = (e: KonvaEventObject<MouseEvent>): void => {
   const evt: MouseEvent | undefined = e.evt
+
+  // SAM Drawing Finish
+  if (props.activeTool === 'sam' && isSamDrawing.value) {
+    isSamDrawing.value = false
+    const path = samPath.value
+    samPath.value = [] // Clear immediately for visual, process path below
+    
+    if (path.length > 0) {
+        const first = path[0]
+        const last = path[path.length - 1]
+        
+        let totalDist = 0
+        for(let i=1; i<path.length; i++) {
+            totalDist += Math.hypot(path[i].x - path[i-1].x, path[i].y - path[i-1].y)
+        }
+        
+        const CLICK_THRESHOLD = 5
+        const LOOP_THRESHOLD = 30 
+        
+        if (totalDist < CLICK_THRESHOLD) {
+            emit('sam-click', { imgX: first.x, imgY: first.y })
+        } else {
+            // Check if Closed Loop (Encircle) -> Box
+            const distStartEnd = Math.hypot(first.x - last.x, first.y - last.y)
+            
+            if (distStartEnd < LOOP_THRESHOLD && totalDist > 50) {
+               // Encircle -> Box Prompt
+               let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+               for(const p of path) {
+                   if (p.x < minX) minX = p.x
+                   if (p.y < minY) minY = p.y
+                   if (p.x > maxX) maxX = p.x
+                   if (p.y > maxY) maxY = p.y
+               }
+               const points = [{x: minX, y: minY}, {x: maxX, y: maxY}]
+               const labels = [2, 3]
+               emit('sam-draw', { points, labels })
+            } else {
+               // Open Line -> Scribble -> Points Prompt
+               const newPoints: {x: number, y: number}[] = [first]
+               let lastAdded = first
+               
+               for(let i=1; i<path.length; i++) {
+                   const p = path[i]
+                   const d = Math.hypot(p.x - lastAdded.x, p.y - lastAdded.y)
+                   if (d > 20) {
+                       newPoints.push(p)
+                       lastAdded = p
+                   }
+               }
+               if (lastAdded !== last) newPoints.push(last)
+               
+               const labels = newPoints.map(() => 1) // Foreground
+               emit('sam-draw', { points: newPoints, labels })
+            }
+        }
+    }
+  }
 
   // BBox için sadece sol mouse'u bıraktığımızda çizimi bitiriyoruz.
   if (isDrawing.value && drawingShape.value === 'bbox' && evt?.button === 0) {
@@ -1044,7 +1122,7 @@ watch(
 </script>
 
 <template>
-  <div ref="containerRef" class="w-full h-full" :style="containerStyle" @contextmenu.prevent>
+  <div ref="containerRef" class="w-full h-full" :style="stageStyle" @contextmenu.prevent>
     <v-stage
       v-if="stageWidth && stageHeight && imageConfig"
       :config="{
@@ -1125,6 +1203,18 @@ watch(
             strokeScaleEnabled: false,
             dash: [6, 4],
             fill: 'rgba(37,99,235,0.08)'
+          }"
+        />
+
+        <!-- SAM Drawing Path -->
+        <v-line
+          v-if="isSamDrawing && samPath.length > 0"
+          :points="samPath.flatMap((p) => [p.x, p.y])"
+          :config="{
+            stroke: '#ef4444',
+            strokeWidth: 2,
+            strokeScaleEnabled: false,
+            listening: false
           }"
         />
 
