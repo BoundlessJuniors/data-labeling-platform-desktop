@@ -6,11 +6,17 @@ const api = {
   db: {
     ping: () => ipcRenderer.invoke('db:ping'),
     datasets: {
-      create: (payload: { id: string; name: string; folder_path?: string | null }) =>
-        ipcRenderer.invoke('db:datasets:create', payload),
+      create: (payload: {
+        id: string
+        name: string
+        folder_path?: string | null
+        cloud_contract_id?: string
+      }) => ipcRenderer.invoke('db:datasets:create', payload),
       list: () => ipcRenderer.invoke('db:datasets:list'),
       getByFolder: (folderPath: string) =>
         ipcRenderer.invoke('db:datasets:getByFolder', folderPath),
+      getByContractId: (contractId: string) =>
+        ipcRenderer.invoke('db:datasets:getByContractId', contractId),
       delete: (datasetId: string) => ipcRenderer.invoke('db:datasets:delete', datasetId)
     },
     media: {
@@ -29,8 +35,14 @@ const api = {
         ipcRenderer.invoke('db:media:setTime', payload)
     },
     annotations: {
-      saveExport: (payload: { media_id: string; data_json: string }) =>
-        ipcRenderer.invoke('db:annotations:saveExport', payload),
+      saveExport: (payload: {
+        media_id: string
+        data_json: string
+        cloud_task_id?: string
+        contract_id?: string
+        payload_json?: string
+        payload_hash?: string
+      }) => ipcRenderer.invoke('db:annotations:saveExport', payload),
       getExport: (mediaId: string) => ipcRenderer.invoke('db:annotations:getExport', mediaId)
     }
   },
@@ -79,8 +91,9 @@ const api = {
   },
   cloud: {
     fetchContracts: () => ipcRenderer.invoke('cloud:fetchContracts'),
-    syncContractTasks: (contractId: string, datasetId: string) =>
-      ipcRenderer.invoke('cloud:syncContractTasks', contractId, datasetId),
+    downloadContractWork: (contractId: string, datasetId: string, amount: number) =>
+      ipcRenderer.invoke('cloud:downloadContractWork', contractId, datasetId, amount),
+    syncNow: () => ipcRenderer.invoke('cloud:syncNow'),
     submitContract: (contractId: string) => ipcRenderer.invoke('cloud:submitContract', contractId)
   },
   window: {

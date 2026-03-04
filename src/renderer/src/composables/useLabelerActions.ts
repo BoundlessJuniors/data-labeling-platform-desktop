@@ -26,6 +26,34 @@ export interface UseLabelerActionsReturn {
   onFitScreen: VoidFn
 }
 
+/**
+ * Compute SHA-256 hex hash of a string using Web Crypto API (renderer-safe).
+ */
+async function computeHashBrowser(text: string): Promise<string> {
+  const encoder = new TextEncoder()
+  const data = encoder.encode(text)
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data)
+  const hashArray = Array.from(new Uint8Array(hashBuffer))
+  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+/**
+ * Simple stable JSON stringify with sorted keys (renderer-side).
+ */
+function stableStringify(obj: unknown): string {
+  if (obj === null || obj === undefined) return JSON.stringify(obj)
+  if (typeof obj !== 'object') return JSON.stringify(obj)
+  if (Array.isArray(obj)) {
+    return '[' + obj.map((item) => stableStringify(item)).join(',') + ']'
+  }
+  const sorted = Object.keys(obj as Record<string, unknown>).sort()
+  const parts = sorted.map((key) => {
+    const val = (obj as Record<string, unknown>)[key]
+    return JSON.stringify(key) + ':' + stableStringify(val)
+  })
+  return '{' + parts.join(',') + '}'
+}
+
 export function useLabelerActions(opts: UseLabelerActionsOptions): UseLabelerActionsReturn {
   const onUndo = (): void => {
     opts.undo()
@@ -49,7 +77,28 @@ export function useLabelerActions(opts: UseLabelerActionsOptions): UseLabelerAct
       const exported = opts.exportAnnotationsToImageSpace()
       const dataJson = JSON.stringify(exported, null, 2)
 
-      await window.api.db.annotations.saveExport({ media_id: mediaId, data_json: dataJson })
+      // Build payload_json and payload_hash for cloud tasks
+      let payloadJson: string | undefined
+      let payloadHash: string | undefined
+
+      if (t.cloudTaskId) {
+        const payloadObj = {
+          type: 'export',
+          data: exported
+        }
+        payloadJson = JSON.stringify(payloadObj)
+        const canonical = stableStringify(payloadObj)
+        payloadHash = await computeHashBrowser(canonical)
+      }
+
+      await window.api.db.annotations.saveExport({
+        media_id: mediaId,
+        data_json: dataJson,
+        cloud_task_id: t.cloudTaskId,
+        contract_id: t.contractId,
+        payload_json: payloadJson,
+        payload_hash: payloadHash
+      })
 
       console.log('--- ANNOTATION DATA (IMAGE SPACE JSON) ---\n', dataJson)
       alert(
@@ -60,14 +109,12 @@ export function useLabelerActions(opts: UseLabelerActionsOptions): UseLabelerAct
 
   const onSubmit = (): void => {
     void (async () => {
-      // Önce tüm task'leri kontrol et: queued kalan var mı?
       const queued = opts.tasks.value.filter((t) => t.status === 'queued')
       if (queued.length > 0) {
         alert('You still have queued images. Please review all images before submitting.')
         return
       }
 
-      // Hiç queued kalmadıysa: tümünü tek seferde completed yap
       for (const t of opts.tasks.value) {
         const mediaId = t.mediaId ?? t.title ?? String(t.id)
         await window.api.db.media.setStatus({ media_id: mediaId, status: 'completed' })

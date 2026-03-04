@@ -6,12 +6,21 @@ export function registerDbIpc(): void {
 
   ipcMain.handle(
     'db:datasets:create',
-    (_evt, payload: { id: string; name: string; folder_path?: string | null }) => {
+    (
+      _evt,
+      payload: { id: string; name: string; folder_path?: string | null; cloud_contract_id?: string }
+    ) => {
       const db = getDb()
       const now = Date.now()
       db.prepare(
-        'INSERT OR IGNORE INTO datasets (id, name, folder_path, created_at) VALUES (?, ?, ?, ?)'
-      ).run(payload.id, payload.name, payload.folder_path ?? null, now)
+        'INSERT OR IGNORE INTO datasets (id, name, folder_path, cloud_contract_id, created_at) VALUES (?, ?, ?, ?, ?)'
+      ).run(
+        payload.id,
+        payload.name,
+        payload.folder_path ?? null,
+        payload.cloud_contract_id ?? null,
+        now
+      )
       return { ok: true }
     }
   )
@@ -22,6 +31,24 @@ export function registerDbIpc(): void {
       .prepare('SELECT id, name, created_at, folder_path FROM datasets WHERE folder_path=? LIMIT 1')
       .get(folderPath) as
       | { id: string; name: string; created_at: number; folder_path: string | null }
+      | undefined
+    return row ?? null
+  })
+
+  ipcMain.handle('db:datasets:getByContractId', (_evt, contractId: string) => {
+    const db = getDb()
+    const row = db
+      .prepare(
+        'SELECT id, name, created_at, folder_path, cloud_contract_id FROM datasets WHERE cloud_contract_id=? LIMIT 1'
+      )
+      .get(contractId) as
+      | {
+          id: string
+          name: string
+          created_at: number
+          folder_path: string | null
+          cloud_contract_id: string
+        }
       | undefined
     return row ?? null
   })
@@ -100,7 +127,7 @@ export function registerDbIpc(): void {
     const db = getDb()
     return db
       .prepare(
-        'SELECT id, dataset_id, local_path, width, height, status, annotation_seconds FROM media_items WHERE dataset_id=? ORDER BY created_at ASC'
+        'SELECT id, dataset_id, local_path, width, height, status, annotation_seconds, cloud_task_id, contract_id FROM media_items WHERE dataset_id=? ORDER BY created_at ASC'
       )
       .all(datasetId)
   })
@@ -126,19 +153,50 @@ export function registerDbIpc(): void {
   // Save / Load exported annotation JSON as a single blob per media
   ipcMain.handle(
     'db:annotations:saveExport',
-    (_evt, payload: { media_id: string; data_json: string }) => {
+    (
+      _evt,
+      payload: {
+        media_id: string
+        data_json: string
+        cloud_task_id?: string
+        contract_id?: string
+        payload_json?: string
+        payload_hash?: string
+      }
+    ) => {
       const db = getDb()
       const now = Date.now()
       const id = `export:${payload.media_id}`
       db.prepare(
         `
-        INSERT INTO annotations (id, media_id, type, category, data_json, updated_at)
-        VALUES (?, ?, 'export', NULL, ?, ?)
+        INSERT INTO annotations (id, media_id, type, category, data_json, updated_at,
+          cloud_task_id, contract_id, payload_json, payload_hash, sync_status)
+        VALUES (?, ?, 'export', NULL, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           data_json=excluded.data_json,
-          updated_at=excluded.updated_at
+          updated_at=excluded.updated_at,
+          cloud_task_id=excluded.cloud_task_id,
+          contract_id=excluded.contract_id,
+          payload_json=excluded.payload_json,
+          payload_hash=excluded.payload_hash,
+          sync_status=CASE
+            WHEN excluded.payload_hash != annotations.last_synced_hash
+                 OR annotations.last_synced_hash IS NULL
+            THEN 'pending_insert'
+            ELSE annotations.sync_status
+          END
       `
-      ).run(id, payload.media_id, payload.data_json, now)
+      ).run(
+        id,
+        payload.media_id,
+        payload.data_json,
+        now,
+        payload.cloud_task_id ?? null,
+        payload.contract_id ?? null,
+        payload.payload_json ?? null,
+        payload.payload_hash ?? null,
+        payload.cloud_task_id ? 'pending_insert' : 'synced'
+      )
       return { ok: true }
     }
   )

@@ -7,13 +7,22 @@ export interface CloudContract {
   id: string
   title: string
   status: string
+  listing?: { title: string }
   [key: string]: unknown
 }
 
-export interface SyncResult {
-  synced: number
+export interface DownloadResult {
+  leased: number
+  downloaded: number
   skipped: number
   failed: number
+}
+
+export interface SubmitResult {
+  ok: boolean
+  unsyncedCount?: number
+  failedCount?: number
+  error?: string
 }
 
 // -----------------------------------------------------------------------
@@ -21,7 +30,7 @@ export interface SyncResult {
 // -----------------------------------------------------------------------
 const contracts = ref<CloudContract[]>([])
 const isFetching = ref(false)
-const syncResult = ref<SyncResult | null>(null)
+const downloadResult = ref<DownloadResult | null>(null)
 const syncError = ref<string | null>(null)
 
 // -----------------------------------------------------------------------
@@ -30,14 +39,19 @@ const syncError = ref<string | null>(null)
 export function useCloud(): {
   contracts: ReturnType<typeof ref<CloudContract[]>>
   isFetching: ReturnType<typeof ref<boolean>>
-  syncResult: ReturnType<typeof ref<SyncResult | null>>
+  downloadResult: ReturnType<typeof ref<DownloadResult | null>>
   syncError: ReturnType<typeof ref<string | null>>
   fetchContracts: () => Promise<void>
-  downloadContractTasks: (contractId: string, datasetName: string) => Promise<SyncResult>
+  downloadContractWork: (
+    contractId: string,
+    datasetName: string,
+    amount?: number
+  ) => Promise<DownloadResult>
+  syncNow: () => Promise<void>
+  submitContract: (contractId: string) => Promise<SubmitResult>
 } {
   /**
    * Kullanıcıya atanmış sözleşmeleri Web API'den çeker.
-   * Veri Main Process üzerinden SQLite'a yazılmaz — sadece UI listesi için.
    */
   const fetchContracts = async (): Promise<void> => {
     isFetching.value = true
@@ -53,38 +67,38 @@ export function useCloud(): {
   }
 
   /**
-   * Seçili sözleşmenin görevlerini cihaza indirir.
-   *
-   * 1. Yerel SQLite'ta sözleşme için bir dataset kaydı oluşturur.
-   * 2. Oluşturulan dataset ID'si ile cloud:syncContractTasks IPC'ini tetikler.
-   * 3. Sonucu syncResult state'ine yazar.
-   *
-   * @param contractId Web API sözleşme kimliği
-   * @param datasetName Yerel dataset için gösterim adı
+   * Atomic lease-batch + download flow.
+   * 1. Check if dataset already exists for this contract (dedup).
+   * 2. Call cloud:downloadContractWork IPC.
    */
-  const downloadContractTasks = async (
+  const downloadContractWork = async (
     contractId: string,
-    datasetName: string
-  ): Promise<SyncResult> => {
+    datasetName: string,
+    amount: number = 20
+  ): Promise<DownloadResult> => {
     isFetching.value = true
     syncError.value = null
-    syncResult.value = null
+    downloadResult.value = null
 
     try {
-      // 1. Yerel dataset kaydı oluştur
-      //    cloud_contract_id, DB şemasında ilişkilendirme için saklanır.
-      //    id'yi burada üretiyoruz çünkü preload API payload olarak bekliyor.
-      const datasetId = crypto.randomUUID()
-      await window.api.db.datasets.create({
-        id: datasetId,
-        name: datasetName,
-        cloud_contract_id: contractId
-      })
+      // Dedup: check if dataset already exists for this contract
+      let datasetId: string
+      const existing = await window.api.db.datasets.getByContractId(contractId)
 
-      // 2. Görev görselleri indir ve media_items'a kaydet
-      const result = await window.api.cloud.syncContractTasks(contractId, datasetId)
+      if (existing) {
+        datasetId = existing.id
+      } else {
+        datasetId = crypto.randomUUID()
+        await window.api.db.datasets.create({
+          id: datasetId,
+          name: datasetName,
+          cloud_contract_id: contractId
+        })
+      }
 
-      syncResult.value = result
+      // Lease + download
+      const result = await window.api.cloud.downloadContractWork(contractId, datasetId, amount)
+      downloadResult.value = result
       return result
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Görevler indirilemedi.'
@@ -95,14 +109,41 @@ export function useCloud(): {
     }
   }
 
+  /**
+   * Manual sync trigger.
+   */
+  const syncNow = async (): Promise<void> => {
+    try {
+      await window.api.cloud.syncNow()
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Senkronizasyon başarısız.'
+      syncError.value = msg
+      throw err
+    }
+  }
+
+  /**
+   * Submit contract: sync first, then validate, then submit.
+   */
+  const submitContract = async (contractId: string): Promise<SubmitResult> => {
+    try {
+      const result = await window.api.cloud.submitContract(contractId)
+      return result as SubmitResult
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Sözleşme teslim edilemedi.'
+      syncError.value = msg
+      throw err
+    }
+  }
+
   return {
-    // State
     contracts,
     isFetching,
-    syncResult,
+    downloadResult,
     syncError,
-    // Actions
     fetchContracts,
-    downloadContractTasks
+    downloadContractWork,
+    syncNow,
+    submitContract
   }
 }

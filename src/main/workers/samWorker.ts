@@ -1,5 +1,4 @@
-import { parentPort, workerData } from 'worker_threads'
-import { join } from 'path'
+import { parentPort } from 'worker_threads'
 import Jimp from 'jimp'
 import * as Ort from 'onnxruntime-node'
 
@@ -13,11 +12,7 @@ interface WorkerConfig {
   threads?: number
 }
 
-interface ComputeRequest {
-  id: string
-  imagePath: string
-  modelId: SamModelId // verification
-}
+// ComputeRequest type handled implicitly via parentPort message shape
 
 // State
 let session: Ort.InferenceSession | null = null
@@ -30,7 +25,7 @@ function getResizeScale(width: number, height: number): number {
   return SAM_IMAGE_SIZE / longSide
 }
 
-async function loadSession(config: WorkerConfig) {
+async function loadSession(config: WorkerConfig): Promise<void> {
   try {
     if (session && currentModelId === config.modelId) {
       return // Already loaded
@@ -39,8 +34,10 @@ async function loadSession(config: WorkerConfig) {
     // Release old
     if (session) {
       try {
-        ;(session as any).release()
-      } catch (e) {}
+        ;(session as Ort.InferenceSession & { release?: () => void }).release?.()
+      } catch {
+        /* session release may fail silently */
+      }
       session = null
     }
 
@@ -56,7 +53,7 @@ async function loadSession(config: WorkerConfig) {
     // Using CPU for encoder in worker is "safe". Using GPU is "fast".
     // Let's try to just use default (likely CPU) first, or configurable.
 
-    const sessionOptions: any = {
+    const sessionOptions: Ort.InferenceSession.SessionOptions = {
       executionProviders: ['cpu'], // Safe default for background worker
       executionMode: 'sequential',
       enableCpuMemArena: true,
@@ -75,7 +72,7 @@ async function loadSession(config: WorkerConfig) {
   }
 }
 
-async function computeEmbedding(videoPath: string, reqId: string) {
+async function computeEmbedding(videoPath: string, reqId: string): Promise<void> {
   if (!session) {
     parentPort?.postMessage({ type: 'error', id: reqId, error: 'Session not initialized' })
     return
@@ -105,7 +102,7 @@ async function computeEmbedding(videoPath: string, reqId: string) {
     let idxB = 2 * SAM_IMAGE_SIZE * SAM_IMAGE_SIZE
 
     // This loop is what blocks the main thread!
-    canvas.scan(0, 0, SAM_IMAGE_SIZE, SAM_IMAGE_SIZE, (x, y, idx) => {
+    canvas.scan(0, 0, SAM_IMAGE_SIZE, SAM_IMAGE_SIZE, (_x, _y, idx) => {
       const r = canvas.bitmap.data[idx + 0]
       const g = canvas.bitmap.data[idx + 1]
       const b = canvas.bitmap.data[idx + 2]
@@ -134,7 +131,7 @@ async function computeEmbedding(videoPath: string, reqId: string) {
         origWidth,
         origHeight
       },
-      [(embedding.data as any).buffer]
+      [(embedding.data as Float32Array).buffer as unknown as ArrayBuffer]
     )
   } catch (e) {
     console.error(`[SAM-Worker] Error computing embedding`, e)

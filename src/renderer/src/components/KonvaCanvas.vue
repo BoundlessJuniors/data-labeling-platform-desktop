@@ -68,7 +68,7 @@ const imageObj = ref<HTMLImageElement | null>(null)
 
 const hoverCursor = ref<string | null>(null)
 
-const stageStyle = computed<Record<string, string>>(() => {
+const stageStyle = computed(() => {
   // SAM mode should always show crosshair
   if (props.activeTool === 'sam') return { cursor: 'crosshair' }
 
@@ -400,8 +400,10 @@ const handleMouseDown = (e: KonvaEventObject<MouseEvent>): void => {
     // SAM isteği üretmeyelim. Bu durumlarda ya seçim ya da uzun basma ile edit beklenir.
     const targetNode = e.target as unknown as Konva.Node | null
     const className =
-      targetNode && typeof (targetNode as any).getClassName === 'function'
-        ? (targetNode as any).getClassName()
+      targetNode &&
+      typeof (targetNode as Konva.Node & { getClassName?: () => string }).getClassName ===
+        'function'
+        ? (targetNode as Konva.Node & { getClassName: () => string }).getClassName()
         : ''
 
     if (className && className !== 'Image') {
@@ -1079,7 +1081,7 @@ defineExpose({
 })
 
 // Transformer Attachment Logic
-const transformerRef = ref<any>(null)
+const transformerRef = ref<{ getNode: () => Konva.Transformer } | null>(null)
 
 watch(
   () => props.editingId,
@@ -1276,16 +1278,16 @@ watch(
         <!-- Polygon düzenleme modu: vertex handle'ları (her zaman polygonların ÜSTÜNDE) -->
         <template v-if="activeEditingAnnotation?.type === 'polygon'">
           <v-circle
-            v-for="(p, idx) in activeEditingAnnotation.points"
-            :key="`edit-handle-${activeEditingAnnotation.id}-${idx}`"
+            v-for="(p, idx) in activeEditingAnnotation!.points"
+            :key="`edit-handle-${activeEditingAnnotation!.id}-${idx}`"
             :x="p.x"
             :y="p.y"
             fill="#ffffff"
             stroke="#ec4899"
             :stroke-width="1.5"
-            :strokeScaleEnabled="false"
+            :stroke-scale-enabled="false"
             :radius="5 / (stageScale || 1)"
-            @mousedown="(e) => handleVertexMouseDown(activeEditingAnnotation.id, idx, e)"
+            @mousedown="(e) => handleVertexMouseDown(activeEditingAnnotation!.id, idx, e)"
           />
         </template>
 
@@ -1315,16 +1317,16 @@ watch(
         <!-- Polyline edit handles -->
         <template v-if="activeEditingAnnotation?.type === 'polyline'">
           <v-circle
-            v-for="(p, idx) in activeEditingAnnotation.points"
-            :key="`edit-handle-line-${activeEditingAnnotation.id}-${idx}`"
+            v-for="(p, idx) in activeEditingAnnotation!.points"
+            :key="`edit-handle-line-${activeEditingAnnotation!.id}-${idx}`"
             :x="p.x"
             :y="p.y"
             fill="#ffffff"
             stroke="#ec4899"
             :stroke-width="1.5"
-            :strokeScaleEnabled="false"
+            :stroke-scale-enabled="false"
             :radius="5 / (stageScale || 1)"
-            @mousedown="(e) => handleVertexMouseDown(activeEditingAnnotation.id, idx, e)"
+            @mousedown="(e) => handleVertexMouseDown(activeEditingAnnotation!.id, idx, e)"
           />
         </template>
 
@@ -1386,16 +1388,16 @@ watch(
         <!-- Circle Radius Visual + Handle (Edit Mode) (Circle kendi radiusuyla render olduğu için extra circle gerek yok, sadece handle) -->
         <template v-if="activeEditingAnnotation?.type === 'circle'">
           <v-circle
-            :key="`circle-radius-handle-${activeEditingAnnotation.id}`"
-            :name="`circle-radius-handle-${activeEditingAnnotation.id}`"
-            :x="activeEditingAnnotation.cx + activeEditingAnnotation.r"
-            :y="activeEditingAnnotation.cy"
+            :key="`circle-radius-handle-${activeEditingAnnotation!.id}`"
+            :name="`circle-radius-handle-${activeEditingAnnotation!.id}`"
+            :x="activeEditingAnnotation!.cx + activeEditingAnnotation!.r"
+            :y="activeEditingAnnotation!.cy"
             :radius="6 / (stageScale || 1)"
             fill="#ffffff"
             stroke="#ec4899"
             :stroke-width="1.5"
-            :strokeScaleEnabled="false"
-            @mousedown="(e) => handleRadiusMouseDown(activeEditingAnnotation.id, e)"
+            :stroke-scale-enabled="false"
+            @mousedown="(e) => handleRadiusMouseDown(activeEditingAnnotation!.id, e)"
             @mouseenter="
               () => {
                 hoverCursor = 'ew-resize'

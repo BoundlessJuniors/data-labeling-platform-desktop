@@ -78,6 +78,13 @@
 - **Crosshair**: Fare pozisyonunu gösteren yatay ve dikey rehber çizgiler.
 - **Koordinat göstergesi**: Sol alt köşede gerçek zamanlı `X, Y` piksel koordinatları.
 
+### ☁️ Bulut Senkronizasyonu ve İş Akışı (Cloud Sync & Workflow)
+
+- **Sözleşme (Contract) Tabanlı Çalışma**: Buluttan size atanan sözleşmeleri görüntüleyip, ilgili görevleri (görselleri) yerel makinenize indirebilirsiniz.
+- **Kiralama (Lease) Mekanizması**: İndirilen görseller kiralama jetonu (lease token) ile korunur, böylece aynı görsel üzerinde başkasının da işlem yapması (race condition) önlenir.
+- **Akıllı Hata ve Senkronizasyon Yönetimi**: Arka planda çalışan Worker ile işlemler buluta senkronize edilir. HTTP hataları (403, 409 vb.) sınıflandırılarak kalıcı (non-retryable) veya geçici hatalara göre yönetilir.
+- **Payload Hash Optimizasyonu**: Anotasyon verilerinin SHA-256 hashleri oluşturularak aynı verinin buluta tekrar gönderilmesi (duplicate submission) engellenir.
+
 ### 📋 Görev Yönetimi (Task Management)
 
 - **Dataset tabanlı görev sistemi**: Bir klasörden içe aktarılan tüm görseller, otomatik olarak birer Task olarak oluşturulur.
@@ -262,12 +269,13 @@ Uygulama yerel bir SQLite veritabanı kullanır (`%APPDATA%/label_gun/db/app.sql
 
 ### `datasets` Tablosu
 
-| Sütun         | Tip           | Açıklama                     |
-| ------------- | ------------- | ---------------------------- |
-| `id`          | TEXT (PK)     | Dataset benzersiz kimliği    |
-| `name`        | TEXT          | Kullanıcıya görünen isim     |
-| `folder_path` | TEXT (UNIQUE) | Kaynak klasör yolu           |
-| `created_at`  | INTEGER       | Oluşturulma zamanı (Unix ms) |
+| Sütun                 | Tip           | Açıklama                           |
+| --------------------- | ------------- | ---------------------------------- |
+| `id`                  | TEXT (PK)     | Dataset benzersiz kimliği          |
+| `name`                | TEXT          | Kullanıcıya görünen isim           |
+| `folder_path`         | TEXT (UNIQUE) | Kaynak klasör yolu                 |
+| `cloud_contract_id`   | TEXT          | Senkronize edilen bulut sözleşmesi |
+| `created_at`          | INTEGER       | Oluşturulma zamanı (Unix ms)       |
 
 ### `media_items` Tablosu
 
@@ -281,19 +289,46 @@ Uygulama yerel bir SQLite veritabanı kullanır (`%APPDATA%/label_gun/db/app.sql
 | `height`             | INTEGER   | Görsel yüksekliği (px)                      |
 | `status`             | TEXT      | Durum: `in_progress` / `completed`          |
 | `annotation_seconds` | INTEGER   | Bu görselde harcanan toplam süre (saniye)   |
+| `cloud_task_id`      | TEXT      | Bulut görev kimliği (senkronizasyon için)   |
+| `cloud_asset_id`     | TEXT      | Bulut görsel varlığı kimliği                |
+| `contract_id`        | TEXT      | İlgili sözleşme ID                          |
+| `cloud_asset_url`    | TEXT      | Varlık indirilirken kullanılan URL          |
+| `sync_status`        | TEXT      | Senkronizasyon durumu                       |
+| `download_status`    | TEXT      | Görsel indirme durumu                       |
+| `last_error`         | TEXT      | Varsa son hata mesajı                       |
 | `created_at`         | INTEGER   | Oluşturulma zamanı (Unix ms)                |
 | `updated_at`         | INTEGER   | Son güncelleme zamanı (Unix ms)             |
 
 ### `annotations` Tablosu
 
-| Sütun        | Tip       | Açıklama                                               |
-| ------------ | --------- | ------------------------------------------------------ |
-| `id`         | TEXT (PK) | Anotasyon kimliği (dışa aktarımda `export:MEDIA_ID`)   |
-| `media_id`   | TEXT (FK) | Bağlı olduğu görsel                                    |
-| `type`       | TEXT      | Tip: `bbox`, `polygon`, `keypoint`, `circle`, `export` |
-| `category`   | TEXT      | Kategori/sınıf adı                                     |
-| `data_json`  | TEXT      | Anotasyon verisinin JSON formatı                       |
-| `updated_at` | INTEGER   | Son güncelleme zamanı (Unix ms)                        |
+| Sütun                | Tip       | Açıklama                                               |
+| -------------------- | --------- | ------------------------------------------------------ |
+| `id`                 | TEXT (PK) | Anotasyon kimliği (dışa aktarımda `export:MEDIA_ID`)   |
+| `media_id`           | TEXT (FK) | Bağlı olduğu görsel                                    |
+| `type`               | TEXT      | Tip: `bbox`, `polygon`, `keypoint`, `circle`, `export` |
+| `category`           | TEXT      | Kategori/sınıf adı                                     |
+| `data_json`          | TEXT      | Anotasyon verisinin JSON formatı                       |
+| `cloud_task_id`      | TEXT      | İlişkili bulut görevi ID                               |
+| `contract_id`        | TEXT      | İlişkili sözleşme ID                                   |
+| `payload_json`       | TEXT      | API'ye gönderilecek JSON yükü                          |
+| `payload_hash`       | TEXT      | Gönderilecek verinin SHA-256 hash özeti                |
+| `last_synced_hash`   | TEXT      | Başarıyla senkronize edilmiş son veri hash'i           |
+| `sync_status`        | TEXT      | Senkronizasyon durumu (pending_insert vb.)             |
+| `attempt_count`      | INTEGER   | Hata sonrası yeniden deneme sayısı                     |
+| `last_error`         | TEXT      | Senkronizasyon hatası sınıflandırması                  |
+| `updated_at`         | INTEGER   | Son güncelleme zamanı (Unix ms)                        |
+
+### `task_leases` Tablosu
+Cloud sync işlemleri sırasında görevleri diğer labeler'lara karşı kilitlemek (race condition önlemek) için kullanılır.
+
+| Sütun          | Tip       | Açıklama                                       |
+| -------------- | --------- | ---------------------------------------------- |
+| `task_id`      | TEXT (PK) | Görev ID'si                                    |
+| `contract_id`  | TEXT      | Sözleşme ID'si                                 |
+| `lease_token`  | TEXT      | Sunucudaki kilit için atanan güvenlik jetonu   |
+| `leased_until` | INTEGER   | Kiralama süresi bitişi                         |
+| `created_at`   | INTEGER   | Oluşturulma tarihi                             |
+| `updated_at`   | INTEGER   | Güncelleme tarihi                              |
 
 ---
 
@@ -328,13 +363,14 @@ Uygulama yerel bir SQLite veritabanı kullanır (`%APPDATA%/label_gun/db/app.sql
 
 ### Auth ve Cloud Kanalları (`authIpc.ts` / `cloudTasksIpc.ts`)
 
-| Kanal                     | Yön    | Açıklama                                                |
-| ------------------------- | ------ | ------------------------------------------------------- |
-| `auth:login`              | invoke | Bulut hesabına giriş yapar                              |
-| `auth:logout`             | invoke | Bulut hesabından çıkış yapar                            |
-| `cloud:fetchContracts`    | invoke | Kullanıcıya atanmış sözleşmeleri listeler               |
-| `cloud:syncContractTasks` | invoke | Sözleşme görevlerini / görsellerini masaüstüne indirir  |
-| `cloud:submitContract`    | invoke | Görevleri API'ye teslim edildi (submit) olarak bildirir |
+| Kanal                        | Yön    | Açıklama                                                  |
+| ---------------------------- | ------ | --------------------------------------------------------- |
+| `auth:login`                 | invoke | Bulut hesabına giriş yapar                                |
+| `auth:logout`                | invoke | Bulut hesabından çıkış yapar                              |
+| `cloud:fetchContracts`       | invoke | Kullanıcıya atanmış sözleşmeleri listeler                 |
+| `cloud:downloadContractWork` | invoke | Kiralama (lease-batch) ve asset indirme akışını yürütür   |
+| `cloud:syncNow`              | invoke | Arka planda bekleyen anotasyonları anında senkronize eder |
+| `cloud:submitContract`       | invoke | Görevleri API'ye teslim edildi (submit) olarak bildirir   |
 
 ### Pencere ve Sistem Kanalları
 
@@ -352,7 +388,7 @@ Uygulama yerel bir SQLite veritabanı kullanır (`%APPDATA%/label_gun/db/app.sql
 | Composable               | Sorumluluk                                                                                                |
 | ------------------------ | --------------------------------------------------------------------------------------------------------- |
 | `useAuth`                | Kullanıcı oturum yönetimi (login, logout, hata durumları)                                                 |
-| `useCloud`               | Cloud sözleşme verilerini çekme, indirme görevleri ve sync durumu                                         |
+| `useCloud`               | Cloud sözleşme verilerini çekme, indirme (lease-batch), submit işlemleri ve sync durumu                   |
 | `useLabelerState`        | Merkezi reaktif durum: anotasyonlar, seçim, çizim bayrakları, araç/etiket bilgisi, zoom/pan parametreleri |
 | `useHistory`             | JSON snapshot ile undo/redo geçmişi yönetimi                                                              |
 | `useCanvasTransform`     | Zoom (min 0.6x – max 10x), pan, fit-to-screen hesaplamaları                                               |
@@ -360,7 +396,7 @@ Uygulama yerel bir SQLite veritabanı kullanır (`%APPDATA%/label_gun/db/app.sql
 | `useAnnotationsRenderer` | SVG şekil render, dışa aktarım (image-space), anotasyon seçimi ve silme                                   |
 | `useKeyboardShortcuts`   | `Ctrl+Z/Y`, `Ctrl+S`, `Del`, `Enter`, `Escape`, `←/→` ok tuşları                                          |
 | `useTasks`               | Task listesi yönetimi, veritabanı senkronizasyonu (`initFromDb`), task arası navigasyon                   |
-| `useLabelerActions`      | Kullanıcı aksiyonları: undo, redo, delete, draft kaydetme, toplu submit                                   |
+| `useLabelerActions`      | Kullanıcı aksiyonları: undo, redo, delete, draft kaydetme (deterministik payload ve hash), toplu submit   |
 | `useTheme`               | Light/dark tema: OS algılama, localStorage kalıcılığı, CSS class toggle                                   |
 
 ---

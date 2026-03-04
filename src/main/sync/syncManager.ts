@@ -7,40 +7,70 @@ import { apiClient } from '../api/apiClient'
 const SYNC_INTERVAL_MS = 30_000 // 30 saniye
 
 // -----------------------------------------------------------------------
-// Tip tanımı — SQLite JOIN sorgusunun döndürdüğü satır şekli
+// Tip tanımı — sync sorgusu satır şekli
 // -----------------------------------------------------------------------
 interface PendingAnnotation {
   annotation_id: string
-  data_json: string
-  type: string
+  payload_json: string | null
   cloud_task_id: string
+  payload_hash: string | null
+  last_synced_hash: string | null
+}
+
+// -----------------------------------------------------------------------
+// Error classification helper
+// -----------------------------------------------------------------------
+function classifyHttpError(status: number, body: string): { retryable: boolean; errorKey: string } {
+  if (status === 409) {
+    return { retryable: false, errorKey: 'already_submitted' }
+  }
+  if (status === 403) {
+    const lower = body.toLowerCase()
+    if (lower.includes('expired') || lower.includes('lease')) {
+      return { retryable: false, errorKey: 'lease_expired' }
+    }
+    return { retryable: false, errorKey: 'forbidden' }
+  }
+  if (status === 400) {
+    return { retryable: false, errorKey: body.substring(0, 200) || 'validation_error' }
+  }
+  if (status >= 500) {
+    return { retryable: true, errorKey: `server_error_${status}` }
+  }
+  // Unknown client errors are non-retryable
+  if (status >= 400 && status < 500) {
+    return { retryable: false, errorKey: `client_error_${status}` }
+  }
+  return { retryable: true, errorKey: 'unknown_error' }
 }
 
 // -----------------------------------------------------------------------
 // Tek seferlik senkronizasyon döngüsü
 // -----------------------------------------------------------------------
-async function runSyncCycle(): Promise<void> {
+export async function runSyncCycle(): Promise<void> {
   let db
   try {
     db = getDb()
   } catch {
-    // DB henüz başlatılmamışsa sessizce atla
     return
   }
 
-  // Sadece bulutan gelen görevlere ait (cloud_task_id dolu) ve henüz
-  // senkronize edilmemiş anotasyonları getir
+  // Lazy import to avoid circular dependency at module load time
+
+  const { getLease, deleteLease } = await import('../api/cloudTasksIpc')
+
+  // Query pending annotations with cloud_task_id — NO media_items join
   const pending = db
     .prepare(
       `SELECT
-         a.id          AS annotation_id,
-         a.data_json,
-         a.type,
-         m.cloud_task_id
+         a.id              AS annotation_id,
+         a.payload_json,
+         a.cloud_task_id,
+         a.payload_hash,
+         a.last_synced_hash
        FROM annotations a
-       JOIN media_items m ON a.media_id = m.id
        WHERE a.sync_status = 'pending_insert'
-         AND m.cloud_task_id IS NOT NULL`
+         AND a.cloud_task_id IS NOT NULL`
     )
     .all() as PendingAnnotation[]
 
@@ -49,23 +79,128 @@ async function runSyncCycle(): Promise<void> {
   console.log(`[syncManager] ${pending.length} adet bekleyen anotasyon bulundu.`)
 
   for (const row of pending) {
+    // Step a: Duplicate submission check
+    if (row.payload_hash && row.payload_hash === row.last_synced_hash) {
+      db.prepare(
+        `UPDATE annotations SET sync_status = 'synced', last_error = NULL WHERE id = ?`
+      ).run(row.annotation_id)
+      console.log(
+        `[syncManager] ${row.annotation_id}: already submitted (hash match), marking synced`
+      )
+      continue
+    }
+
+    // Step b: Parse payload_json
+    let annotationData: { type: string; data: unknown }
+    if (!row.payload_json || row.payload_json.trim() === '') {
+      db.prepare(
+        `UPDATE annotations SET sync_status = 'failed_permanent', last_error = 'invalid_payload_json' WHERE id = ?`
+      ).run(row.annotation_id)
+      console.error(
+        `[syncManager] ${row.annotation_id}: empty payload_json, marking failed_permanent`
+      )
+      continue
+    }
+
     try {
-      await apiClient.post('/api/v1/annotations/raw', {
-        taskId: row.cloud_task_id,
-        data: JSON.parse(row.data_json),
-        type: row.type
+      annotationData = JSON.parse(row.payload_json)
+      if (
+        !annotationData ||
+        typeof annotationData.type !== 'string' ||
+        annotationData.data === undefined
+      ) {
+        throw new Error('Missing type or data fields')
+      }
+    } catch (parseErr) {
+      db.prepare(
+        `UPDATE annotations SET sync_status = 'failed_permanent', last_error = 'invalid_payload_json' WHERE id = ?`
+      ).run(row.annotation_id)
+      console.error(
+        `[syncManager] ${row.annotation_id}: invalid payload_json: ${(parseErr as Error).message}`
+      )
+      continue
+    }
+
+    // Step c: Load lease
+    const lease = getLease(row.cloud_task_id)
+    if (!lease) {
+      db.prepare(
+        `UPDATE annotations SET sync_status = 'failed_permanent', last_error = 'missing_lease_token' WHERE id = ?`
+      ).run(row.annotation_id)
+      console.error(
+        `[syncManager] ${row.annotation_id}: no lease for task ${row.cloud_task_id}, marking failed_permanent`
+      )
+      continue
+    }
+
+    // Step d: POST /api/v1/tasks/:id/submit
+    try {
+      await apiClient.post(`/api/v1/tasks/${row.cloud_task_id}/submit`, {
+        leaseToken: lease.lease_token,
+        annotationData: {
+          type: annotationData.type,
+          data: annotationData.data
+        }
       })
 
-      // Başarılı → sync_status güncelle
-      db.prepare(`UPDATE annotations SET sync_status = 'synced' WHERE id = ?`).run(
-        row.annotation_id
+      // Step e: Success
+      db.prepare(
+        `UPDATE annotations SET sync_status = 'synced', last_synced_hash = payload_hash, last_error = NULL WHERE id = ?`
+      ).run(row.annotation_id)
+
+      deleteLease(row.cloud_task_id)
+
+      db.prepare(`UPDATE media_items SET status = 'completed' WHERE cloud_task_id = ?`).run(
+        row.cloud_task_id
       )
-    } catch (err) {
-      // Ağ hatası veya API hatası → bir sonraki döngüye bırak
+
       console.log(
-        `[syncManager] Anotasyon ${row.annotation_id} gönderilemedi, bir sonraki döngüde tekrar denenecek:`,
-        (err as Error).message ?? err
+        `[syncManager] ${row.annotation_id}: submitted successfully for task ${row.cloud_task_id}`
       )
+    } catch (err: unknown) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const error = err as any
+      const status = error?.response?.status ?? 0
+      const bodyStr =
+        typeof error?.response?.data === 'object'
+          ? JSON.stringify(error.response.data)
+          : String(error?.response?.data ?? error.message ?? '')
+
+      const classification = classifyHttpError(status, bodyStr)
+
+      // Step f: 409 = idempotent success
+      if (status === 409) {
+        db.prepare(
+          `UPDATE annotations SET sync_status = 'synced', last_synced_hash = payload_hash, last_error = NULL WHERE id = ?`
+        ).run(row.annotation_id)
+
+        deleteLease(row.cloud_task_id)
+
+        db.prepare(`UPDATE media_items SET status = 'completed' WHERE cloud_task_id = ?`).run(
+          row.cloud_task_id
+        )
+
+        console.log(`[syncManager] ${row.annotation_id}: 409 (already submitted) → marking synced`)
+        continue
+      }
+
+      if (classification.retryable) {
+        // Step g: Retryable
+        db.prepare(
+          `UPDATE annotations SET attempt_count = attempt_count + 1, last_error = ? WHERE id = ?`
+        ).run(classification.errorKey, row.annotation_id)
+        console.log(
+          `[syncManager] ${row.annotation_id}: retryable error (${classification.errorKey}), will retry`
+        )
+      } else {
+        // Step h: Non-retryable
+        db.prepare(
+          `UPDATE annotations SET sync_status = 'failed_permanent', last_error = ? WHERE id = ?`
+        ).run(classification.errorKey, row.annotation_id)
+        console.error(
+          `[syncManager] ${row.annotation_id}: non-retryable error (${classification.errorKey}), marking failed_permanent`
+        )
+      }
     }
   }
 }
@@ -77,12 +212,10 @@ let timer: ReturnType<typeof setInterval> | null = null
 
 /**
  * Arka plan senkronizasyon döngüsünü başlatır.
- * app.whenReady() içinde bir kez çağrılmalıdır.
  */
 export function startSync(): void {
-  if (timer !== null) return // Zaten çalışıyor
+  if (timer !== null) return
 
-  // İlk çalışmayı hemen tetikle (uygulama açılışında da çalışsın)
   runSyncCycle().catch((err) => console.error('[syncManager] İlk sync hatası:', err))
 
   timer = setInterval(() => {

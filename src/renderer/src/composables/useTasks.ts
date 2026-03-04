@@ -5,7 +5,7 @@ import { loadImage } from '@renderer/utils/image'
 function toLocalUrlMaybe(p: string): string {
   if (p.startsWith('http://') || p.startsWith('https://') || p.startsWith('local://')) return p
 
-  const isWinAbs = /^[a-zA-Z]:[\\/]/.test(p) || p.startsWith('\\\\')
+  const isWinAbs = /^[a-zA-Z]:[/\\]/.test(p) || p.startsWith('\\\\')
   const isPosixAbs = p.startsWith('/')
 
   if (isWinAbs) {
@@ -38,19 +38,18 @@ export function useTasks(initial: Task[]): {
     tasks.value = rows.map((r, idx) => ({
       id: idx + 1,
       title: `Task ${idx + 1}`,
-      mediaId: r.id, // asıl DB kimliği
+      mediaId: r.id,
       image: r.local_path,
-      // Durum mantığı:
-      // - DB'de status "completed" ise: her zaman completed
-      // - Aksi halde, annotation_seconds > 0 ise: in_progress (üzerinde çalışılmış)
-      // - Hiç süre yoksa: queued (henüz dokunulmamış)
       status:
         r.status === 'completed'
           ? 'completed'
           : typeof r.annotation_seconds === 'number' && r.annotation_seconds > 0
             ? 'in_progress'
             : 'queued',
-      timeSeconds: typeof r.annotation_seconds === 'number' ? r.annotation_seconds : 0
+      timeSeconds: typeof r.annotation_seconds === 'number' ? r.annotation_seconds : 0,
+      // Cloud fields from media_items
+      cloudTaskId: r.cloud_task_id ?? undefined,
+      contractId: r.contract_id ?? undefined
     }))
     currentTaskIndex.value = 0
   }

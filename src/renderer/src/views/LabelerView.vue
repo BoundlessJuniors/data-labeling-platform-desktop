@@ -102,8 +102,10 @@ const samDownloadStage = ref<'idle' | 'encoder' | 'decoder' | 'done'>('idle')
 const samDownloadingModelId = ref<string | null>(null) // Track which model is downloading
 
 const showSamSettings = ref(false)
-const samModels = ref<Record<string, any>>({})
-const samStatus = ref<any>({
+// eslint-disable-next-line no-undef
+const samModels = ref<Record<string, SamModelInfo>>({})
+// eslint-disable-next-line no-undef
+const samStatus = ref<SamStatusInfo>({
   status: 'idle',
   currentModelId: 'vit_b',
   modelsStatus: {},
@@ -123,9 +125,9 @@ const downloadConfirmation = ref<{
 
 // Polygon düzenleme modu (SAM veya normal polygon)
 const editingAnnotationId = ref<number | null>(null)
-const editingOriginalState = ref<any>(null)
+const editingOriginalState = ref<Record<string, unknown> | null>(null)
 // Edit modu için yerel undo/redo geçmişi
-const editHistory = ref<any[]>([])
+const editHistory = ref<Record<string, unknown>[]>([])
 const editHistoryIndex = ref(-1)
 
 // Edit ipucu (artık genel)
@@ -155,6 +157,7 @@ watch(strokeWidth, (val) => {
 
 // Props & emit (dataset kimliği ve geri dönüş olayı)
 const props = defineProps<{ datasetId: string }>()
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const emit = defineEmits<{ (e: 'back-to-datasets'): void }>()
 
 // Başlangıçta boş; dataset seçilince DB'den doldurulacak
@@ -214,11 +217,6 @@ function getTaskSeconds(t: Task): number {
   return taskSecondsById.value[id] ?? 0
 }
 
-function getCurrentTaskSeconds(): number {
-  const t = tasks.value[currentTaskIndex.value]
-  return t ? getTaskSeconds(t) : 0
-}
-
 function formatTime(total: number): string {
   const sec = Math.max(0, Math.floor(total))
   const h = Math.floor(sec / 3600)
@@ -251,7 +249,7 @@ function playAutoSaveOverlayAnimation(): void {
 
   el.classList.remove('show')
   // Force reflow so the animation can restart even if class was already present
-  // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+
   void el.offsetWidth
   el.classList.add('show')
 }
@@ -696,7 +694,10 @@ function handleEditRequestFromKonva(id: number): void {
   updateDeleteButton()
 }
 
-function handleUpdateAnnotationStateFromKonva(payload: { id: number; patch: any }): void {
+function handleUpdateAnnotationStateFromKonva(payload: {
+  id: number
+  patch: Record<string, unknown>
+}): void {
   const idx = state.annotations.findIndex((a) => a.id === payload.id)
   if (idx === -1) return
 
@@ -726,7 +727,7 @@ function handleAnnotationTransformEndFromKonva(): void {
   if (editingAnnotationId.value != null) {
     const ann = state.annotations.find((a) => a.id === editingAnnotationId.value)
     if (ann) {
-      let snapshot: any = {}
+      let snapshot: Record<string, unknown> = {}
       if (ann.type === 'polygon' || ann.type === 'polyline') {
         snapshot = { points: ann.points.map((p) => ({ ...p })) }
       } else if (ann.type === 'bbox') {
@@ -766,7 +767,7 @@ function redoLocalEdit(): void {
   }
 }
 
-function applyLocalState(snapshot: any): void {
+function applyLocalState(snapshot: Record<string, unknown>): void {
   if (editingAnnotationId.value == null) return
   const idx = state.annotations.findIndex((a) => a.id === editingAnnotationId.value)
   if (idx === -1) return
@@ -1196,7 +1197,7 @@ onMounted(async (): Promise<void> => {
     // 2. If no saved model (or invalid), look for ANY downloaded model
     if (!targetModel || !samModels.value[targetModel]) {
       // Find first available 'available' model
-      const available = Object.entries(status.modelsStatus).find(([id, st]) => st === 'available')
+      const available = Object.entries(status.modelsStatus).find(([, st]) => st === 'available')
       if (available) {
         targetModel = available[0]
       } else {
@@ -1519,7 +1520,7 @@ async function performModelSwitch(modelId: string, downloadFirst = false): Promi
     try {
       await window.api.sam.download(modelId)
       // Refresh status after download
-      const newStatus = await window.api.sam.status()
+      await window.api.sam.status()
       samStatus.value.modelsStatus[modelId] = 'available'
     } catch (e) {
       console.error('Download failed or paused', e)
@@ -1772,8 +1773,8 @@ function confirmDownloadAction(accept: boolean): void {
                 <!-- Dropdown Trigger (Right) -->
                 <button
                   class="p-1 px-1.5 rounded-r-lg hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center border-l-0"
-                  @click.stop="showSamSettings = !showSamSettings"
                   title="Select Model"
+                  @click.stop="showSamSettings = !showSamSettings"
                 >
                   <ArrowDropDownIcon class="ui-svg h-5 w-5 text-slate-500 dark:text-gray-400" />
                 </button>
@@ -1875,8 +1876,8 @@ function confirmDownloadAction(accept: boolean): void {
                           <!-- Controls -->
                           <div class="flex items-center gap-1">
                             <button
-                              @click="togglePauseDownload(String(id))"
                               class="p-0.5 hover:bg-slate-200 dark:hover:bg-gray-600 rounded"
+                              @click="togglePauseDownload(String(id))"
                             >
                               <component
                                 :is="samPaused ? PlayIcon : PauseIcon"
@@ -1884,8 +1885,8 @@ function confirmDownloadAction(accept: boolean): void {
                               />
                             </button>
                             <button
-                              @click="cancelDownload(String(id))"
                               class="p-0.5 hover:bg-red-100 dark:hover:bg-red-900/30 rounded group/cancel"
+                              @click="cancelDownload(String(id))"
                             >
                               <CloseIcon
                                 class="w-4 h-4 text-slate-400 group-hover/cancel:text-red-500"
@@ -1994,11 +1995,11 @@ function confirmDownloadAction(accept: boolean): void {
               >
                 <span class="text-xs font-bold text-slate-500 dark:text-gray-400">Size</span>
                 <input
+                  v-model.number="strokeWidth"
                   type="range"
                   min="1"
                   max="10"
                   step="0.5"
-                  v-model.number="strokeWidth"
                   class="w-20 h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700 accent-primary"
                 />
                 <span class="text-xs font-mono text-slate-500 dark:text-gray-400 w-6 text-right">{{
@@ -2176,14 +2177,14 @@ function confirmDownloadAction(accept: boolean): void {
           </p>
           <div class="flex items-center justify-end gap-3">
             <button
-              @click="confirmDownloadAction(false)"
               class="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-700"
+              @click="confirmDownloadAction(false)"
             >
               Cancel
             </button>
             <button
-              @click="confirmDownloadAction(true)"
               class="px-4 py-2 rounded-lg text-sm font-medium text-white bg-primary hover:bg-primary-light"
+              @click="confirmDownloadAction(true)"
             >
               Download
             </button>
