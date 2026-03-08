@@ -59,3 +59,24 @@ export type Task = {
   cloudTaskId?: string
   contractId?: string
 }
+
+export type LabelDefinition = {
+  id: string
+  name: string
+  color?: string | null
+  attributesSchemaJson?: unknown | null
+  source?: 'cloud' | 'local'
+}
+
+export type DatasetLabelSource = 'local' | 'cloud' | null
+
+export type DatasetLabelingContext = {
+  datasetId: string
+  labelSource: DatasetLabelSource
+  annotationFormat?: string | null
+  labelingSpecJson?: unknown | null
+  qcMode?: string | null
+  labelSetName?: string | null
+  labelSetVersion?: number | null
+  labels: LabelDefinition[]
+}

@@ -163,6 +163,90 @@ export function registerCloudTasksIpc(): void {
         `[cloud:downloadContractWork] contractId=${contractId} datasetId=${datasetId} amount=${amount}`
       )
 
+      // 0. Update labeling metadata before any tasks are leased
+      try {
+        const metaResp = await apiClient.get<{
+          success: boolean
+          data: {
+            contract: unknown
+            listing: { annotationFormat?: string; labelingSpecJson?: unknown; qcMode?: string }
+            labelSet?: {
+              name?: string
+              version?: number
+              labels: Array<{
+                id?: string
+                name: string
+                color?: string
+                attributesSchemaJson?: unknown
+              }>
+            }
+          }
+        }>(`/api/v1/contracts/${contractId}/labeling-context`)
+
+        if (!metaResp.data?.data) {
+          throw new Error('Labeling context response was empty from the server')
+        }
+
+        const meta = metaResp.data.data
+        if (!meta.labelSet) {
+          throw new Error(
+            'The cloud contract does not have a configured label set. Downloading tasks without a label set is prohibited.'
+          )
+        }
+
+        const db = getDb()
+
+        // Update dataset metadata
+        db.prepare(
+          `UPDATE datasets SET
+            label_source = 'cloud',
+            annotation_format = ?,
+            labeling_spec_json = ?,
+            qc_mode = ?,
+            label_set_name = ?,
+            label_set_version = ?
+           WHERE id = ?`
+        ).run(
+          meta.listing.annotationFormat ?? null,
+          meta.listing.labelingSpecJson ? JSON.stringify(meta.listing.labelingSpecJson) : null,
+          meta.listing.qcMode ?? null,
+          meta.labelSet?.name ?? null,
+          meta.labelSet?.version ?? null,
+          datasetId
+        )
+
+        // Replace dataset labels
+        if (Array.isArray(meta.labelSet.labels)) {
+          const tx = db.transaction(() => {
+            db.prepare(`DELETE FROM dataset_labels WHERE dataset_id = ?`).run(datasetId)
+
+            const stmt = db.prepare(
+              `INSERT INTO dataset_labels (id, dataset_id, name, color, attributes_schema_json, source, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, 'cloud', ?, ?)`
+            )
+            const now = Date.now()
+            for (const lbl of meta.labelSet!.labels) {
+              stmt.run(
+                lbl.id || randomUUID(),
+                datasetId,
+                lbl.name,
+                lbl.color ?? null,
+                lbl.attributesSchemaJson ? JSON.stringify(lbl.attributesSchemaJson) : null,
+                now,
+                now
+              )
+            }
+          })
+          tx()
+        }
+        console.log(`[cloud:downloadContractWork] Successfully refreshed labeling context locally.`)
+      } catch (err: unknown) {
+        console.error(
+          `[cloud:downloadContractWork] Could not fetch labeling context: ${(err as Error).message}`
+        )
+        throw new Error(`Cloud etiket ayarları alınamadı: ${(err as Error).message}`)
+      }
+
       // 1. Lease tasks in batch
       let leasedTasks: LeasedTask[] = []
       try {

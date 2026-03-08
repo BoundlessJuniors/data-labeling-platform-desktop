@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron'
 import { getDb } from '../db/sqlite'
+import { randomUUID } from 'crypto'
 
 export function registerDbIpc(): void {
   ipcMain.handle('db:ping', () => ({ ok: true }))
@@ -8,18 +9,41 @@ export function registerDbIpc(): void {
     'db:datasets:create',
     (
       _evt,
-      payload: { id: string; name: string; folder_path?: string | null; cloud_contract_id?: string }
+      payload: {
+        id: string
+        name: string
+        folder_path?: string | null
+        cloud_contract_id?: string
+        label_source?: 'cloud' | 'local' | null
+        annotation_format?: string | null
+        labeling_spec_json?: string | null
+        qc_mode?: string | null
+        label_set_name?: string | null
+        label_set_version?: number | null
+      }
     ) => {
       const db = getDb()
       const now = Date.now()
+      // Default to local if no cloud contract id is provided and no source is explicitly set
+      const finalLabelSource = payload.label_source ?? (payload.cloud_contract_id ? null : 'local')
+
       db.prepare(
-        'INSERT OR IGNORE INTO datasets (id, name, folder_path, cloud_contract_id, created_at) VALUES (?, ?, ?, ?, ?)'
+        `INSERT OR IGNORE INTO datasets (
+          id, name, folder_path, cloud_contract_id, created_at,
+          label_source, annotation_format, labeling_spec_json, qc_mode, label_set_name, label_set_version
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         payload.id,
         payload.name,
         payload.folder_path ?? null,
         payload.cloud_contract_id ?? null,
-        now
+        now,
+        finalLabelSource,
+        payload.annotation_format ?? null,
+        payload.labeling_spec_json ?? null,
+        payload.qc_mode ?? null,
+        payload.label_set_name ?? null,
+        payload.label_set_version ?? null
       )
       return { ok: true }
     }
@@ -56,17 +80,274 @@ export function registerDbIpc(): void {
   ipcMain.handle('db:datasets:delete', (_evt, datasetId: string) => {
     const db = getDb()
     const tx = db.transaction(() => {
-      // annotations -> media_items -> datasets
+      // annotations -> media_items -> dataset_labels -> datasets
       db.prepare(
         `DELETE FROM annotations 
          WHERE media_id IN (SELECT id FROM media_items WHERE dataset_id = ?)`
       ).run(datasetId)
       db.prepare(`DELETE FROM media_items WHERE dataset_id = ?`).run(datasetId)
+      db.prepare(`DELETE FROM dataset_labels WHERE dataset_id = ?`).run(datasetId)
       db.prepare(`DELETE FROM datasets WHERE id = ?`).run(datasetId)
     })
     tx()
     return { ok: true }
   })
+
+  ipcMain.handle(
+    'db:datasets:updateLabelingContext',
+    (
+      _evt,
+      payload: {
+        dataset_id: string
+        label_source: 'cloud' | 'local'
+        annotation_format?: string | null
+        labeling_spec_json?: string | null
+        qc_mode?: string | null
+        label_set_name?: string | null
+        label_set_version?: number | null
+      }
+    ) => {
+      const db = getDb()
+      db.prepare(
+        `UPDATE datasets SET
+          label_source = ?,
+          annotation_format = ?,
+          labeling_spec_json = ?,
+          qc_mode = ?,
+          label_set_name = ?,
+          label_set_version = ?
+         WHERE id = ?`
+      ).run(
+        payload.label_source,
+        payload.annotation_format ?? null,
+        payload.labeling_spec_json ?? null,
+        payload.qc_mode ?? null,
+        payload.label_set_name ?? null,
+        payload.label_set_version ?? null,
+        payload.dataset_id
+      )
+      return { ok: true }
+    }
+  )
+
+  ipcMain.handle('db:datasets:getLabelingContext', (_evt, datasetId: string) => {
+    const db = getDb()
+    const dataset = db
+      .prepare(
+        `SELECT
+          id as datasetId,
+          label_source as labelSource,
+          annotation_format as annotationFormat,
+          labeling_spec_json as labelingSpecJson,
+          qc_mode as qcMode,
+          label_set_name as labelSetName,
+          label_set_version as labelSetVersion
+         FROM datasets WHERE id = ? LIMIT 1`
+      )
+      .get(datasetId)
+
+    if (!dataset) return null
+
+    const datasetObj = dataset as Record<string, unknown>
+    if (datasetObj.labelingSpecJson && typeof datasetObj.labelingSpecJson === 'string') {
+      try {
+        datasetObj.labelingSpecJson = JSON.parse(datasetObj.labelingSpecJson)
+      } catch (err) {
+        console.error('Failed to parse labelingSpecJson from datasets:', err)
+        datasetObj.labelingSpecJson = null
+      }
+    }
+
+    const labels = db
+      .prepare(
+        `SELECT
+          id, dataset_id, name, color, attributes_schema_json as attributesSchemaJson, source
+         FROM dataset_labels WHERE dataset_id = ? ORDER BY created_at ASC`
+      )
+      .all(datasetId)
+
+    const parsedLabels = labels.map((lbl: unknown) => {
+      const labelObj = lbl as Record<string, unknown>
+      if (labelObj.attributesSchemaJson && typeof labelObj.attributesSchemaJson === 'string') {
+        try {
+          labelObj.attributesSchemaJson = JSON.parse(labelObj.attributesSchemaJson)
+        } catch (err) {
+          console.error('Failed to parse attributesSchemaJson for label:', labelObj.id, err)
+          labelObj.attributesSchemaJson = null
+        }
+      }
+      return labelObj
+    })
+
+    return {
+      dataset: datasetObj,
+      labels: parsedLabels
+    }
+  })
+
+  ipcMain.handle(
+    'db:datasetLabels:replaceAll',
+    (
+      _evt,
+      payload: {
+        dataset_id: string
+        source: 'cloud' | 'local'
+        labels: Array<{
+          id?: string
+          name: string
+          color?: string | null
+          attributes_schema_json?: string | null
+        }>
+      }
+    ) => {
+      const db = getDb()
+      const tx = db.transaction(() => {
+        db.prepare(`DELETE FROM dataset_labels WHERE dataset_id = ?`).run(payload.dataset_id)
+
+        const stmt = db.prepare(
+          `INSERT INTO dataset_labels (id, dataset_id, name, color, attributes_schema_json, source, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        const now = Date.now()
+        for (const lbl of payload.labels) {
+          stmt.run(
+            lbl.id || randomUUID(),
+            payload.dataset_id,
+            lbl.name,
+            lbl.color ?? null,
+            lbl.attributes_schema_json ?? null,
+            payload.source,
+            now,
+            now
+          )
+        }
+      })
+      tx()
+      return { ok: true }
+    }
+  )
+
+  ipcMain.handle('db:datasetLabels:listByDataset', (_evt, datasetId: string) => {
+    const labels = getDb()
+      .prepare(
+        `SELECT id, dataset_id, name, color, attributes_schema_json as attributesSchemaJson, source
+         FROM dataset_labels WHERE dataset_id = ? ORDER BY created_at ASC`
+      )
+      .all(datasetId)
+
+    return labels.map((lbl: unknown) => {
+      const labelObj = lbl as Record<string, unknown>
+      if (labelObj.attributesSchemaJson && typeof labelObj.attributesSchemaJson === 'string') {
+        try {
+          labelObj.attributesSchemaJson = JSON.parse(labelObj.attributesSchemaJson)
+        } catch (err) {
+          console.error('Failed to parse attributesSchemaJson for label:', labelObj.id, err)
+          labelObj.attributesSchemaJson = null
+        }
+      }
+      return labelObj
+    })
+  })
+
+  ipcMain.handle(
+    'db:datasetLabels:add',
+    (
+      _evt,
+      payload: {
+        dataset_id: string
+        name: string
+        color?: string | null
+        attributes_schema_json?: string | null
+        source?: 'local' | 'cloud'
+      }
+    ) => {
+      const db = getDb()
+
+      const ds = db
+        .prepare(`SELECT label_source FROM datasets WHERE id = ?`)
+        .get(payload.dataset_id) as { label_source: string | null } | undefined
+
+      if (!ds) {
+        throw new Error('Dataset not found')
+      }
+      if (ds.label_source !== 'local') {
+        throw new Error('Cannot add labels to a non-local dataset')
+      }
+
+      // Explicitly check for duplicate label name to provide friendly error
+      const existing = db
+        .prepare(`SELECT id FROM dataset_labels WHERE dataset_id = ? AND name = ?`)
+        .get(payload.dataset_id, payload.name)
+      if (existing) {
+        throw new Error(`Label with name "${payload.name}" already exists in this dataset`)
+      }
+
+      const id = randomUUID()
+      const now = Date.now()
+      db.prepare(
+        `INSERT INTO dataset_labels (id, dataset_id, name, color, attributes_schema_json, source, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        id,
+        payload.dataset_id,
+        payload.name,
+        payload.color ?? null,
+        payload.attributes_schema_json ?? null,
+        payload.source ?? 'local',
+        now,
+        now
+      )
+      return { ok: true, id }
+    }
+  )
+
+  ipcMain.handle(
+    'db:datasetLabels:delete',
+    (_evt, payload: { dataset_id: string; label_id: string }) => {
+      const db = getDb()
+      const ds = db
+        .prepare(`SELECT label_source FROM datasets WHERE id = ?`)
+        .get(payload.dataset_id) as { label_source: string | null } | undefined
+
+      if (!ds) {
+        throw new Error('Dataset not found')
+      }
+      if (ds.label_source !== 'local') {
+        throw new Error('Cannot delete labels from a non-local dataset')
+      }
+
+      const labelRow = db
+        .prepare(`SELECT name FROM dataset_labels WHERE id = ?`)
+        .get(payload.label_id) as { name: string } | undefined
+      if (!labelRow) {
+        throw new Error('Label not found')
+      }
+
+      // Check if the label is used by any persisted annotations in this dataset
+      // The JSON stringifier emits "label":"MyLabel", so we search for that exact pattern.
+      const usageCheck = db
+        .prepare(
+          `
+        SELECT 1 FROM annotations
+        WHERE media_id IN (SELECT id FROM media_items WHERE dataset_id = ?)
+        AND data_json LIKE ? LIMIT 1
+      `
+        )
+        .get(payload.dataset_id, `%"label":"${labelRow.name}"%`)
+
+      if (usageCheck) {
+        throw new Error(
+          `Cannot delete label "${labelRow.name}" because it is currently used by annotations in this dataset.`
+        )
+      }
+
+      db.prepare(`DELETE FROM dataset_labels WHERE id = ? AND dataset_id = ?`).run(
+        payload.label_id,
+        payload.dataset_id
+      )
+      return { ok: true }
+    }
+  )
 
   ipcMain.handle(
     'db:media:upsert',

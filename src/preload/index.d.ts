@@ -12,6 +12,12 @@ declare global {
             name: string
             folder_path?: string | null
             cloud_contract_id?: string
+            label_source?: 'cloud' | 'local' | null
+            annotation_format?: string | null
+            labeling_spec_json?: string | null
+            qc_mode?: string | null
+            label_set_name?: string | null
+            label_set_version?: number | null
           }) => Promise<{ ok: true }>
           list: () => Promise<
             Array<{ id: string; name: string; created_at: number; folder_path?: string | null }>
@@ -30,6 +36,64 @@ declare global {
             cloud_contract_id: string
           } | null>
           delete: (datasetId: string) => Promise<{ ok: true }>
+          updateLabelingContext: (payload: {
+            dataset_id: string
+            label_source: 'cloud' | 'local'
+            annotation_format?: string | null
+            labeling_spec_json?: string | null
+            qc_mode?: string | null
+            label_set_name?: string | null
+            label_set_version?: number | null
+          }) => Promise<{ ok: true }>
+          getLabelingContext: (datasetId: string) => Promise<{
+            dataset: {
+              datasetId: string
+              labelSource: 'cloud' | 'local' | null
+              annotationFormat: string | null
+              labelingSpecJson: unknown | null
+              qcMode: string | null
+              labelSetName: string | null
+              labelSetVersion: number | null
+            }
+            labels: Array<{
+              id: string
+              dataset_id: string
+              name: string
+              color: string | null
+              attributesSchemaJson: unknown | null
+              source: 'cloud' | 'local'
+            }>
+          } | null>
+        }
+        datasetLabels: {
+          replaceAll: (payload: {
+            dataset_id: string
+            source: 'cloud' | 'local'
+            labels: Array<{
+              id?: string
+              name: string
+              color?: string | null
+              attributes_schema_json?: string | null
+            }>
+          }) => Promise<{ ok: true }>
+          listByDataset: (datasetId: string) => Promise<
+            Array<{
+              id: string
+              dataset_id: string
+              name: string
+              color: string | null
+              attributesSchemaJson: unknown | null
+              source: 'cloud' | 'local'
+            }>
+          >
+          add: (payload: {
+            dataset_id: string
+            name: string
+            color?: string | null
+            attributes_schema_json?: string | null
+            source?: 'local' | 'cloud'
+          }) => Promise<{ ok: true; id: string }>
+          delete: (payload: { dataset_id: string; label_id: string }) => Promise<{ ok: true }>
         }
         media: {
           upsert: (payload: {

@@ -40,11 +40,12 @@ import { qsa } from '@renderer/utils/dom'
 // Composable’lar
 import { useLabelerState } from '@renderer/composables/useLabelerState'
 import { useHistory } from '@renderer/composables/useHistory'
+import { useDatasetLabeling } from '@renderer/composables/useDatasetLabeling'
 import { useCanvasTransform } from '@renderer/composables/useCanvasTransform'
 import { useTasks } from '@renderer/composables/useTasks'
 import { useAnnotationsRenderer } from '@renderer/composables/useAnnotationsRenderer'
 import { useKeyboardShortcuts } from '@renderer/composables/useKeyboardShortcuts'
-import { useLabelerActions } from '@renderer/composables/useLabelerActions'
+import { useLabelerActions, buildAndSaveExport } from '@renderer/composables/useLabelerActions'
 import KonvaCanvas from '@renderer/components/KonvaCanvas.vue'
 
 /* =============================
@@ -73,7 +74,6 @@ const crosshairV = ref<HTMLDivElement | null>(null)
 const coords = ref<HTMLDivElement | null>(null)
 
 const toolGroup = ref<HTMLDivElement | null>(null)
-const labelList = ref<HTMLDivElement | null>(null)
 const annotationList = ref<HTMLDivElement | null>(null)
 
 const undoBtn = ref<HTMLButtonElement | null>(null)
@@ -156,7 +156,7 @@ watch(strokeWidth, (val) => {
   ============================= */
 
 // Props & emit (dataset kimliği ve geri dönüş olayı)
-const props = defineProps<{ datasetId: string }>()
+const props = defineProps<{ datasetId: string | null }>()
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const emit = defineEmits<{ (e: 'back-to-datasets'): void }>()
 
@@ -167,6 +167,42 @@ const { tasks, currentTaskIndex, initFromDb } = useTasks(initialTasks)
 
 // Reactif state
 const { state } = useLabelerState()
+
+const {
+  loadDatasetLabeling,
+  addLocalLabel,
+  deleteLocalLabel,
+  filteredLabels,
+  isCloudLabelsReadOnly,
+  canManageLocalLabels
+} = useDatasetLabeling(state)
+
+const newLabelName = ref('')
+const handleAddLabel = async (): Promise<void> => {
+  if (!newLabelName.value.trim() || !props.datasetId) return
+  try {
+    await addLocalLabel(props.datasetId, newLabelName.value.trim())
+    newLabelName.value = ''
+  } catch (err: unknown) {
+    alert((err as Error).message)
+  }
+}
+
+const handleDeleteLabel = async (labelId: string): Promise<void> => {
+  if (!props.datasetId) return
+  if (!confirm('Are you sure you want to delete this label?')) return
+  try {
+    await deleteLocalLabel(props.datasetId, labelId)
+  } catch (err: unknown) {
+    alert((err as Error).message)
+  }
+}
+
+function setActiveLabelByName(name: string | null): void {
+  state.activeLabel = name
+  showLabelHint.value = false
+  updateCursor()
+}
 
 const konvaCanvasRef = ref<InstanceType<typeof KonvaCanvas> | null>(null)
 
@@ -275,8 +311,7 @@ async function restartCurrentTask(): Promise<void> {
 
   // 3) DB'deki kaydı da boş bir liste ile overwrite et (tam temizlik)
   try {
-    const emptyJson = JSON.stringify([], null, 2)
-    await window.api.db.annotations.saveExport({ media_id: mediaId, data_json: emptyJson })
+    await buildAndSaveExport(current, [])
   } catch (e) {
     console.error('[Restart] failed to clear annotations in DB:', e)
   }
@@ -375,8 +410,8 @@ function setActiveTool(el: HTMLElement | null): void {
   }
 
   // Dropdown dışında: select / sam / ana shapes butonu
-  if (tool === 'shapes' && !state.activeLabel) {
-    // Label yokken shapes moduna hiç geçme, uyarı göster
+  if ((tool === 'shapes' || tool === 'sam') && !state.activeLabel) {
+    // Label yokken shapes veya sam moduna hiç geçme, uyarı göster
     showLabelHint.value = true
     if (labelHintTimer != null) window.clearTimeout(labelHintTimer)
     labelHintTimer = window.setTimeout(() => {
@@ -423,17 +458,7 @@ function toLocalUrlMaybe(p: string): string {
    Seçim & Cursor
    ============================= */
 
-function setActiveLabel(el: HTMLElement | null): void {
-  if (!labelList.value) return
-  qsa<HTMLElement>(labelList.value, '.label-item').forEach((e) => e.classList.remove('active'))
-  if (el) {
-    el.classList.add('active')
-    state.activeLabel = el.dataset.label ?? null
-  } else {
-    state.activeLabel = null
-  }
-  updateCursor()
-}
+// Removed setActiveLabel as it's replaced by setActiveLabelByName
 
 function updateCursor(): void {
   const target = canvasContainer.value
@@ -887,60 +912,61 @@ const { attachKeyboardShortcuts, detachKeyboardShortcuts } = useKeyboardShortcut
 // Eski canvas etkileşimleri (useCanvasInteractions) Konva geçişiyle birlikte devre dışı bırakıldı.
 
 /* =============================
-   Lifecycle: onMounted / onBeforeUnmount
+   Lifecycle: watch / onMounted / onBeforeUnmount
    ============================= */
+watch(
+  () => props.datasetId,
+  async (newId) => {
+    if (!newId) return
+
+    // 1) Clear cross-dataset bleeding state
+    state.availableLabels = []
+    state.activeLabel = null
+    state.labelSearchTerm = ''
+    state.labelSource = 'local'
+    state.annotationFormat = null
+    state.labelingSpecJson = null
+    state.qcMode = null
+    state.labelSetName = null
+    state.labelSetVersion = null
+    state.labelingLoadError = null
+    localAnnotationsByTask.clear()
+
+    try {
+      // 2) Load labeling context strictly before task logic
+      await loadDatasetLabeling(newId)
+
+      // 3) Initialize tasks from DB
+      await initFromDb(newId)
+
+      if (tasks.value.length === 0) {
+        console.warn('[UI] ⚠️ NO TASKS FOUND! Dataset might be empty.')
+      }
+
+      // 4) SAM Prefetch (only if needed/supported)
+      try {
+        await window.electron.ipcRenderer.invoke('sam:ensureReady')
+        await window.electron.ipcRenderer.invoke('sam:startPrefetch')
+      } catch (samErr) {
+        console.warn('[UI] ⚠️ SAM session load failed:', samErr)
+      }
+
+      if (tasks.value.length > 0 && currentTaskIndex.value >= 0) {
+        const simplifiedTasks = tasks.value.map((task) => ({ image: task.image }))
+        await window.electron.ipcRenderer.invoke(
+          'sam:updatePrefetchPlan',
+          currentTaskIndex.value,
+          tasks.value.length,
+          simplifiedTasks
+        )
+      }
+    } catch (e) {
+      console.error('[UI] ❌ Watch dataset pipeline failed:', e)
+    }
+  },
+  { immediate: true }
+)
 onMounted(async (): Promise<void> => {
-  // Seçilen dataset'ten görevleri yükle
-  try {
-    console.log('[UI] 🔄 Calling initFromDb...')
-    console.log('[UI] Dataset ID:', props.datasetId)
-
-    await initFromDb(props.datasetId)
-
-    console.log(`[UI] ✅ initFromDb done!`)
-    console.log(`[UI] Tasks count: ${tasks.value.length}`)
-    console.log(`[UI] Current task index: ${currentTaskIndex.value}`)
-
-    if (tasks.value.length === 0) {
-      console.warn('[UI] ⚠️ NO TASKS FOUND! Dataset might be empty.')
-      console.warn('[UI] ⚠️ Prefetch will NOT initialize (no tasks to cache)')
-    }
-
-    // ⚡ PREFETCH: Start AFTER tasks are loaded
-    console.log(`[UI] Tasks loaded: ${tasks.value.length} tasks`)
-
-    // WAIT for SAM to be ready before starting prefetch
-    console.log('[UI] Waiting for SAM session to be ready...')
-    await window.electron.ipcRenderer.invoke('sam:ensureReady')
-    console.log('[UI] SAM session ready!')
-
-    // Start background processing
-    await window.electron.ipcRenderer.invoke('sam:startPrefetch')
-    console.log('[UI] Prefetch background processing started')
-
-    // Initialize plan for first task
-    if (tasks.value.length > 0 && currentTaskIndex.value >= 0) {
-      const timestamp = new Date().toISOString().split('T')[1].slice(0, -1)
-      console.log(
-        `[${timestamp}] [UI] ✅ Initializing prefetch plan for task ${currentTaskIndex.value}`
-      )
-      // Send simplified task data (only serializable properties)
-      const simplifiedTasks = tasks.value.map((task) => ({ image: task.image }))
-      await window.electron.ipcRenderer.invoke(
-        'sam:updatePrefetchPlan',
-        currentTaskIndex.value,
-        tasks.value.length,
-        simplifiedTasks
-      )
-    } else {
-      console.warn('[UI] ⚠️ Skipping prefetch initialization:')
-      console.warn(`[UI]    - Tasks count: ${tasks.value.length}`)
-      console.warn(`[UI]    - Current index: ${currentTaskIndex.value}`)
-    }
-  } catch (e) {
-    console.error('[UI] ❌ initFromDb failed:', e)
-  }
-
   // === THEME INIT (light/dark) ===
   const saved = localStorage.getItem('theme')
   const prefersDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false
@@ -1032,10 +1058,7 @@ onMounted(async (): Promise<void> => {
     if ((target as HTMLElement).closest('#shapes-dropdown')) closeShapes()
   })
 
-  labelList.value?.addEventListener('click', (e): void => {
-    const target = (e.target as HTMLElement).closest('.label-item') as HTMLElement | null
-    if (target) setActiveLabel(target)
-  })
+  // Removed labelList.value?.addEventListener('click', ...) as it is now handled by v-for @click
 
   annotationsSvg.value?.addEventListener('click', (e): void => {
     const t = (e.target as HTMLElement).closest('.annotation-shape') as HTMLElement | null
@@ -1371,17 +1394,16 @@ async function loadTaskByIndex(i: number): Promise<void> {
         state.annotations = []
       }
     }
+    if (prevLabel && state.availableLabels.find((l) => l.name === prevLabel)) {
+      state.activeLabel = prevLabel
+    } else if (state.availableLabels.length > 0) {
+      state.activeLabel = state.availableLabels[0].name
+    } else {
+      state.activeLabel = null
+    }
 
-    let labelEl: HTMLElement | null = null
-    if (prevLabel && labelList.value) {
-      labelEl = labelList.value.querySelector(
-        `.label-item[data-label="${prevLabel}"]`
-      ) as HTMLElement | null
-    }
-    if (!labelEl) {
-      labelEl = labelList.value?.querySelector('.label-item') as HTMLElement | null
-    }
-    setActiveLabel(labelEl)
+    showLabelHint.value = false
+    updateCursor()
 
     let toolEl: HTMLElement | null = null
     if (prevTool === 'shapes') {
@@ -2135,22 +2157,62 @@ function confirmDownloadAction(accept: boolean): void {
                 class="ui-svg h-5 w-5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2"
               />
               <input
+                v-model="state.labelSearchTerm"
                 type="search"
                 placeholder="Search labels..."
                 class="w-full pl-10 pr-4 py-2 rounded-lg border border-border dark:border-gray-700 bg-background-light dark:bg-background-dark"
               />
             </div>
-            <div ref="labelList" class="flex flex-wrap gap-2">
+
+            <div
+              v-if="isCloudLabelsReadOnly"
+              class="mb-3 text-xs text-blue-500 font-semibold bg-blue-50 dark:bg-blue-900/30 dark:text-blue-300 p-2 rounded flex items-center gap-2"
+            >
+              <span>Cloud Contract Labels (Read-only)</span>
+            </div>
+
+            <div ref="labelList" class="flex flex-wrap gap-2 mb-3">
               <span
-                class="cursor-pointer bg-primary/10 text-primary text-xs font-medium px-2.5 py-1 rounded-full hover:bg-primary/20 label-item"
-                data-label="Göz"
-                >Göz</span
+                v-for="lbl in filteredLabels"
+                :key="lbl.id"
+                class="cursor-pointer text-xs font-medium px-2.5 py-1 rounded-full label-item flex items-center gap-1 transition-colors"
+                :class="[
+                  state.activeLabel === lbl.name
+                    ? 'bg-primary text-white shadow-md'
+                    : 'bg-primary/10 text-primary hover:bg-primary/20'
+                ]"
+                :data-label="lbl.name"
+                @click="setActiveLabelByName(lbl.name)"
               >
-              <span
-                class="cursor-pointer bg-primary/10 text-primary text-xs font-medium px-2.5 py-1 rounded-full hover:bg-primary/20 label-item"
-                data-label="Kulak"
-                >Kulak</span
+                {{ lbl.name }}
+                <button
+                  v-if="canManageLocalLabels"
+                  class="ml-1 hover:text-red-500 focus:outline-none"
+                  title="Delete Label"
+                  @click.stop="handleDeleteLabel(lbl.id)"
+                >
+                  &times;
+                </button>
+              </span>
+              <span v-if="filteredLabels.length === 0" class="text-xs text-slate-400 italic"
+                >No labels found.</span
               >
+            </div>
+
+            <div v-if="canManageLocalLabels" class="flex gap-2">
+              <input
+                v-model="newLabelName"
+                type="text"
+                placeholder="New label..."
+                class="flex-1 text-sm px-2 py-1 rounded border border-border dark:border-gray-700 bg-background-light dark:bg-background-dark focus:outline-none focus:ring focus:ring-primary/30"
+                @keyup.enter="handleAddLabel"
+              />
+              <button
+                class="bg-primary hover:bg-primary-light text-white px-3 py-1 rounded text-sm font-semibold transition-colors"
+                @click="handleAddLabel"
+              >
+                Add
+              </button>
             </div>
           </div>
         </div>

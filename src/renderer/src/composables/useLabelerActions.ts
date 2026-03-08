@@ -54,6 +54,34 @@ function stableStringify(obj: unknown): string {
   return '{' + parts.join(',') + '}'
 }
 
+export async function buildAndSaveExport(task: Task, exportedAnnotations: unknown): Promise<void> {
+  const mediaId = task.mediaId ?? task.title ?? String(task.id)
+  const dataJson = JSON.stringify(exportedAnnotations, null, 2)
+
+  // Build payload_json and payload_hash for cloud tasks
+  let payloadJson: string | undefined
+  let payloadHash: string | undefined
+
+  if (task.cloudTaskId) {
+    const payloadObj = {
+      type: 'export',
+      data: exportedAnnotations
+    }
+    payloadJson = JSON.stringify(payloadObj)
+    const canonical = stableStringify(payloadObj)
+    payloadHash = await computeHashBrowser(canonical)
+  }
+
+  await window.api.db.annotations.saveExport({
+    media_id: mediaId,
+    data_json: dataJson,
+    cloud_task_id: task.cloudTaskId,
+    contract_id: task.contractId,
+    payload_json: payloadJson,
+    payload_hash: payloadHash
+  })
+}
+
 export function useLabelerActions(opts: UseLabelerActionsOptions): UseLabelerActionsReturn {
   const onUndo = (): void => {
     opts.undo()
@@ -73,36 +101,10 @@ export function useLabelerActions(opts: UseLabelerActionsOptions): UseLabelerAct
       const t = opts.tasks.value[idx]
       if (!t) return
 
-      const mediaId = t.mediaId ?? t.title ?? String(t.id)
       const exported = opts.exportAnnotationsToImageSpace()
-      const dataJson = JSON.stringify(exported, null, 2)
+      await buildAndSaveExport(t, exported)
 
-      // Build payload_json and payload_hash for cloud tasks
-      let payloadJson: string | undefined
-      let payloadHash: string | undefined
-
-      if (t.cloudTaskId) {
-        // PER BACKEND CONTRACT: This must be a FULL FINAL SNAPSHOT of all annotations for this media/task.
-        // It should never be a partial patch or single incremental shape.
-        const payloadObj = {
-          type: 'export',
-          data: exported
-        }
-        payloadJson = JSON.stringify(payloadObj)
-        const canonical = stableStringify(payloadObj)
-        payloadHash = await computeHashBrowser(canonical)
-      }
-
-      await window.api.db.annotations.saveExport({
-        media_id: mediaId,
-        data_json: dataJson,
-        cloud_task_id: t.cloudTaskId,
-        contract_id: t.contractId,
-        payload_json: payloadJson,
-        payload_hash: payloadHash
-      })
-
-      console.log('--- ANNOTATION DATA (IMAGE SPACE JSON) ---\n', dataJson)
+      console.log('--- ANNOTATION DATA (IMAGE SPACE JSON) ---\n', JSON.stringify(exported, null, 2))
       alert(
         'Draft saved: Annotation data has been written to the database and logged to the console (F12).'
       )

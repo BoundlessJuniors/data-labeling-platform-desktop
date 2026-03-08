@@ -17,7 +17,41 @@ const api = {
         ipcRenderer.invoke('db:datasets:getByFolder', folderPath),
       getByContractId: (contractId: string) =>
         ipcRenderer.invoke('db:datasets:getByContractId', contractId),
-      delete: (datasetId: string) => ipcRenderer.invoke('db:datasets:delete', datasetId)
+      delete: (datasetId: string) => ipcRenderer.invoke('db:datasets:delete', datasetId),
+      updateLabelingContext: (payload: {
+        dataset_id: string
+        label_source: 'cloud' | 'local'
+        annotation_format?: string | null
+        labeling_spec_json?: string | null
+        qc_mode?: string | null
+        label_set_name?: string | null
+        label_set_version?: number | null
+      }) => ipcRenderer.invoke('db:datasets:updateLabelingContext', payload),
+      getLabelingContext: (datasetId: string) =>
+        ipcRenderer.invoke('db:datasets:getLabelingContext', datasetId)
+    },
+    datasetLabels: {
+      replaceAll: (payload: {
+        dataset_id: string
+        source: 'cloud' | 'local'
+        labels: Array<{
+          id?: string
+          name: string
+          color?: string | null
+          attributes_schema_json?: string | null
+        }>
+      }) => ipcRenderer.invoke('db:datasetLabels:replaceAll', payload),
+      listByDataset: (datasetId: string) =>
+        ipcRenderer.invoke('db:datasetLabels:listByDataset', datasetId),
+      add: (payload: {
+        dataset_id: string
+        name: string
+        color?: string | null
+        attributes_schema_json?: string | null
+        source?: 'local' | 'cloud'
+      }) => ipcRenderer.invoke('db:datasetLabels:add', payload),
+      delete: (payload: { dataset_id: string; label_id: string }) =>
+        ipcRenderer.invoke('db:datasetLabels:delete', payload)
     },
     media: {
       upsert: (payload: {

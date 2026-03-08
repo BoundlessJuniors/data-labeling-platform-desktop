@@ -119,6 +119,13 @@
 - **Dataset silme**: Cascade silme ile dataset, medya ve anotasyonlar birlikte temizlenir.
 - **Özel `local://` protokolü**: Yerel dosyaları güvenli şekilde Chromium renderer'a sunmak için özel bir URL scheme kullanılır.
 
+### 🏷️ Dinamik Etiket (Label) Mimarisi
+
+- **Bulut ve Yerel İzolasyonu**: Dataset tabanlı etiket modellemesi. Sözleşme üzerinden indirilen görevlerde etiketler ve meta verileri buluttan gelir, yerel uygulamada veri bütünlüğünü korumak için **salt okunur** olarak kilitlenir.
+- **Dinamik Yerel Etiketleme**: Kullanıcının kendi ortamından (Local Dataset) içe aktardığı görsellerde sistem etiket havuzunu izole tutar; kullanıcı serbestçe etiket ekleyebilir ve silebilir.
+- **Zil Sesi (Safe Deletion) Koruması**: Veritabanı ve canvas üzerinde fiilen uygulanmış, halihazırda kullanılmakta olan anotasyon etiketlerinin silinmesi engellenir.
+- **Hardcode Bağımsız**: Arayüzde kodlanmış sabit (ör. "Göz", "Kulak") sınıf listeleri tamamen kaldırılmış olup, SQLite ve Bulut meta veri kaynakları ile senkronize çalışır.
+
 ---
 
 ## 🏗️ Teknoloji Yığını
@@ -284,7 +291,28 @@ Uygulama yerel bir SQLite veritabanı kullanır (`%APPDATA%/label_gun/db/app.sql
 | `name`                | TEXT          | Kullanıcıya görünen isim           |
 | `folder_path`         | TEXT (UNIQUE) | Kaynak klasör yolu                 |
 | `cloud_contract_id`   | TEXT          | Senkronize edilen bulut sözleşmesi |
+| `label_source`        | TEXT          | Etiket Kaynağı (`cloud`/`local`)   |
+| `annotation_format`   | TEXT          | Etiketleme formatı                 |
+| `labeling_spec_json`  | TEXT          | Yönergeler ve UI meta verileri     |
+| `qc_mode`             | TEXT          | Kalite kontrol durumu              |
+| `label_set_name`      | TEXT          | Etiket seti genel adı              |
+| `label_set_version`   | INTEGER       | Etiket seti sürümü                 |
 | `created_at`          | INTEGER       | Oluşturulma zamanı (Unix ms)       |
+
+### `dataset_labels` Tablosu
+
+Dataset'e özel dinamik etiket yapılandırmaları. Cloud dataset'lerinde salt okunurdur, Local dataset'lerinde kullanıcı tarafından yönetilebilir.
+
+| Sütun                    | Tip       | Açıklama                                       |
+| ------------------------ | --------- | ---------------------------------------------- |
+| `id`                     | TEXT (PK) | Etiket kimliği                                 |
+| `dataset_id`             | TEXT (FK) | Bağlı olduğu dataset                           |
+| `name`                   | TEXT      | Etiket adı (ör. "Araç", "Yaya")                |
+| `color`                  | TEXT      | Hex renk kodu (opsiyonel)                      |
+| `attributes_schema_json` | TEXT      | Alt özellik tanımları (JSON formatında)        |
+| `source`                 | TEXT      | Etiket kaynağı (`cloud` veya `local`)          |
+| `created_at`             | INTEGER   | Oluşturulma tarihi                             |
+| `updated_at`             | INTEGER   | Son güncellenme tarihi                         |
 
 ### `media_items` Tablosu
 
@@ -351,7 +379,12 @@ Cloud sync işlemleri sırasında görevleri diğer labeler'lara karşı kilitle
 | `db:datasets:create`        | invoke | Yeni dataset oluşturma                                 |
 | `db:datasets:list`          | invoke | Tüm dataset'leri listeleme                             |
 | `db:datasets:getByFolder`   | invoke | Klasör yoluna göre dataset sorgulama                   |
+| `db:datasets:getLabelingContext`| invoke | Dataset ve etiket ağacını toplu getirme               |
+| `db:datasets:updateLabelingContext`| invoke | Dataset sözleşme meta verilerini güncelleme        |
 | `db:datasets:delete`        | invoke | Dataset + ilişkili media + anotasyonları cascade silme |
+| `db:datasetLabels:replaceAll` | invoke | Bulut etiket listesini atomik yenileme                 |
+| `db:datasetLabels:add`      | invoke | Local dataset'e etiket ekleme                          |
+| `db:datasetLabels:delete`   | invoke | Local dataset'ten kullanımda olmayan etiketi silme     |
 | `db:media:upsert`           | invoke | Görsel ekleme veya güncelleme (UPSERT)                 |
 | `db:media:listByDataset`    | invoke | Dataset'e ait görselleri listeleme                     |
 | `db:media:setStatus`        | invoke | Görsel durumunu güncelleme                             |
@@ -494,7 +527,7 @@ Derleme çıktısı `out/` dizinindeki üretim build dosyalarını kullanarak `e
 
 ### 2. Etiketleme Araçlarını Kullanma
 
-1. Sol paneldeki **Labels** bölümünden bir etiket seçin (ör. "Göz", "Kulak").
+1. Sol paneldeki **Labels** bölümünden dinamik yüklenen etiketlerinizi seçin. Local dataset'lerde `+` butonu ile kendinize özel yeni etiketler ekleyebilir, çöpe tıklayarak kullanılmayanları silebilirsiniz. Cloud sözleşmelerinde ise projeye sağlanan etiket havuzu read-only (salt okunur) olarak güvence altına alınır.
 2. Toolbar'dan bir araç seçin:
    - **Select**: Mevcut anotasyonları seçmek ve düzenlemek için.
    - **SAM**: Tek tıkla AI destekli otomatik segmentasyon.

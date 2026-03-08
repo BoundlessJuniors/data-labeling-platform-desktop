@@ -72,6 +72,7 @@ export function initDb(): void {
   `)
   // --- Lightweight migrations (kolon ekleme) ---
   migrateDatasets()
+  migrateDatasetsLabels()
   migrateMediaItems()
   migrateAnnotations()
 }
@@ -133,6 +134,48 @@ function migrateDatasets(): void {
   }
   // folder_path kolonu garanti olduktan sonra index güvenle oluşturulur
   db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS ux_datasets_folder_path ON datasets(folder_path);`)
+}
+
+function migrateDatasetsLabels(): void {
+  const db = getDb()
+  if (!hasColumn('datasets', 'label_source')) {
+    db.exec(`ALTER TABLE datasets ADD COLUMN label_source TEXT;`)
+  }
+  if (!hasColumn('datasets', 'annotation_format')) {
+    db.exec(`ALTER TABLE datasets ADD COLUMN annotation_format TEXT;`)
+  }
+  if (!hasColumn('datasets', 'labeling_spec_json')) {
+    db.exec(`ALTER TABLE datasets ADD COLUMN labeling_spec_json TEXT;`)
+  }
+  if (!hasColumn('datasets', 'qc_mode')) {
+    db.exec(`ALTER TABLE datasets ADD COLUMN qc_mode TEXT;`)
+  }
+  if (!hasColumn('datasets', 'label_set_name')) {
+    db.exec(`ALTER TABLE datasets ADD COLUMN label_set_name TEXT;`)
+  }
+  if (!hasColumn('datasets', 'label_set_version')) {
+    db.exec(`ALTER TABLE datasets ADD COLUMN label_set_version INTEGER;`)
+  }
+
+  // Normalize existing legacy local datasets
+  db.exec(
+    `UPDATE datasets SET label_source = 'local' WHERE cloud_contract_id IS NULL AND label_source IS NULL;`
+  )
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS dataset_labels (
+      id TEXT PRIMARY KEY,
+      dataset_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      color TEXT,
+      attributes_schema_json TEXT,
+      source TEXT NOT NULL DEFAULT 'local',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_dataset_labels_dataset ON dataset_labels(dataset_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_dataset_labels_dataset_name ON dataset_labels(dataset_id, name);
+  `)
 }
 
 function migrateAnnotations(): void {

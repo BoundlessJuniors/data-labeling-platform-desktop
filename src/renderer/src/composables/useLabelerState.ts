@@ -1,6 +1,11 @@
 import { reactive } from 'vue'
-import type { Annotation, Point } from '@renderer/types/annotation'
-interface LabelerState {
+import type {
+  Annotation,
+  Point,
+  LabelDefinition,
+  DatasetLabelSource
+} from '@renderer/types/annotation'
+export interface LabelerState {
   annotations: Annotation[]
   selectedAnnotationId: number | null
   history: Annotation[][]
@@ -25,6 +30,16 @@ interface LabelerState {
   polyPoints: Point[]
 
   img: HTMLImageElement
+
+  availableLabels: LabelDefinition[]
+  labelSource: DatasetLabelSource
+  annotationFormat: string | null
+  labelingSpecJson: unknown | null
+  qcMode: string | null
+  labelSetName: string | null
+  labelSetVersion: number | null
+  labelSearchTerm: string
+  labelingLoadError: string | null
 }
 
 export function useLabelerState(): { state: LabelerState } {
@@ -52,7 +67,17 @@ export function useLabelerState(): { state: LabelerState } {
     drawingShape: null as 'bbox' | 'polygon' | 'polyline' | 'circle' | null,
     polyPoints: [] as Point[],
 
-    img: new Image()
+    img: new Image(),
+
+    availableLabels: [] as LabelDefinition[],
+    labelSource: null as DatasetLabelSource,
+    annotationFormat: null,
+    labelingSpecJson: null,
+    qcMode: null,
+    labelSetName: null,
+    labelSetVersion: null,
+    labelSearchTerm: '',
+    labelingLoadError: null
   })
 
   return { state }
