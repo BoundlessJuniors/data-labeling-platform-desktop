@@ -204,6 +204,12 @@ function setActiveLabelByName(name: string | null): void {
   updateCursor()
 }
 
+function hasValidActiveLabel(): boolean {
+  if (state.labelingLoadError) return false
+  if (!state.activeLabel) return false
+  return state.availableLabels.some((l) => l.name === state.activeLabel)
+}
+
 const konvaCanvasRef = ref<InstanceType<typeof KonvaCanvas> | null>(null)
 
 // Uygulama açıkken, her task için geçici (kaydedilmemiş) annotation'ları hafızada tutmak için
@@ -321,7 +327,8 @@ async function restartCurrentTask(): Promise<void> {
    Shapes Dropdown Control
    ============================= */
 let isShapesOpen = false
-let onDocClick: ((e: MouseEvent) => void) | null = null
+let onShapesDocClick: ((e: MouseEvent) => void) | null = null
+let onSamSettingsDocClick: ((e: MouseEvent) => void) | null = null
 let onEsc: ((e: KeyboardEvent) => void) | null = null
 
 function openShapes(): void {
@@ -377,7 +384,7 @@ function setActiveTool(el: HTMLElement | null): void {
   // Shapes dropdown içindeki gerçek şekil seçimi
   if (el.closest('#shapes-dropdown')) {
     // Henüz label seçili değilse: shapes moduna geçme, sadece küçük bir uyarı göster
-    if (!state.activeLabel) {
+    if (!hasValidActiveLabel()) {
       showLabelHint.value = true
       if (labelHintTimer != null) window.clearTimeout(labelHintTimer)
       labelHintTimer = window.setTimeout(() => {
@@ -410,7 +417,7 @@ function setActiveTool(el: HTMLElement | null): void {
   }
 
   // Dropdown dışında: select / sam / ana shapes butonu
-  if ((tool === 'shapes' || tool === 'sam') && !state.activeLabel) {
+  if ((tool === 'shapes' || tool === 'sam') && !hasValidActiveLabel()) {
     // Label yokken shapes veya sam moduna hiç geçme, uyarı göster
     showLabelHint.value = true
     if (labelHintTimer != null) window.clearTimeout(labelHintTimer)
@@ -548,6 +555,7 @@ function handleSelectAnnotationFromKonva(id: number | null): void {
 
 async function handleSamClickFromKonva(payload: { imgX: number; imgY: number }): Promise<void> {
   if (!tasks.value.length) return
+  if (!hasValidActiveLabel()) return
 
   // SAM aracı seçiliyken, her tıklamada önceden hazır olduğunu varsayıyoruz.
   if (!samReady.value) {
@@ -637,6 +645,7 @@ async function handleSamDrawFromKonva(payload: {
   labels: number[]
 }): Promise<void> {
   if (!tasks.value.length) return
+  if (!hasValidActiveLabel()) return
 
   // Ensure tool is ready
   if (!samReady.value) {
@@ -917,13 +926,11 @@ const { attachKeyboardShortcuts, detachKeyboardShortcuts } = useKeyboardShortcut
 watch(
   () => props.datasetId,
   async (newId) => {
-    if (!newId) return
-
     // 1) Clear cross-dataset bleeding state
     state.availableLabels = []
     state.activeLabel = null
     state.labelSearchTerm = ''
-    state.labelSource = 'local'
+    state.labelSource = null as unknown as 'local'
     state.annotationFormat = null
     state.labelingSpecJson = null
     state.qcMode = null
@@ -931,6 +938,17 @@ watch(
     state.labelSetVersion = null
     state.labelingLoadError = null
     localAnnotationsByTask.clear()
+    state.annotations = []
+    state.history = []
+    state.historyIndex = -1
+    state.selectedAnnotationId = null
+    clearSelection()
+    if (state.img) state.img.src = ''
+
+    if (!newId) {
+      await initFromDb(null)
+      return
+    }
 
     try {
       // 2) Load labeling context strictly before task logic
@@ -941,6 +959,9 @@ watch(
 
       if (tasks.value.length === 0) {
         console.warn('[UI] ⚠️ NO TASKS FOUND! Dataset might be empty.')
+        if (state.img) state.img.src = ''
+      } else {
+        await loadTaskByIndex(0)
       }
 
       // 4) SAM Prefetch (only if needed/supported)
@@ -1000,13 +1021,13 @@ onMounted(async (): Promise<void> => {
       }
       ;(e as MouseEvent).stopPropagation()
     })
-    onDocClick = (e: MouseEvent): void => {
+    onShapesDocClick = (e: MouseEvent): void => {
       const t = e.target as Node
       if (!shapesDropdown.value!.contains(t) && !shapesToolBtn.value!.contains(t)) {
         closeShapes()
       }
     }
-    document.addEventListener('click', onDocClick)
+    document.addEventListener('click', onShapesDocClick)
     onEsc = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') closeShapes()
     }
@@ -1139,14 +1160,13 @@ onMounted(async (): Promise<void> => {
           anns = exportAnnotationsToImageSpace() as Annotation[]
         } else {
           const cached = localAnnotationsByTask.get(mediaId)
-          if (cached && cached.length > 0) {
+          if (cached) {
             anns = JSON.parse(JSON.stringify(cached)) as Annotation[]
           }
         }
 
-        if (anns && anns.length > 0) {
-          const dataJson = JSON.stringify(anns, null, 2)
-          await window.api.db.annotations.saveExport({ media_id: mediaId, data_json: dataJson })
+        if (anns) {
+          await buildAndSaveExport(t, anns)
         }
       }
 
@@ -1250,17 +1270,18 @@ onMounted(async (): Promise<void> => {
   })
 
   // Listen for global click to close dropdowns
-  onDocClick = (e: Event) => {
+  onSamSettingsDocClick = (e: Event) => {
     const target = e.target as HTMLElement
-    if (shapesDropdown.value && !shapesToolBtn.value?.contains(target)) {
-      // Logic for shapes dropdown already handled by toggleShapes hopefully or similar
-    }
     // Also close SAM settings if clicked outside
-    if (showSamSettings.value && !target.closest('.sam-settings-container')) {
+    if (
+      showSamSettings.value &&
+      !target.closest('.sam-settings-container') &&
+      !target.closest('.sam-split-button')
+    ) {
       showSamSettings.value = false
     }
   }
-  document.addEventListener('click', onDocClick)
+  document.addEventListener('click', onSamSettingsDocClick)
 })
 
 onBeforeUnmount((): void => {
@@ -1268,7 +1289,10 @@ onBeforeUnmount((): void => {
   // window.removeEventListener('resize', fitToScreen)
   // containerRO?.disconnect()
   shapesToolBtn.value?.removeEventListener('click', toggleShapes)
-  if (onDocClick) document.removeEventListener('click', onDocClick)
+  if (onShapesDocClick)
+    document.removeEventListener('click', onShapesDocClick as unknown as (e: Event) => void)
+  if (onSamSettingsDocClick)
+    document.removeEventListener('click', onSamSettingsDocClick as unknown as (e: Event) => void)
   if (onEsc) document.removeEventListener('keydown', onEsc)
   detachKeyboardShortcuts()
   // detachCanvasInteractions()
@@ -1324,14 +1348,10 @@ async function loadTaskByIndex(i: number): Promise<void> {
 
   // Önce mevcut task'in annotation'larını hafızaya yaz (uygulama açıkken geçerli).
   const currentTask = tasks.value[currentTaskIndex.value]
-  if (currentTask) {
+  if (currentTask && state.img?.src) {
     const currentMediaId = currentTask.mediaId ?? currentTask.title ?? String(currentTask.id)
-    // Eğer gerçekten RAM'de annotation varsa cache'e yaz; aksi halde DB'deki kaydı
-    // "boş" bir snapshot ile gölgeleme.
-    if (state.annotations.length > 0) {
-      const snapshot = JSON.parse(JSON.stringify(state.annotations)) as Annotation[]
-      localAnnotationsByTask.set(currentMediaId, snapshot)
-    }
+    const snapshot = JSON.parse(JSON.stringify(state.annotations)) as Annotation[]
+    localAnnotationsByTask.set(currentMediaId, snapshot)
   }
 
   const clamped = Math.max(0, Math.min(tasks.value.length - 1, i))
@@ -1369,10 +1389,9 @@ async function loadTaskByIndex(i: number): Promise<void> {
 
     const mediaId = t.mediaId ?? t.title ?? String(t.id) // en sağlam kimlik
 
-    // Önce, bu task için oturum içi cache'te annotation var mı diye bak.
-    const cached = localAnnotationsByTask.get(mediaId)
-    if (cached && cached.length > 0) {
-      // Sadece gerçekten dolu bir cache varsa onu kullan
+    // Önce, bu task için oturum içi cache'te var mı diye bak.
+    if (localAnnotationsByTask.has(mediaId)) {
+      const cached = localAnnotationsByTask.get(mediaId)
       state.annotations = JSON.parse(JSON.stringify(cached)) as Annotation[]
     } else {
       // === RESTORE SAVED ANNOTATIONS (DB) ===
@@ -2149,10 +2168,19 @@ function confirmDownloadAction(accept: boolean): void {
             class="bg-surface/70 dark:bg-background-dark p-4 rounded-lg border border-border dark:border-gray-800 flex flex-col shrink-0"
           >
             <h3 class="text-lg font-semibold mb-3">Labels</h3>
-            <p v-if="showLabelHint" class="text-xs text-amber-500 mb-2">
+
+            <div
+              v-if="state.labelingLoadError"
+              class="mb-3 p-3 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 rounded-md text-sm"
+            >
+              <strong class="font-bold">Error Loading Labels:</strong><br />
+              {{ state.labelingLoadError }}
+            </div>
+
+            <p v-if="showLabelHint && !state.labelingLoadError" class="text-xs text-amber-500 mb-2">
               Lütfen önce bir label seçin.
             </p>
-            <div class="relative mb-3">
+            <div v-if="!state.labelingLoadError" class="relative mb-3">
               <SearchIcon
                 class="ui-svg h-5 w-5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2"
               />

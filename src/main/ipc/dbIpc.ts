@@ -324,18 +324,38 @@ export function registerDbIpc(): void {
       }
 
       // Check if the label is used by any persisted annotations in this dataset
-      // The JSON stringifier emits "label":"MyLabel", so we search for that exact pattern.
       const usageCheck = db
         .prepare(
-          `
-        SELECT 1 FROM annotations
-        WHERE media_id IN (SELECT id FROM media_items WHERE dataset_id = ?)
-        AND data_json LIKE ? LIMIT 1
-      `
+          `SELECT data_json FROM annotations
+           WHERE media_id IN (SELECT id FROM media_items WHERE dataset_id = ?)`
         )
-        .get(payload.dataset_id, `%"label":"${labelRow.name}"%`)
+        .all(payload.dataset_id) as { data_json: string }[]
 
-      if (usageCheck) {
+      let isUsed = false
+      for (const row of usageCheck) {
+        if (!row.data_json) continue
+        try {
+          const parsed = JSON.parse(row.data_json)
+          if (Array.isArray(parsed)) {
+            if (parsed.some((a: { label?: string }) => a.label === labelRow.name)) {
+              isUsed = true
+              break
+            }
+          }
+        } catch (e) {
+          console.error('Failed to parse annotation data_json for usage check:', e)
+          // Conservative fallback
+          if (
+            row.data_json.includes(`"label":"${labelRow.name}"`) ||
+            row.data_json.includes(`"label": "${labelRow.name}"`)
+          ) {
+            isUsed = true
+            break
+          }
+        }
+      }
+
+      if (isUsed) {
         throw new Error(
           `Cannot delete label "${labelRow.name}" because it is currently used by annotations in this dataset.`
         )

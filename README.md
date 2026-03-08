@@ -54,7 +54,7 @@
 
 ### ⏱️ Otomatik Kaydetme (Auto-Save) ve Süre Takibi
 
-- **1 dakikada bir otomatik kaydetme**: Tüm task'lerin anotasyonları ve çalışma süreleri otomatik olarak veritabanına yazılır.
+- **1 dakikada bir otomatik kaydetme**: Tüm task'lerin anotasyonları ve çalışma süreleri otomatik olarak veritabanına yazılır. Kullanıcı tarafından bilerek silinmiş (boş) etiket listeleri de durumu tam yansıtmak amacıyla kaydedilir.
 - **Save Draft butonu üzerinde progress halkası**: Otomatik kaydetmeye kalan süreyi görsel olarak gösterir.
 - **Task bazlı zamanlayıcı**: Her görev (görsel) için ayrı çalışma süresi saniye cinsinden kaydedilir.
 - **Global zamanlayıcı**: Toplam çalışma süresini header'da canlı olarak gösterir.
@@ -92,8 +92,9 @@
 - **Dataset tabanlı görev sistemi**: Bir klasörden içe aktarılan tüm görseller, otomatik olarak birer Task olarak oluşturulur.
 - **Görev durumları**: Her görev `Queued` → `In Progress` → `Completed` durumlarında izlenir.
 - **Görevler arası navigasyon**: Sol/Sağ ok tuşları veya Prev/Next butonlarıyla görevler arasında ileri/geri geçiş.
-- **Anotasyon koruma**: Görevler arasında geçiş yaparken mevcut anotasyonlar bellek içi cache'te korunur.
-- **DB'den anotasyon geri yükleme**: Task yüklendiğinde önce cache, yoksa veritabanından kaydedilmiş anotasyonlar restore edilir.
+- **Anotasyon koruma ve Sıfır Sızıntı**: Görevler arasında geçiş yaparken mevcut anotasyon durumu (kullanıcı tüm etiketleri temizlemiş olsa dahi) bellek içi cache'te sıkı bir şekilde güvenceye alınır.
+- **DB'den anotasyon geri yükleme**: Task yüklendiğinde görev önce cache'ten (boş bile olsa) okunur, eğer yoksa veritabanından kaydedilmiş anotasyonlar restore edilir.
+- **Dataset izolasyonu**: Farklı dataset'ler arasında geçiş yapıldığında eski görevlerin anotasyonları tamamen temizlenir.
 - **Submit Work**: Tüm görevler incelendikten sonra tek seferde toplu olarak "completed" durumuna geçirilir.
 
 ### 🎨 Tema ve Görünüm
@@ -233,6 +234,7 @@ label_gun/
 │           ├── composables/           # Vue 3 Composition API modülleri
 │           │   ├── useAuth.ts               # Kimlik doğrulama state'leri ve login/logout işlemleri
 │           │   ├── useCloud.ts              # Bulut veri iletişimi ve sözleşme durum reaktivitesi
+│           │   ├── useDatasetLabeling.ts    # Dataset etiket yönetimi ve cloud/local izin izolasyonu
 │           │   ├── useLabelerState.ts       # Merkezi reactive state yönetimi
 │           │   ├── useLabelerActions.ts     # Kullanıcı aksiyonları (save, submit, undo)
 │           │   ├── useHistory.ts            # Snapshot tabanlı undo/redo
@@ -431,6 +433,7 @@ Cloud sync işlemleri sırasında görevleri diğer labeler'lara karşı kilitle
 | ------------------------ | --------------------------------------------------------------------------------------------------------- |
 | `useAuth`                | Kullanıcı oturum yönetimi (login, logout, hata durumları)                                                 |
 | `useCloud`               | Cloud sözleşme verilerini çekme, indirme (lease-batch), submit işlemleri ve sync durumu                   |
+| `useDatasetLabeling`     | Dataset etiket havuzu yükleme, aktif etiket seçimi ve cloud(salt-okunur) / local(yönetilebilir) kontrolü  |
 | `useLabelerState`        | Merkezi reaktif durum: anotasyonlar, seçim, çizim bayrakları, araç/etiket bilgisi, zoom/pan parametreleri |
 | `useHistory`             | JSON snapshot ile undo/redo geçmişi yönetimi                                                              |
 | `useCanvasTransform`     | Zoom (min 0.6x – max 10x), pan, fit-to-screen hesaplamaları                                               |

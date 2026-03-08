@@ -21,6 +21,7 @@ export function useDatasetLabeling(state: LabelerState): {
         state.labelSetName = result.dataset.labelSetName ?? null
         state.labelSetVersion = result.dataset.labelSetVersion ?? null
         state.availableLabels = result.labels as LabelDefinition[]
+        state.labelingLoadError = null
       } else {
         state.labelSource = 'local'
         state.availableLabels = []
@@ -68,7 +69,7 @@ export function useDatasetLabeling(state: LabelerState): {
       await loadDatasetLabeling(datasetId)
 
       if (!state.activeLabel) {
-        state.activeLabel = name
+        state.activeLabel = trimmedName
       }
     } catch (err) {
       console.error('Failed to add local label:', err)
@@ -102,8 +103,12 @@ export function useDatasetLabeling(state: LabelerState): {
     return state.availableLabels.filter((l) => l.name.toLowerCase().includes(term))
   })
 
-  const isCloudLabelsReadOnly = computed(() => state.labelSource === 'cloud')
-  const canManageLocalLabels = computed(() => state.labelSource === 'local')
+  const isCloudLabelsReadOnly = computed(
+    () => state.labelSource === 'cloud' && !state.labelingLoadError
+  )
+  const canManageLocalLabels = computed(
+    () => state.labelSource === 'local' && !state.labelingLoadError
+  )
 
   return {
     loadDatasetLabeling,
