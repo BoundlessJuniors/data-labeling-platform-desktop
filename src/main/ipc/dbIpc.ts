@@ -150,7 +150,9 @@ export function registerDbIpc(): void {
       .all()
   })
 
-  // Save / Load exported annotation JSON as a single blob per media
+  // Save / Load exported annotation JSON as a single blob per media.
+  // CRITICAL ARCHITECTURAL RULE: The backend expects exactly ONE full final snapshot
+  // per media/task. We implement this by upserting a single row with id = `export:<media_id>`.
   ipcMain.handle(
     'db:annotations:saveExport',
     (

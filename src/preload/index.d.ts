@@ -11,7 +11,7 @@ declare global {
             id: string
             name: string
             folder_path?: string | null
-            cloud_contract_id?: string | null
+            cloud_contract_id?: string
           }) => Promise<{ ok: true }>
           list: () => Promise<
             Array<{ id: string; name: string; created_at: number; folder_path?: string | null }>
@@ -21,6 +21,13 @@ declare global {
             name: string
             created_at: number
             folder_path: string | null
+          } | null>
+          getByContractId: (contractId: string) => Promise<{
+            id: string
+            name: string
+            created_at: number
+            folder_path: string | null
+            cloud_contract_id: string
           } | null>
           delete: (datasetId: string) => Promise<{ ok: true }>
         }
@@ -42,6 +49,8 @@ declare global {
               height: number | null
               status: 'in_progress' | 'completed' | string | null
               annotation_seconds?: number | null
+              cloud_task_id?: string
+              contract_id?: string
             }>
           >
           setStatus: (payload: {
@@ -51,7 +60,14 @@ declare global {
           setTime: (payload: { media_id: string; seconds: number }) => Promise<{ ok: true }>
         }
         annotations: {
-          saveExport: (payload: { media_id: string; data_json: string }) => Promise<{ ok: true }>
+          saveExport: (payload: {
+            media_id: string
+            data_json: string
+            cloud_task_id?: string
+            contract_id?: string
+            payload_json?: string
+            payload_hash?: string
+          }) => Promise<{ ok: true }>
           getExport: (mediaId: string) => Promise<{ data_json: string; updated_at: number } | null>
         }
       }
@@ -141,14 +157,26 @@ declare global {
       }
       cloud: {
         fetchContracts: () => Promise<
-          Array<{ id: string; title: string; status: string; [key: string]: unknown }>
+          Array<{
+            id: string
+            status: string
+            listing: { id?: string; title: string }
+            [key: string]: unknown
+          }>
         >
-        syncContractTasks: (
+        downloadContractWork: (
           contractId: string,
-          datasetId: string
-        ) => Promise<{ synced: number; skipped: number; failed: number }>
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        submitContract: (contractId: string) => Promise<any>
+          datasetId: string,
+          amount: number
+        ) => Promise<{ leased: number; downloaded: number; skipped: number; failed: number }>
+        syncNow: () => Promise<{ ok: boolean }>
+        submitContract: (contractId: string) => Promise<{
+          ok: boolean
+          data?: unknown
+          unsyncedCount?: number
+          failedCount?: number
+          error?: string
+        }>
       }
       window: {
         minimize: () => Promise<void>

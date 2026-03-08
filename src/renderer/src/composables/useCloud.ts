@@ -5,9 +5,12 @@ import { ref } from 'vue'
 // -----------------------------------------------------------------------
 export interface CloudContract {
   id: string
-  title: string
   status: string
-  listing?: { title: string }
+  listing: { id?: string; title: string }
+  client?: unknown
+  labeler?: unknown
+  tasks?: unknown[]
+  _count?: { tasks: number }
   [key: string]: unknown
 }
 
@@ -20,6 +23,7 @@ export interface DownloadResult {
 
 export interface SubmitResult {
   ok: boolean
+  data?: unknown
   unsyncedCount?: number
   failedCount?: number
   error?: string

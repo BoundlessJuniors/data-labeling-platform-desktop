@@ -82,6 +82,8 @@ export function useLabelerActions(opts: UseLabelerActionsOptions): UseLabelerAct
       let payloadHash: string | undefined
 
       if (t.cloudTaskId) {
+        // PER BACKEND CONTRACT: This must be a FULL FINAL SNAPSHOT of all annotations for this media/task.
+        // It should never be a partial patch or single incremental shape.
         const payloadObj = {
           type: 'export',
           data: exported

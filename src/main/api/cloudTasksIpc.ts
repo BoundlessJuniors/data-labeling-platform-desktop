@@ -18,9 +18,12 @@ mkdirSync(cacheDir, { recursive: true })
 // -----------------------------------------------------------------------
 interface ContractItem {
   id: string
-  title: string
   status: string
-  listing?: { title: string }
+  listing: { id?: string; title: string }
+  client?: unknown
+  labeler?: unknown
+  tasks?: unknown[]
+  _count?: { tasks: number }
   [key: string]: unknown
 }
 
@@ -30,6 +33,8 @@ interface LeasedTask {
     id: string
     objectKey?: string
     mimeType?: string
+    width?: number
+    height?: number
     signedUrl?: string
     [key: string]: unknown
   }
@@ -37,7 +42,6 @@ interface LeasedTask {
     leaseToken: string
     leasedUntil?: string | number | null
   }
-  contractId: string
   [key: string]: unknown
 }
 
@@ -344,6 +348,7 @@ export function registerCloudTasksIpc(): void {
       unsyncedCount?: number
       failedCount?: number
       error?: string
+      data?: unknown
     }> => {
       // 1. Run sync first
       try {
@@ -378,8 +383,11 @@ export function registerCloudTasksIpc(): void {
 
       // 3. Submit contract
       try {
-        const response = await apiClient.patch(`/api/v1/contracts/${contractId}/submit`)
-        return { ok: true, ...response.data }
+        const response = await apiClient.patch<{
+          success: boolean
+          data?: unknown
+        }>(`/api/v1/contracts/${contractId}/submit`)
+        return { ok: true, data: response.data.data }
       } catch (err: unknown) {
         const error = err as { message: string }
         console.error(`[cloud:submitContract] contractId=${contractId} failed:`, error.message)

@@ -46,6 +46,8 @@ function classifyHttpError(status: number, body: string): { retryable: boolean; 
 
 // -----------------------------------------------------------------------
 // Tek seferlik senkronizasyon döngüsü
+// CRITICAL: Bu döngü backend'e sadece FULL FINAL SNAPSHOT payloads (export) gönderir,
+// asıl beklenen de budur. Parçalı gönderim desteklenmez ve yapılmamalıdır.
 // -----------------------------------------------------------------------
 export async function runSyncCycle(): Promise<void> {
   let db

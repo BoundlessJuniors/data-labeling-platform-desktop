@@ -84,6 +84,8 @@
 - **Kiralama (Lease) Mekanizması**: İndirilen görseller kiralama jetonu (lease token) ile korunur, böylece aynı görsel üzerinde başkasının da işlem yapması (race condition) önlenir.
 - **Akıllı Hata ve Senkronizasyon Yönetimi**: Arka planda çalışan Worker ile işlemler buluta senkronize edilir. HTTP hataları (403, 409 vb.) sınıflandırılarak kalıcı (non-retryable) veya geçici hatalara göre yönetilir.
 - **Payload Hash Optimizasyonu**: Anotasyon verilerinin SHA-256 hashleri oluşturularak aynı verinin buluta tekrar gönderilmesi (duplicate submission) engellenir.
+- **Kapsamlı Snapshot Modeli (Full Snapshot)**: İş akışı parçalı yamalar (incremental patch) yerine, sunucuya her daim bir görev/medyanın tüm güncel verilerini içeren tek, nihai bir "tam kopya (export)" gönderir.
+- **Strict Tip Uyumluluğu ve API Normalizasyonu**: Backend servislerinden dönen karmaşık veri yapıları (HTTP response zarfları vs.) doğrudan masaüstüne yansıtılmaz. IPC Köprüsü (Main Process), bu yanıtları normalize ederek Renderer'ın saf, platform-native `({ ok: true, data: ... })` yapılarıyla güvenli çalışmasını sağlar.
 
 ### 📋 Görev Yönetimi (Task Management)
 
@@ -190,9 +192,13 @@ label_gun/
 │   │   │                              # mask→polygon dönüşümü, convex hull
 │   │   ├── db/
 │   │   │   └── sqlite.ts              # SQLite bağlantısı, şema, migrasyon
-│   │   └── ipc/
-│   │       ├── dbIpc.ts               # Veritabanı IPC handler'ları (CRUD)
-│   │       └── samIpc.ts              # SAM model IPC handler'ları
+│   │   ├── ipc/
+│   │   │   ├── dbIpc.ts               # Veritabanı IPC handler'ları (CRUD)
+│   │   │   └── samIpc.ts              # SAM model IPC handler'ları
+│   │   ├── utils/
+│   │   │   └── hashUtil.ts            # Veri bütünlüğü için hashing yardımcıları
+│   │   └── workers/
+│   │       └── samWorker.ts           # SAM modelini main thread'i engellemeden çalıştıran arka plan Worker'ı
 │   │
 │   ├── preload/                       # Electron Preload (Renderer ↔ Main köprüsü)
 │   │   ├── index.ts                   # contextBridge – API'yi renderer'a açar
@@ -249,6 +255,9 @@ label_gun/
 │           └── assets/
 │               ├── base.css           # Temel CSS değişkenleri ve reset
 │               ├── fonts.css          # Font tanımları
+│               ├── main.css           # Uygulama genel stilleri
+│               ├── fonts/             # Uygulama font dosyaları (Exo vb.)
+│               ├── images/            # Statik uygulama görselleri
 │               └── icons/custom/      # SVG ikon dosyaları (undo, redo, search vb.)
 │
 ├── electron.vite.config.ts            # Vite yapılandırması (main/preload/renderer)
@@ -303,7 +312,7 @@ Uygulama yerel bir SQLite veritabanı kullanır (`%APPDATA%/label_gun/db/app.sql
 
 | Sütun                | Tip       | Açıklama                                               |
 | -------------------- | --------- | ------------------------------------------------------ |
-| `id`                 | TEXT (PK) | Anotasyon kimliği (dışa aktarımda `export:MEDIA_ID`)   |
+| `id`                 | TEXT (PK) | Anotasyon kimliği (dışa aktarımda `export:MEDIA_ID` / Snapshot)|
 | `media_id`           | TEXT (FK) | Bağlı olduğu görsel                                    |
 | `type`               | TEXT      | Tip: `bbox`, `polygon`, `keypoint`, `circle`, `export` |
 | `category`           | TEXT      | Kategori/sınıf adı                                     |
@@ -365,12 +374,12 @@ Cloud sync işlemleri sırasında görevleri diğer labeler'lara karşı kilitle
 
 | Kanal                        | Yön    | Açıklama                                                  |
 | ---------------------------- | ------ | --------------------------------------------------------- |
-| `auth:login`                 | invoke | Bulut hesabına giriş yapar                                |
+| `auth:login`                 | invoke | Bulut hesabına giriş yapar ve doğrulanmış kullanıcıyı döner |
 | `auth:logout`                | invoke | Bulut hesabından çıkış yapar                              |
 | `cloud:fetchContracts`       | invoke | Kullanıcıya atanmış sözleşmeleri listeler                 |
 | `cloud:downloadContractWork` | invoke | Kiralama (lease-batch) ve asset indirme akışını yürütür   |
 | `cloud:syncNow`              | invoke | Arka planda bekleyen anotasyonları anında senkronize eder |
-| `cloud:submitContract`       | invoke | Görevleri API'ye teslim edildi (submit) olarak bildirir   |
+| `cloud:submitContract`       | invoke | Görevleri API'ye teslim eder (Normalize `SubmitResult` döner) |
 
 ### Pencere ve Sistem Kanalları
 
