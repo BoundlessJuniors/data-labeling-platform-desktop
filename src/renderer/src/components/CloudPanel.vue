@@ -3,6 +3,10 @@ import { ref, onMounted } from 'vue'
 import { useAuth } from '../composables/useAuth'
 import { useCloud, type SubmitResult } from '../composables/useCloud'
 
+const emit = defineEmits<{
+  (e: 'dataset-downloaded'): void
+}>()
+
 const { user, isAuthenticated, isLoading: authLoading, error: authError, login, logout } = useAuth()
 const {
   contracts,
@@ -46,6 +50,7 @@ const handleDownload = async (contractId: string, contractTitle: string): Promis
   try {
     const amount = Math.min(Math.max(1, downloadAmount.value), 100)
     await downloadContractWork(contractId, contractTitle, amount)
+    emit('dataset-downloaded')
   } catch (err) {
     console.error('Download failed', err)
   } finally {

@@ -225,7 +225,7 @@ const onClose = (): void => {
             >
               ✕
             </button>
-            <CloudPanel />
+            <CloudPanel @dataset-downloaded="refreshDatasets" />
           </div>
         </div>
 
@@ -325,7 +325,7 @@ const onClose = (): void => {
             >
               ✕
             </button>
-            <CloudPanel />
+            <CloudPanel @dataset-downloaded="refreshDatasets" />
           </div>
         </div>
       </transition>
