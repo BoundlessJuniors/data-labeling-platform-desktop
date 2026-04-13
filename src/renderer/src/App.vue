@@ -8,6 +8,15 @@ type DatasetRow = { id: string; name: string; created_at: number; folder_path?: 
 const activeTab = ref<'local' | 'cloud'>('local')
 const datasets = ref<DatasetRow[]>([])
 
+// Date formatter
+const formatDate = (ts: number | undefined): string => {
+  if (!ts) return ''
+  return new Intl.DateTimeFormat('default', {
+    dateStyle: 'medium',
+    timeStyle: 'short'
+  }).format(new Date(ts))
+}
+
 // Son seçilen dataset'i localStorage'dan geri yükle
 const selectedDatasetId = ref<string | null>(localStorage.getItem('selectedDatasetId'))
 const isDatasetModalOpen = ref<boolean>(false)
@@ -151,202 +160,212 @@ const onClose = (): void => {
       <!-- Dataset seçimi modülü -->
       <transition name="fade">
         <div
-          v-if="isDatasetModalOpen && !selectedDatasetId"
-          class="absolute inset-0 z-50 flex flex-col items-center p-6 bg-gray-50/95 dark:bg-gray-900/95 backdrop-blur-sm transition-colors overflow-auto"
+          v-if="isDatasetModalOpen"
+          class="absolute inset-0 z-50 flex flex-col p-6 sm:p-10 bg-slate-50 dark:bg-slate-900 transition-colors overflow-auto"
         >
-          <!-- Sekme Butonları -->
-          <div class="flex justify-center space-x-4 mb-8">
+          <!-- Üst Alan: Başlık ve Kapat Butonu -->
+          <div class="max-w-5xl w-full mx-auto flex items-start justify-between mb-8">
+            <div>
+              <h1 class="text-3xl font-bold text-slate-900 dark:text-slate-100 tracking-tight">
+                Datasets
+              </h1>
+              <p class="text-slate-500 dark:text-slate-400 mt-1">
+                Manage your local datasets or sync with LabelGun Cloud.
+              </p>
+            </div>
             <button
-              class="px-6 py-2 rounded-md font-semibold transition-all duration-200"
-              :class="
-                activeTab === 'local'
-                  ? 'bg-blue-600 text-white shadow-md'
-                  : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
-              "
-              @click="activeTab = 'local'"
+              v-if="selectedDatasetId"
+              class="p-2 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-200/50 dark:hover:text-slate-200 dark:hover:bg-slate-800 transition-colors"
+              title="Close Workspace"
+              @click="isDatasetModalOpen = false"
             >
-              Yerel Çalışma Alanı
-            </button>
-            <button
-              class="px-6 py-2 rounded-md font-semibold transition-all duration-200"
-              :class="
-                activeTab === 'cloud'
-                  ? 'bg-blue-600 text-white shadow-md'
-                  : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
-              "
-              @click="activeTab = 'cloud'"
-            >
-              Bulut Çalışma Alanı
+              <svg
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
             </button>
           </div>
 
+          <!-- Sekme Navigasyonu -->
+          <div class="max-w-5xl w-full mx-auto mb-6">
+            <div class="flex border-b border-slate-200 dark:border-slate-800">
+              <button
+                class="px-6 py-3 font-medium text-sm transition-colors border-b-2 relative -bottom-[1px]"
+                :class="
+                  activeTab === 'local'
+                    ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                    : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300'
+                "
+                @click="activeTab = 'local'"
+              >
+                Local Workspace
+              </button>
+              <button
+                class="px-6 py-3 font-medium text-sm transition-colors border-b-2 relative -bottom-[1px]"
+                :class="
+                  activeTab === 'cloud'
+                    ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                    : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300'
+                "
+                @click="activeTab = 'cloud'"
+              >
+                Cloud Workspace
+              </button>
+            </div>
+          </div>
+
           <!-- YEREL İÇERİK -->
-          <div
-            v-if="activeTab === 'local'"
-            class="w-full max-w-xl rounded-lg border border-gray-200 dark:border-gray-700 p-6 bg-white dark:bg-gray-800 shadow-sm transition-colors relative"
-          >
-            <!-- Eğer iptal edebilmek istenirse çarpı konabilir ama dataset seçilmeden çıkılamıyor çünkü seçili yok -->
-            <button
-              v-if="selectedDatasetId"
-              class="absolute top-4 right-4 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-              @click="isDatasetModalOpen = false"
-            >
-              ✕
-            </button>
-
-            <h1 class="text-2xl font-bold mb-2 text-gray-900 dark:text-gray-100">
-              Dataset Selection
-            </h1>
-            <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
-              Select a dataset to continue or import a new folder.
-            </p>
-
-            <div class="flex gap-2 mb-4">
-              <button class="px-4 py-2 rounded bg-blue-600 text-white" @click="importDataset">
+          <div v-if="activeTab === 'local'" class="max-w-5xl w-full mx-auto">
+            <!-- Toolbar -->
+            <div class="flex justify-between items-center mb-4">
+              <h2 class="text-lg font-semibold text-slate-800 dark:text-slate-200">
+                Local Datasets
+              </h2>
+              <button
+                class="px-4 py-2 flex items-center gap-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white font-medium shadow-sm transition-colors text-sm"
+                @click="importDataset"
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
+                </svg>
                 Import Dataset
               </button>
             </div>
 
-            <div v-if="datasets.length === 0" class="text-sm text-gray-500">No datasets found.</div>
-
-            <ul v-else class="space-y-2">
-              <li
-                v-for="d in datasets"
-                :key="d.id"
-                class="flex items-center justify-between border dark:border-gray-700 rounded p-3 bg-gray-50 dark:bg-gray-700/50"
+            <!-- Boş Durum -->
+            <div
+              v-if="datasets.length === 0"
+              class="flex flex-col items-center justify-center p-12 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm text-center"
+            >
+              <div class="p-4 bg-slate-100 dark:bg-slate-700 rounded-full mb-4 text-slate-400">
+                <svg
+                  width="32"
+                  height="32"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path
+                    d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
+                  ></path>
+                </svg>
+              </div>
+              <h3 class="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-1">
+                No local datasets found
+              </h3>
+              <p class="text-slate-500 dark:text-slate-400 text-sm mb-6 max-w-sm">
+                Get started by importing a folder containing your images. We'll automatically set up
+                a workspace for you.
+              </p>
+              <button
+                class="px-4 py-2 rounded-md bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-medium transition-colors text-sm shadow-sm"
+                @click="importDataset"
               >
-                <div>
-                  <div class="font-semibold text-gray-900 dark:text-gray-100">{{ d.name }}</div>
-                  <div class="text-xs text-gray-500 dark:text-gray-400">id: {{ d.id }}</div>
-                </div>
-                <div class="flex gap-2">
-                  <button
-                    class="px-3 py-2 rounded bg-green-600 text-white"
-                    @click="selectDataset(d.id)"
-                  >
-                    Select
-                  </button>
-
-                  <button
-                    class="px-3 py-2 rounded bg-red-600 text-white"
-                    @click="deleteDataset(d.id)"
-                  >
-                    Delete
-                  </button>
-                </div>
-              </li>
-            </ul>
-          </div>
-
-          <!-- BULUT İÇERİK -->
-          <div v-else-if="activeTab === 'cloud'" class="w-full max-w-2xl px-2 relative">
-            <button
-              v-if="selectedDatasetId"
-              class="absolute -top-12 right-4 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-              @click="isDatasetModalOpen = false"
-            >
-              ✕
-            </button>
-            <CloudPanel @dataset-downloaded="refreshDatasets" />
-          </div>
-        </div>
-
-        <!-- Eğer daha önce bir dataset seçildiyse de sonradan datasets'e tıklanıp açılırsa -->
-        <div
-          v-else-if="isDatasetModalOpen && selectedDatasetId"
-          class="absolute inset-0 z-50 flex flex-col items-center p-6 bg-gray-50/95 dark:bg-gray-900/95 backdrop-blur-sm transition-colors overflow-auto"
-        >
-          <!-- Sekme Butonları -->
-          <div class="flex justify-center space-x-4 mb-8">
-            <button
-              class="px-6 py-2 rounded-md font-semibold transition-all duration-200"
-              :class="
-                activeTab === 'local'
-                  ? 'bg-blue-600 text-white shadow-md'
-                  : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
-              "
-              @click="activeTab = 'local'"
-            >
-              Yerel Çalışma Alanı
-            </button>
-            <button
-              class="px-6 py-2 rounded-md font-semibold transition-all duration-200"
-              :class="
-                activeTab === 'cloud'
-                  ? 'bg-blue-600 text-white shadow-md'
-                  : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
-              "
-              @click="activeTab = 'cloud'"
-            >
-              Bulut Çalışma Alanı
-            </button>
-          </div>
-
-          <!-- YEREL İÇERİK -->
-          <div
-            v-if="activeTab === 'local'"
-            class="w-full max-w-xl rounded-lg border border-gray-200 dark:border-gray-700 p-6 bg-white dark:bg-gray-800 shadow-sm transition-colors relative"
-          >
-            <!-- İptal Et -->
-            <button
-              class="absolute top-4 right-4 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-              @click="isDatasetModalOpen = false"
-            >
-              ✕
-            </button>
-
-            <h1 class="text-2xl font-bold mb-2 text-gray-900 dark:text-gray-100">
-              Dataset Selection
-            </h1>
-            <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
-              Select a dataset to continue or import a new folder.
-            </p>
-
-            <div class="flex gap-2 mb-4">
-              <button class="px-4 py-2 rounded bg-blue-600 text-white" @click="importDataset">
-                Import Dataset
+                Browse Folders...
               </button>
             </div>
 
-            <div v-if="datasets.length === 0" class="text-sm text-gray-500">No datasets found.</div>
-
-            <ul v-else class="space-y-2">
-              <li
+            <!-- Dataset Listesi -->
+            <div v-else class="space-y-3">
+              <div
                 v-for="d in datasets"
                 :key="d.id"
-                class="flex items-center justify-between border dark:border-gray-700 rounded p-3 bg-gray-50 dark:bg-gray-700/50"
+                class="flex items-center justify-between border border-slate-200 dark:border-slate-700 rounded-lg p-4 bg-white dark:bg-slate-800 shadow-sm hover:border-blue-300 dark:hover:border-blue-500/50 transition-colors"
               >
-                <div>
-                  <div class="font-semibold text-gray-900 dark:text-gray-100">{{ d.name }}</div>
-                  <div class="text-xs text-gray-500 dark:text-gray-400">id: {{ d.id }}</div>
+                <div class="flex-1 min-w-0 pr-4">
+                  <div class="flex items-center gap-3 mb-1">
+                    <h3 class="font-semibold text-slate-900 dark:text-slate-100 truncate">
+                      {{ d.name }}
+                    </h3>
+                    <span
+                      v-if="d.created_at"
+                      class="text-xs text-slate-400 dark:text-slate-500 border border-slate-200 dark:border-slate-700 px-2 py-0.5 rounded-full"
+                    >
+                      {{ formatDate(d.created_at) }}
+                    </span>
+                  </div>
+                  <div
+                    class="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400 truncate"
+                  >
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      class="shrink-0"
+                    >
+                      <path
+                        d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
+                      ></path>
+                    </svg>
+                    <span class="truncate" :title="d.folder_path || 'No path'">{{
+                      d.folder_path || 'No path selected'
+                    }}</span>
+                  </div>
                 </div>
-                <div class="flex gap-2">
+
+                <div class="flex items-center gap-2 shrink-0">
                   <button
-                    class="px-3 py-2 rounded bg-green-600 text-white"
+                    class="px-4 py-2 rounded-md bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-600 hover:text-slate-900 dark:hover:text-white transition-colors text-sm font-medium shadow-sm"
                     @click="selectDataset(d.id)"
                   >
-                    Select
+                    Open Workspace
                   </button>
 
                   <button
-                    class="px-3 py-2 rounded bg-red-600 text-white"
+                    class="p-2 rounded-md text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
+                    title="Delete Dataset"
                     @click="deleteDataset(d.id)"
                   >
-                    Delete
+                    <svg
+                      width="18"
+                      height="18"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <polyline points="3 6 5 6 21 6"></polyline>
+                      <path
+                        d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
+                      ></path>
+                      <line x1="10" y1="11" x2="10" y2="17"></line>
+                      <line x1="14" y1="11" x2="14" y2="17"></line>
+                    </svg>
                   </button>
                 </div>
-              </li>
-            </ul>
+              </div>
+            </div>
           </div>
 
           <!-- BULUT İÇERİK -->
-          <div v-else-if="activeTab === 'cloud'" class="w-full max-w-2xl px-2 relative">
-            <button
-              class="absolute -top-12 right-4 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-              @click="isDatasetModalOpen = false"
-            >
-              ✕
-            </button>
+          <div v-else-if="activeTab === 'cloud'" class="max-w-5xl w-full mx-auto">
             <CloudPanel @dataset-downloaded="refreshDatasets" />
           </div>
         </div>
