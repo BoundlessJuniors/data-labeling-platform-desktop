@@ -19,7 +19,7 @@ const formatDate = (ts: number | undefined): string => {
 
 // Son seçilen dataset'i localStorage'dan geri yükle
 const selectedDatasetId = ref<string | null>(localStorage.getItem('selectedDatasetId'))
-const isDatasetModalOpen = ref<boolean>(false)
+const isDatasetModalOpen = ref<boolean>(true)
 
 async function refreshDatasets(): Promise<void> {
   datasets.value = await window.api.db.datasets.list()
