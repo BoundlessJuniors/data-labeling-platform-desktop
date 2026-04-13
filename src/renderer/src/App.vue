@@ -2,6 +2,10 @@
 import { onMounted, ref } from 'vue'
 import LabelerView from './views/LabelerView.vue'
 import CloudPanel from './components/CloudPanel.vue'
+import ToastHost from './components/ui/ToastHost.vue'
+import DialogHost from './components/ui/DialogHost.vue'
+
+import { useFeedback } from './composables/useFeedback'
 
 type DatasetRow = { id: string; name: string; created_at: number; folder_path?: string | null }
 
@@ -62,7 +66,11 @@ async function importDataset(): Promise<void> {
 }
 
 async function deleteDataset(id: string): Promise<void> {
-  const ok = confirm('Bu dataset silinsin mi? (Geri alınamaz)')
+  const { dialog } = useFeedback()
+  const ok = await dialog.dangerConfirm({
+    title: 'Delete Dataset',
+    message: 'Bu dataset silinsin mi? (Geri alınamaz)'
+  })
   if (!ok) return
 
   await window.api.db.datasets.delete(id)
@@ -99,6 +107,10 @@ const onClose = (): void => {
 
 <template>
   <div class="h-screen flex flex-col overflow-hidden">
+    <!-- Global Notifications & Dialogs -->
+    <ToastHost />
+    <DialogHost />
+
     <!-- Custom title bar (frameless window) -->
     <header
       class="flex items-center justify-between pl-4 pr-0 h-10 bg-slate-900 text-slate-100 dark:bg-slate-950 border-b border-slate-800/80 shadow-sm select-none"

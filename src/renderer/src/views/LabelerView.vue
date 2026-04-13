@@ -47,6 +47,9 @@ import { useAnnotationsRenderer } from '@renderer/composables/useAnnotationsRend
 import { useKeyboardShortcuts } from '@renderer/composables/useKeyboardShortcuts'
 import { useLabelerActions, buildAndSaveExport } from '@renderer/composables/useLabelerActions'
 import KonvaCanvas from '@renderer/components/KonvaCanvas.vue'
+import { useFeedback } from '@renderer/composables/useFeedback'
+
+const { dialog, toast, state: feedbackState } = useFeedback()
 
 /* =============================
    Refs (DOM erişimi)
@@ -111,17 +114,7 @@ const samStatus = ref<SamStatusInfo>({
   modelsStatus: {},
   error: null
 })
-const downloadConfirmation = ref<{
-  show: boolean
-  modelId: string
-  modelName: string
-  size: string
-}>({
-  show: false,
-  modelId: '',
-  modelName: '',
-  size: ''
-})
+// (removed downloadConfirmation as it is replaced by Dialog system)
 
 // Polygon düzenleme modu (SAM veya normal polygon)
 const editingAnnotationId = ref<number | null>(null)
@@ -184,17 +177,22 @@ const handleAddLabel = async (): Promise<void> => {
     await addLocalLabel(props.datasetId, newLabelName.value.trim())
     newLabelName.value = ''
   } catch (err: unknown) {
-    alert((err as Error).message)
+    toast.error('Giriş Hatası', (err as Error).message)
   }
 }
 
 const handleDeleteLabel = async (labelId: string): Promise<void> => {
   if (!props.datasetId) return
-  if (!confirm('Are you sure you want to delete this label?')) return
+  const ok = await dialog.dangerConfirm({
+    title: 'Delete Label',
+    message: 'Are you sure you want to delete this label?'
+  })
+  if (!ok) return
+
   try {
     await deleteLocalLabel(props.datasetId, labelId)
   } catch (err: unknown) {
-    alert((err as Error).message)
+    toast.error('Hata', (err as Error).message)
   }
 }
 
@@ -636,7 +634,10 @@ async function handleSamClickFromKonva(payload: { imgX: number; imgY: number }):
     }
   } catch (e) {
     console.error('[SAM] run failed:', e)
-    alert('SAM ile maske oluşturulurken bir hata oluştu. Ayrıntılar için konsolu kontrol edin.')
+    toast.error(
+      'SAM Error',
+      'SAM ile maske oluşturulurken bir hata oluştu. Ayrıntılar için konsolu kontrol edin.'
+    )
   }
 }
 
@@ -1488,7 +1489,7 @@ async function loadTaskByIndex(i: number): Promise<void> {
 
 function handleTaskNavigation(idx: number): void {
   if (editingAnnotationId.value !== null) {
-    alert('⚠️ Finish editing first! Press ESC to cancel or Enter to save.')
+    toast.warning('Not Saved', 'Finish editing first! Press ESC to cancel or Enter to save.')
     return
   }
   loadTaskByIndex(idx)
@@ -1511,7 +1512,7 @@ function handleStrokeWidthScroll(e: WheelEvent): void {
 
 async function handleSamModelSelect(modelId: string): Promise<void> {
   // Guard: Confirm dialog is already open
-  if (downloadConfirmation.value.show) return
+  if (feedbackState.dialog.isOpen) return
 
   // Guard: Download in progress
   if (samDownloading.value || samPaused.value) {
@@ -1520,7 +1521,10 @@ async function handleSamModelSelect(modelId: string): Promise<void> {
       return
     } else {
       // Downloading a DIFFERENT model, block switching
-      alert('Please wait for the current download to complete or cancel it first.')
+      toast.warning(
+        'Download in progress',
+        'Please wait for the current download to complete or cancel it first.'
+      )
       return
     }
   }
@@ -1531,16 +1535,21 @@ async function handleSamModelSelect(modelId: string): Promise<void> {
   const isDownloaded = samStatus.value.modelsStatus?.[modelId] === 'available'
 
   if (!isDownloaded) {
-    // Show confirmation instead of downloading immediately
-    const model = samModels.value[modelId]
-    downloadConfirmation.value = {
-      show: true,
-      modelId,
-      modelName: model?.name || modelId,
-      size: model?.size || 'Unknown'
-    }
-    // Close settings dropdown
+    // Return early to close settings dropdown visually, then show dialog asynchronously
     showSamSettings.value = false
+    const model = samModels.value[modelId]
+
+    // Slight delay so the close animation of the settings popover completes
+    setTimeout(async () => {
+      const ok = await dialog.confirm({
+        title: 'Download Model',
+        message: `Are you sure you want to download the <strong>${model?.name || modelId}</strong> model?`,
+        detail: `Size: ${model?.size || 'Unknown'}`
+      })
+      if (ok) {
+        performModelSwitch(modelId, true)
+      }
+    }, 100)
     return
   }
 
@@ -1604,15 +1613,6 @@ async function cancelDownload(modelId: string): Promise<void> {
   // Update status
   const newStatus = await window.api.sam.status()
   samStatus.value = newStatus
-}
-
-function confirmDownloadAction(accept: boolean): void {
-  const { modelId } = downloadConfirmation.value
-  downloadConfirmation.value.show = false
-
-  if (accept && modelId) {
-    performModelSwitch(modelId, true)
-  }
 }
 </script>
 
@@ -2246,42 +2246,6 @@ function confirmDownloadAction(accept: boolean): void {
         </div>
       </div>
     </main>
-
-    <!-- Download Confirmation Modal -->
-    <transition name="fade">
-      <div
-        v-if="downloadConfirmation.show"
-        class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
-      >
-        <div
-          class="bg-surface dark:bg-gray-800 rounded-xl shadow-2xl max-w-sm w-full p-6 border border-slate-200 dark:border-gray-700"
-        >
-          <h3 class="text-lg font-bold text-slate-800 dark:text-gray-100 mb-2">Download Model?</h3>
-          <p class="text-sm text-slate-600 dark:text-gray-300 mb-4">
-            You are about to download <strong>{{ downloadConfirmation.modelName }}</strong
-            >. <br /><br />
-            Approximate size:
-            <span class="font-mono bg-slate-100 dark:bg-gray-700 px-1 rounded">{{
-              downloadConfirmation.size
-            }}</span>
-          </p>
-          <div class="flex items-center justify-end gap-3">
-            <button
-              class="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-700"
-              @click="confirmDownloadAction(false)"
-            >
-              Cancel
-            </button>
-            <button
-              class="px-4 py-2 rounded-lg text-sm font-medium text-white bg-primary hover:bg-primary-light"
-              @click="confirmDownloadAction(true)"
-            >
-              Download
-            </button>
-          </div>
-        </div>
-      </div>
-    </transition>
   </div>
 </template>
 <style src="@renderer/styles/labeler-view.css"></style>

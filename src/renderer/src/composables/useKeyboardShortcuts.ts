@@ -29,6 +29,8 @@ type KeyboardDeps = {
   redoLocalEdit?: () => void
 }
 
+import { useFeedback } from './useFeedback'
+
 export function useKeyboardShortcuts(deps: KeyboardDeps): {
   attachKeyboardShortcuts: () => void
   detachKeyboardShortcuts: () => void
@@ -56,6 +58,10 @@ export function useKeyboardShortcuts(deps: KeyboardDeps): {
     } = deps
 
     handler = (e: KeyboardEvent): void => {
+      if (useFeedback().state.dialog.isOpen) {
+        return
+      }
+
       const target = e.target as HTMLElement | null
 
       if (target) {

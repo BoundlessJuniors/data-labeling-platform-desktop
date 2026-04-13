@@ -105,6 +105,13 @@
 - **Anotasyon renk paleti**: Tüm şekiller tek bir ana renk (`#F97316` – Orange) ile çizilir; tip bazında dolgu opaklığı farklılaştırılır.
 - **Ayarlanabilir çizgi kalınlığı**: Toolbar üzerinde 1–10 arası slider ile anotasyon kenar kalınlığı dinamik olarak değiştirilebilir.
 
+### 🔔 Gelişmiş Geri Bildirim Sistemi (Feedback System)
+
+- **Toast Bildirimleri (ToastHost)**: İşlem sonuçları, uyarılar ve arka plan process'leri için otomatik kapanan (auto-dismiss), modern anlık bildirimler.
+- **Özel Diyaloglar (DialogHost)**: Native tarayıcı pencereleri (`alert`/`confirm`) yerine uygulamanın karanlık/aydınlık teması ile tam uyumlu, uygulamanın geri kalanıyla görsel bütünlük sağlayan modal iletişim kutuları.
+- **Klavye İzolasyonu**: Diyaloglar etkinken arka plan klavye kısayollarını (ör. çizim veya undo/redo tetiklemeleri) donduran akıllı event listener (Capture Phase) yönetimi.
+- **Güvenlik Politikası (XSS Koruması)**: Kullanıcıdan veya ağdan gelen veri içeren diyalog/toast mesajlarında `v-html` yerine güvenli metin interpolasyonu (`{{ }}`) kullanılarak **Cross-Site Scripting (XSS)** zafiyetleri önlenir.
+
 ### 🖥️ Özel Çerçevesiz Pencere (Custom Frameless Window)
 
 - İşletim sistemi varsayılan başlık çubuğu yerine, tamamen özelleştirilmiş bir title bar.
@@ -225,6 +232,9 @@ label_gun/
 │           │                          # SAM entegrasyonu, auto-save, task navigasyonu
 │           │
 │           ├── components/
+│           │   ├── ui/
+│           │   │   ├── DialogHost.vue # Global modal iletişim ve onay penceresi yöneticisi
+│           │   │   └── ToastHost.vue  # Global anlık bildirim (toast) arayüzü
 │           │   ├── CloudPanel.vue     # Bulut hesap giriş tabı, sözleşme ve görev listesi paneli
 │           │   ├── KonvaCanvas.vue    # Konva.js tabanlı 2D canvas bileşeni (~1300 satır):
 │           │   │                      # şekil çizimi, düzenleme, drag & drop,
@@ -234,6 +244,7 @@ label_gun/
 │           ├── composables/           # Vue 3 Composition API modülleri
 │           │   ├── useAuth.ts               # Kimlik doğrulama state'leri ve login/logout işlemleri
 │           │   ├── useCloud.ts              # Bulut veri iletişimi ve sözleşme durum reaktivitesi
+│           │   ├── useFeedback.ts           # Global dialog ve toast bildirim yönetimi
 │           │   ├── useDatasetLabeling.ts    # Dataset etiket yönetimi ve cloud/local izin izolasyonu
 │           │   ├── useLabelerState.ts       # Merkezi reactive state yönetimi
 │           │   ├── useLabelerActions.ts     # Kullanıcı aksiyonları (save, submit, undo)
@@ -434,7 +445,9 @@ Cloud sync işlemleri sırasında görevleri diğer labeler'lara karşı kilitle
 | ------------------------ | --------------------------------------------------------------------------------------------------------- |
 | `useAuth`                | Kullanıcı oturum yönetimi (login, logout, hata durumları)                                                 |
 | `useCloud`               | Cloud sözleşme verilerini çekme, indirme (lease-batch), submit işlemleri ve sync durumu                   |
+| `useFeedback`            | Uygulama genelinde özel diyaloğ (onay/hata) ve toast bildirimlerinin reaktif yönetimi                     |
 | `useDatasetLabeling`     | Dataset etiket havuzu yükleme, aktif etiket seçimi ve cloud(salt-okunur) / local(yönetilebilir) kontrolü  |
+
 | `useLabelerState`        | Merkezi reaktif durum: anotasyonlar, seçim, çizim bayrakları, araç/etiket bilgisi, zoom/pan parametreleri |
 | `useHistory`             | JSON snapshot ile undo/redo geçmişi yönetimi                                                              |
 | `useCanvasTransform`     | Zoom (min 0.6x – max 10x), pan, fit-to-screen hesaplamaları                                               |

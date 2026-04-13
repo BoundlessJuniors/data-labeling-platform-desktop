@@ -1,5 +1,6 @@
 import type { Ref } from 'vue'
 import type { Task } from '@renderer/types/annotation'
+import { useFeedback } from '@renderer/composables/useFeedback'
 
 type VoidFn = () => void
 
@@ -83,6 +84,8 @@ export async function buildAndSaveExport(task: Task, exportedAnnotations: unknow
 }
 
 export function useLabelerActions(opts: UseLabelerActionsOptions): UseLabelerActionsReturn {
+  const { toast } = useFeedback()
+
   const onUndo = (): void => {
     opts.undo()
   }
@@ -105,9 +108,8 @@ export function useLabelerActions(opts: UseLabelerActionsOptions): UseLabelerAct
       await buildAndSaveExport(t, exported)
 
       console.log('--- ANNOTATION DATA (IMAGE SPACE JSON) ---\n', JSON.stringify(exported, null, 2))
-      alert(
-        'Draft saved: Annotation data has been written to the database and logged to the console (F12).'
-      )
+      console.log('--- ANNOTATION DATA (IMAGE SPACE JSON) ---\n', JSON.stringify(exported, null, 2))
+      toast.success('Draft Saved', 'Annotation data has been written to the database.', 3000)
     })()
   }
 
@@ -115,7 +117,10 @@ export function useLabelerActions(opts: UseLabelerActionsOptions): UseLabelerAct
     void (async () => {
       const queued = opts.tasks.value.filter((t) => t.status === 'queued')
       if (queued.length > 0) {
-        alert('You still have queued images. Please review all images before submitting.')
+        toast.warning(
+          'Incomplete tasks',
+          'You still have queued images. Please review all images before submitting.'
+        )
         return
       }
 
@@ -125,7 +130,7 @@ export function useLabelerActions(opts: UseLabelerActionsOptions): UseLabelerAct
         t.status = 'completed'
       }
 
-      alert('All tasks submitted ✔️')
+      toast.success('Tasks Submitted', 'All tasks submitted successfully ✔️')
     })()
   }
 
