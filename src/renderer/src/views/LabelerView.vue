@@ -1618,22 +1618,23 @@ async function cancelDownload(modelId: string): Promise<void> {
 
 <template>
   <div
-    class="flex h-full bg-background-light dark:bg-background-dark font-display text-text-primary dark:text-white"
+    class="flex h-full bg-background-light dark:bg-[#0f1115] font-display text-text-primary dark:text-white"
   >
     <!-- Sidebar (kısa) -->
     <aside
-      class="flex flex-col w-72 bg-surface/80 dark:bg-background-dark border-r border-border/70 dark:border-gray-800"
+      class="flex flex-col w-72 bg-surface/90 dark:bg-[#161920]/90 backdrop-blur-md border-r border-border/50 dark:border-white/5 z-10 shadow-[2px_0_12px_rgba(0,0,0,0.02)]"
     >
-      <div class="p-5 bg-surface dark:bg-background-dark">
-        <h1 class="text-2xl font-bold">LabelGun</h1>
+      <div class="px-6 py-5">
+        <h1
+          class="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary to-primary-light"
+        >
+          LabelGun
+        </h1>
       </div>
 
-      <nav
-        ref="tasksNav"
-        class="flex-1 px-4 space-y-2 overflow-y-auto bg-surface/60 dark:bg-background-dark/60 p-3 tasks-scroll"
-      >
+      <nav ref="tasksNav" class="flex-1 px-4 space-y-3 overflow-y-auto pb-4 tasks-scroll">
         <div
-          class="px-2 mb-2 flex items-center justify-between text-xs font-semibold text-text-secondary dark:text-gray-300 uppercase tracking-wider"
+          class="px-1 mb-2 flex items-center justify-between text-[11px] font-bold text-slate-400 dark:text-gray-500 uppercase tracking-wider"
         >
           <h2>Tasks</h2>
           <div class="flex items-center gap-1">
@@ -1659,42 +1660,50 @@ async function cancelDownload(modelId: string): Promise<void> {
               href="#"
               :data-active="idx === currentTaskIndex ? 'true' : null"
               :class="[
-                'block rounded-lg overflow-hidden border-2',
+                'block rounded-xl overflow-hidden border transition-all duration-200',
                 idx === currentTaskIndex
-                  ? 'border-primary dark:border-primary/80 bg-primary/5'
-                  : 'border-transparent hover:border-primary/50'
+                  ? 'border-primary/40 dark:border-primary/30 bg-primary/5 dark:bg-primary/10 shadow-[0_2px_12px_rgba(37,99,235,0.08)] ring-1 ring-primary/20'
+                  : 'border-border/60 dark:border-white/5 bg-surface dark:bg-[#1c1f26] hover:border-border dark:hover:border-white/10 hover:shadow-sm'
               ]"
               @click.prevent="handleTaskNavigation(idx)"
             >
               <div
-                class="h-24 bg-background-light dark:bg-background-dark flex items-center justify-center"
+                class="h-20 bg-slate-100/50 dark:bg-white/5 flex items-center justify-center border-b border-border/40 dark:border-white/5"
               >
-                <span class="text-text-secondary dark:text-gray-400">image</span>
+                <span class="text-xs font-medium text-slate-400 dark:text-gray-500 antialiased"
+                  >Image preview</span
+                >
               </div>
               <div class="p-3">
-                <div class="flex justify-between items-start">
-                  <span class="text-sm font-medium">{{ t.title }}</span>
+                <div class="flex justify-between items-start mb-1.5">
+                  <span
+                    class="text-sm font-semibold text-slate-700 dark:text-gray-200 truncate pr-2"
+                    >{{ t.title }}</span
+                  >
 
                   <span
                     v-if="t.status === 'in_progress'"
-                    class="text-xs font-semibold px-2 py-1 rounded-full bg-slate-100 text-slate-800 dark:bg-gray-700/60 dark:text-gray-300"
+                    class="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400 whitespace-nowrap"
                     >In Progress</span
                   >
 
                   <span
                     v-else-if="t.status === 'completed'"
-                    class="text-xs font-semibold px-2 py-1 rounded-full bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300"
+                    class="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400 whitespace-nowrap"
                     >Completed</span
                   >
 
                   <span
                     v-else
-                    class="text-xs font-semibold px-2 py-1 rounded-full bg-gray-100 text-gray-800 dark:bg-gray-700/60 dark:text-gray-300"
+                    class="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-500 dark:bg-white/5 dark:text-gray-400 whitespace-nowrap"
                     >Queued</span
                   >
                 </div>
-                <div class="mt-1 text-xs text-slate-500 dark:text-gray-400">
-                  Time: {{ formatTime(getTaskSeconds(t)) }}
+                <div
+                  class="text-[11px] font-medium text-slate-400 dark:text-gray-500 flex items-center gap-1"
+                >
+                  <TimerIcon class="w-3 h-3 ui-svg opacity-70" />
+                  {{ formatTime(getTaskSeconds(t)) }}
                 </div>
               </div>
             </a>
@@ -1703,13 +1712,13 @@ async function cancelDownload(modelId: string): Promise<void> {
       </nav>
 
       <div
-        class="p-4 border-t border-border dark:border-gray-800 relative bg-surface dark:bg-background-dark"
+        class="p-4 border-t border-border/50 dark:border-white/5 relative bg-surface/90 dark:bg-[#161920]/90 backdrop-blur-sm"
       >
         <button
           ref="filterBtn"
-          class="w-full flex items-center justify-center gap-2 rounded bg-primary text-white hover:bg-primary-light py-2 px-4 text-sm font-semibold"
+          class="w-full flex items-center justify-center gap-2 rounded-xl bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-gray-300 hover:bg-slate-200 dark:hover:bg-white/10 py-2.5 px-4 text-sm font-semibold transition-colors"
         >
-          <FilterIcon class="ui-svg h-5 w-5 text-white" />
+          <FilterIcon class="ui-svg h-4 w-4" />
           <span>Filter Tasks</span>
         </button>
         <div ref="filterDropdown" class="absolute bottom-full mb-2 w-full left-0 px-4">
@@ -1721,78 +1730,78 @@ async function cancelDownload(modelId: string): Promise<void> {
     <!-- Main -->
     <main class="flex-1 flex flex-col overflow-hidden">
       <header
-        class="flex items-center justify-between p-5 border-b border-border dark:border-gray-800 bg-surface/70 dark:bg-background-dark"
+        class="flex items-center justify-between px-6 py-4 border-b border-border/50 dark:border-white/5 bg-surface/80 dark:bg-[#0f1115]/80 backdrop-blur-md z-10"
       >
         <div class="flex items-center gap-4">
-          <h2 ref="taskTitle" class="text-xl font-bold">Image Annotation - Task 1</h2>
+          <h2 ref="taskTitle" class="text-lg font-bold text-slate-800 dark:text-white">
+            Image Annotation - Task 1
+          </h2>
         </div>
 
-        <div class="flex items-center gap-4">
+        <div class="flex items-center gap-3">
           <button
             ref="themeToggle"
-            class="relative inline-flex items-center h-8 w-14 shrink-0 rounded-full bg-slate-200 dark:bg-gray-700 ml-2"
+            class="relative inline-flex items-center h-7 w-12 shrink-0 rounded-full bg-slate-200 dark:bg-white/10 mr-2 transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-primary/30"
           >
             <span
-              class="absolute left-1.5 top-1.5 h-5 w-5 bg-white dark:bg-gray-800 rounded-full shadow-md transform transition-transform duration-300 dark:translate-x-6 flex items-center justify-center"
+              class="absolute left-1 top-1 h-5 w-5 bg-white dark:bg-gray-800 rounded-full shadow-sm transform transition-transform duration-300 dark:translate-x-5 flex items-center justify-center"
             >
-              <SunIcon class="ui-svg h-4 w-4 text-slate-600 opacity-100 dark:opacity-0" />
-              <MoonIcon class="ui-svg h-4 w-4 text-primary absolute opacity-0 dark:opacity-100" />
+              <SunIcon class="ui-svg h-3.5 w-3.5 text-amber-500 opacity-100 dark:opacity-0" />
+              <MoonIcon class="ui-svg h-3 w-3 text-blue-400 absolute opacity-0 dark:opacity-100" />
             </span>
           </button>
 
-          <div class="flex items-center gap-2 text-sm text-slate-600 dark:text-gray-400">
-            <TimerIcon class="ui-svg h-5 w-5" />
+          <div
+            class="flex items-center gap-1.5 pl-3 pr-4 py-1.5 bg-slate-100/80 dark:bg-white/5 rounded-full border border-slate-200/60 dark:border-white/5"
+          >
+            <TimerIcon class="ui-svg h-4 w-4 text-slate-400 dark:text-gray-400" />
             <div
-              class="font-mono bg-slate-100 dark:bg-gray-800 rounded px-2 py-1 text-lg font-bold"
+              class="font-mono text-sm font-semibold text-slate-700 dark:text-gray-200 tracking-tight"
             >
               {{ formatTime(globalSeconds) }}
             </div>
           </div>
 
-          <!-- Removed old floating progress bar as it is now in the menu -->
-
           <button
             ref="saveBtn"
-            class="flex items-center gap-2 rounded bg-primary text-white hover:bg-primary-light py-2 px-4 text-sm font-semibold save-auto-btn"
+            class="flex items-center gap-2 rounded-xl bg-white dark:bg-[#1c1f26] border border-slate-200/80 dark:border-white/10 text-slate-700 dark:text-gray-200 hover:bg-slate-50 dark:hover:bg-white/5 py-2 px-4 text-sm font-semibold save-auto-btn shadow-sm transition-all"
             :style="{ '--save-progress': String(autoSaveProgress) }"
           >
-            <SaveIcon class="ui-svg h-5 w-5 text-white" />
+            <SaveIcon class="ui-svg h-4 w-4 text-slate-400 dark:text-gray-400" />
             <span>Save Draft</span>
           </button>
 
           <button
             ref="submitBtn"
-            class="flex items-center gap-2 rounded bg-primary py-2 px-4 text-sm font-semibold text-white hover:bg-primary-light"
+            class="flex items-center gap-2 rounded-xl bg-primary py-2 px-4 text-sm font-semibold text-white hover:bg-primary-light shadow-md shadow-primary/20 hover:shadow-lg hover:shadow-primary/30 transition-all hover:-translate-y-px"
           >
-            <ApproveIcon class="ui-svg h-5 w-5 text-white" />
+            <ApproveIcon class="ui-svg h-4 w-4 text-white" />
             <span>Submit Work</span>
           </button>
         </div>
       </header>
 
-      <div class="flex-1 flex p-4 gap-4 overflow-hidden">
-        <div class="flex-1 flex flex-col gap-2">
+      <div class="flex-1 flex p-4 gap-4 min-h-0 relative isolate">
+        <div class="flex-1 flex flex-col gap-2 relative z-10">
           <!-- Toolbar -->
           <div
-            class="flex items-center justify-between gap-1 p-2 bg-surface/70 dark:bg-background-dark rounded-lg border border-border dark:border-gray-800"
+            class="flex items-center justify-between p-1.5 bg-white/60 dark:bg-[#161920]/80 backdrop-blur-md rounded-xl border border-slate-200/80 dark:border-white/5 shadow-sm relative z-30"
           >
-            <div id="tool-group" ref="toolGroup" class="flex items-center gap-1">
+            <div id="tool-group" ref="toolGroup" class="flex items-center gap-0.5">
               <button
-                class="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-gray-800 annotation-tool"
+                class="p-2.5 rounded-lg hover:bg-slate-100 dark:hover:bg-white/5 annotation-tool transition-colors"
                 data-tool="select"
                 title="Select/Edit"
               >
-                <SelectIcon class="ui-svg h-6 w-6 text-slate-600 dark:text-gray-300" />
+                <SelectIcon class="ui-svg h-5 w-5 text-slate-600 dark:text-gray-300" />
               </button>
 
-              <div class="h-6 w-px bg-gray-200 dark:bg-gray-700 mx-1"></div>
+              <div class="h-5 w-px bg-slate-200 dark:bg-white/10 mx-1.5"></div>
 
-              <div class="h-6 w-px bg-gray-200 dark:bg-gray-700 mx-1"></div>
-
-              <div class="relative flex items-center sam-split-button group">
+              <div class="relative flex items-center sam-split-button group z-40">
                 <!-- Main Tool Button (Left) -->
                 <button
-                  class="p-2 rounded-l-lg hover:bg-gray-100 dark:hover:bg-gray-800 annotation-tool border-r border-gray-200 dark:border-gray-700 flex items-center justify-center relative"
+                  class="p-2.5 rounded-l-lg hover:bg-slate-100 dark:hover:bg-white/5 annotation-tool border-r border-slate-200/80 dark:border-white/5 flex items-center justify-center relative transition-colors"
                   data-tool="sam"
                   :title="`Shoot with labelGun (${samModels[samStatus.currentModelId]?.name || 'Fast'})`"
                 >
@@ -1813,7 +1822,7 @@ async function cancelDownload(modelId: string): Promise<void> {
 
                 <!-- Dropdown Trigger (Right) -->
                 <button
-                  class="p-1 px-1.5 rounded-r-lg hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center border-l-0"
+                  class="p-1 px-1.5 rounded-r-lg hover:bg-slate-100 dark:hover:bg-white/5 flex items-center justify-center border-l-0 transition-colors"
                   title="Select Model"
                   @click.stop="showSamSettings = !showSamSettings"
                 >
@@ -1823,7 +1832,7 @@ async function cancelDownload(modelId: string): Promise<void> {
                 <!-- Professional Model Menu -->
                 <div
                   v-if="showSamSettings"
-                  class="absolute top-full left-0 mt-2 w-72 bg-white dark:bg-gray-900 rounded-lg shadow-xl z-20 border border-slate-200 dark:border-gray-700 overflow-hidden"
+                  class="absolute top-full left-0 mt-2 w-72 bg-white dark:bg-gray-900 rounded-lg shadow-xl z-50 border border-slate-200 dark:border-gray-700 overflow-hidden"
                 >
                   <div
                     class="bg-slate-50 dark:bg-gray-800 px-3 py-2 border-b border-slate-200 dark:border-gray-700"
@@ -1941,21 +1950,21 @@ async function cancelDownload(modelId: string): Promise<void> {
                 </div>
               </div>
 
-              <div class="relative">
+              <div class="relative ml-0.5 z-40">
                 <button
                   id="shapes-tool-btn"
                   ref="shapesToolBtn"
-                  class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center gap-1"
+                  class="p-2.5 rounded-lg hover:bg-slate-100 dark:hover:bg-white/5 flex items-center gap-0.5 transition-colors"
                   title="Annotation Shapes"
                 >
-                  <ShapesIcon class="ui-svg h-6 w-6 text-slate-600 dark:text-gray-300" />
-                  <ChevronDownIcon class="ui-svg h-4 w-4 text-slate-600 dark:text-gray-300" />
+                  <ShapesIcon class="ui-svg h-5 w-5 text-slate-600 dark:text-gray-300" />
+                  <ChevronDownIcon class="ui-svg h-3 w-3 text-slate-500 dark:text-gray-400" />
                 </button>
 
                 <div
                   id="shapes-dropdown"
                   ref="shapesDropdown"
-                  class="absolute top-full mt-2 w-48 bg-slate-50 dark:bg-gray-800 rounded-lg shadow-xl z-20"
+                  class="absolute top-full mt-2 w-48 bg-slate-50 dark:bg-gray-800 rounded-lg shadow-xl z-50"
                 >
                   <a
                     href="#"
@@ -2000,11 +2009,11 @@ async function cancelDownload(modelId: string): Promise<void> {
                 </div>
               </div>
 
-              <div class="h-6 w-px bg-slate-200 dark:bg-gray-700 mx-1"></div>
+              <div class="h-5 w-px bg-slate-200 dark:bg-white/10 mx-1.5"></div>
 
               <button
                 ref="undoBtn"
-                class="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-gray-800 disabled:opacity-50"
+                class="p-2.5 rounded-lg hover:bg-slate-100 dark:hover:bg-white/5 disabled:opacity-30 transition-colors"
                 title="Undo (Ctrl+Z)"
               >
                 <UndoIcon class="ui-svg h-5 w-5 text-slate-600 dark:text-gray-300" />
@@ -2012,7 +2021,7 @@ async function cancelDownload(modelId: string): Promise<void> {
 
               <button
                 ref="redoBtn"
-                class="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-gray-800 disabled:opacity-50"
+                class="p-2.5 rounded-lg hover:bg-slate-100 dark:hover:bg-white/5 disabled:opacity-30 transition-colors"
                 title="Redo (Ctrl+Y)"
               >
                 <RedoIcon class="ui-svg h-5 w-5 text-slate-600 dark:text-gray-300" />
@@ -2020,13 +2029,15 @@ async function cancelDownload(modelId: string): Promise<void> {
 
               <button
                 ref="deleteBtn"
-                class="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-gray-800 disabled:opacity-50"
+                class="p-2.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-30 transition-colors group/del"
                 title="Delete (Del)"
               >
-                <DeleteIcon class="ui-svg h-5 w-5 text-slate-600 dark:text-gray-300" />
+                <DeleteIcon
+                  class="ui-svg h-5 w-5 text-slate-600 dark:text-gray-300 group-hover/del:text-red-600 dark:group-hover/del:text-red-400"
+                />
               </button>
 
-              <div class="h-6 w-px bg-slate-200 dark:bg-gray-700 mx-1"></div>
+              <div class="h-5 w-px bg-slate-200 dark:bg-white/10 mx-1.5"></div>
 
               <!-- Stroke Width Slider -->
               <div
@@ -2034,14 +2045,17 @@ async function cancelDownload(modelId: string): Promise<void> {
                 title="Border Thickness (Scroll to adjust)"
                 @wheel.prevent="handleStrokeWidthScroll"
               >
-                <span class="text-xs font-bold text-slate-500 dark:text-gray-400">Size</span>
+                <span
+                  class="text-[11px] font-semibold text-slate-400 dark:text-gray-500 uppercase tracking-wider"
+                  >Size</span
+                >
                 <input
                   v-model.number="strokeWidth"
                   type="range"
                   min="1"
                   max="10"
                   step="0.5"
-                  class="w-20 h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700 accent-primary"
+                  class="w-20 h-1.5 bg-slate-200 rounded-full appearance-none cursor-pointer dark:bg-white/10 accent-primary outline-none focus:ring-1 focus:ring-primary/50 transition-all"
                 />
                 <span class="text-xs font-mono text-slate-500 dark:text-gray-400 w-6 text-right">{{
                   strokeWidth
@@ -2052,11 +2066,11 @@ async function cancelDownload(modelId: string): Promise<void> {
 
           <!-- Canvas alanı (kart içinde) -->
           <div
-            class="flex-1 rounded-lg bg-surface/70 dark:bg-background-dark border border-border dark:border-gray-800 shadow-sm p-2"
+            class="flex-1 rounded-xl bg-white/60 dark:bg-[#161920]/80 backdrop-blur-sm border border-slate-200/80 dark:border-white/5 shadow-sm p-2 flex flex-col min-h-0"
           >
             <div
               ref="canvasContainer"
-              class="relative w-full h-full rounded-md bg-background-light dark:bg-background-dark overflow-hidden canvas-container"
+              class="relative w-full h-full rounded-lg bg-slate-50 dark:bg-[#0f1115] overflow-hidden canvas-container shadow-[inset_0_2px_10px_rgba(0,0,0,0.02)] border border-slate-200/50 dark:border-white/5"
             >
               <KonvaCanvas
                 ref="konvaCanvasRef"
@@ -2107,29 +2121,41 @@ async function cancelDownload(modelId: string): Promise<void> {
               </div>
 
               <div
-                class="absolute bottom-4 right-4 flex items-center gap-1 bg-black/50 p-1 rounded-lg text-white"
+                class="absolute bottom-4 right-4 flex items-center gap-0.5 bg-black/40 dark:bg-black/60 shadow-lg backdrop-blur-md p-1.5 rounded-xl border border-white/10 text-white"
               >
-                <button ref="zoomOutBtn" class="p-2 rounded-md hover:bg-white/20" title="Zoom Out">
-                  <ZoomOutIcon class="ui-svg h-6 w-6 text-white" />
+                <button
+                  ref="zoomOutBtn"
+                  class="p-1.5 rounded-lg hover:bg-white/20 transition-colors"
+                  title="Zoom Out"
+                >
+                  <ZoomOutIcon class="ui-svg h-5 w-5 text-white" />
                 </button>
-                <button ref="zoomInBtn" class="p-2 rounded-md hover:bg-white/20" title="Zoom In">
-                  <ZoomInIcon class="ui-svg h-6 w-6 text-white" />
+                <button
+                  ref="zoomInBtn"
+                  class="p-1.5 rounded-lg hover:bg-white/20 transition-colors"
+                  title="Zoom In"
+                >
+                  <ZoomInIcon class="ui-svg h-5 w-5 text-white" />
                 </button>
                 <button
                   ref="fitScreenBtn"
-                  class="p-2 rounded-md hover:bg-white/20"
+                  class="p-1.5 rounded-lg hover:bg-white/20 transition-colors"
                   title="Fit to Screen"
                 >
-                  <FitScreenIcon class="ui-svg h-6 w-6 text-white" />
+                  <FitScreenIcon class="ui-svg h-5 w-5 text-white" />
                 </button>
-                <button ref="resetViewBtn" class="p-2 rounded-md hover:bg-white/20" title="Restart">
-                  <ResetViewIcon class="ui-svg h-6 w-6 text-white" />
+                <button
+                  ref="resetViewBtn"
+                  class="p-1.5 rounded-lg hover:bg-white/20 transition-colors"
+                  title="Restart"
+                >
+                  <ResetViewIcon class="ui-svg h-5 w-5 text-white" />
                 </button>
               </div>
 
               <div
                 ref="coords"
-                class="absolute bottom-4 left-4 bg-black/50 text-white text-xs font-mono rounded px-2 py-1"
+                class="absolute bottom-4 left-4 bg-black/40 dark:bg-black/60 shadow-lg backdrop-blur-md text-white/90 text-[11px] font-mono rounded-lg px-3 py-1.5 border border-white/10 tracking-widest"
               >
                 X: -, Y: -
               </div>
@@ -2156,18 +2182,33 @@ async function cancelDownload(modelId: string): Promise<void> {
         </div>
 
         <!-- Sağ paneller -->
-        <div class="w-full lg:w-96 flex flex-col gap-4 pt-0 h-full overflow-hidden">
+        <div class="w-full lg:w-80 flex flex-col gap-4 pt-0 h-full shrink-0 relative z-0">
           <div
-            class="bg-surface/70 dark:bg-background-dark p-4 rounded-lg border border-border dark:border-gray-800 flex flex-col min-h-0 flex-1"
+            class="bg-white/60 dark:bg-[#161920]/80 backdrop-blur-sm p-4 rounded-xl border border-slate-200/80 dark:border-white/5 shadow-sm flex flex-col min-h-0 flex-1"
           >
-            <h3 class="text-lg font-semibold mb-3">Annotations</h3>
-            <div ref="annotationList" class="space-y-3 overflow-y-auto flex-1 min-h-0"></div>
+            <div class="flex items-center justify-between mb-4">
+              <h3
+                class="text-sm font-bold text-slate-800 dark:text-gray-200 tracking-wide uppercase"
+              >
+                Annotations
+              </h3>
+            </div>
+            <div
+              ref="annotationList"
+              class="space-y-2 overflow-y-auto flex-1 min-h-0 px-1 -mx-1"
+            ></div>
           </div>
 
           <div
-            class="bg-surface/70 dark:bg-background-dark p-4 rounded-lg border border-border dark:border-gray-800 flex flex-col shrink-0"
+            class="bg-white/60 dark:bg-[#161920]/80 backdrop-blur-sm p-4 rounded-xl border border-slate-200/80 dark:border-white/5 shadow-sm flex flex-col shrink-0"
           >
-            <h3 class="text-lg font-semibold mb-3">Labels</h3>
+            <div class="flex items-center justify-between mb-3">
+              <h3
+                class="text-sm font-bold text-slate-800 dark:text-gray-200 tracking-wide uppercase"
+              >
+                Labels
+              </h3>
+            </div>
 
             <div
               v-if="state.labelingLoadError"
@@ -2182,32 +2223,32 @@ async function cancelDownload(modelId: string): Promise<void> {
             </p>
             <div v-if="!state.labelingLoadError" class="relative mb-3">
               <SearchIcon
-                class="ui-svg h-5 w-5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2"
+                class="ui-svg h-4 w-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2"
               />
               <input
                 v-model="state.labelSearchTerm"
                 type="search"
-                placeholder="Search labels..."
-                class="w-full pl-10 pr-4 py-2 rounded-lg border border-border dark:border-gray-700 bg-background-light dark:bg-background-dark"
+                placeholder="Search..."
+                class="w-full pl-9 pr-3 py-1.5 text-sm rounded-lg border border-slate-200/80 dark:border-white/10 bg-slate-50 dark:bg-black/20 focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-slate-400"
               />
             </div>
 
             <div
               v-if="isCloudLabelsReadOnly"
-              class="mb-3 text-xs text-blue-500 font-semibold bg-blue-50 dark:bg-blue-900/30 dark:text-blue-300 p-2 rounded flex items-center gap-2"
+              class="mb-3 text-[11px] uppercase tracking-wide text-blue-600 font-bold bg-blue-50 dark:bg-blue-500/10 dark:text-blue-400 p-2 rounded-lg flex items-center justify-center border border-blue-100 dark:border-blue-500/20"
             >
-              <span>Cloud Contract Labels (Read-only)</span>
+              <span>Cloud Contract (Read-only)</span>
             </div>
 
-            <div ref="labelList" class="flex flex-wrap gap-2 mb-3">
+            <div ref="labelList" class="flex flex-wrap gap-1.5 mb-3 max-h-32 overflow-y-auto p-0.5">
               <span
                 v-for="lbl in filteredLabels"
                 :key="lbl.id"
-                class="cursor-pointer text-xs font-medium px-2.5 py-1 rounded-full label-item flex items-center gap-1 transition-colors"
+                class="cursor-pointer text-xs font-semibold px-2 py-1 rounded-md label-item flex items-center gap-1.5 transition-all border group/chip"
                 :class="[
                   state.activeLabel === lbl.name
-                    ? 'bg-primary text-white shadow-md'
-                    : 'bg-primary/10 text-primary hover:bg-primary/20'
+                    ? 'bg-primary text-white border-primary shadow-md shadow-primary/20'
+                    : 'bg-white dark:bg-white/5 text-slate-700 dark:text-gray-300 border-slate-200/80 dark:border-white/10 hover:border-primary/40 hover:bg-primary/5 hover:text-primary dark:hover:text-primary-light'
                 ]"
                 :data-label="lbl.name"
                 @click="setActiveLabelByName(lbl.name)"
@@ -2215,15 +2256,22 @@ async function cancelDownload(modelId: string): Promise<void> {
                 {{ lbl.name }}
                 <button
                   v-if="canManageLocalLabels"
-                  class="ml-1 hover:text-red-500 focus:outline-none"
+                  class="focus:outline-none opacity-50 hover:opacity-100 transition-opacity"
+                  :class="
+                    state.activeLabel === lbl.name
+                      ? 'text-white'
+                      : 'text-slate-400 hover:text-red-500 dark:text-gray-500 dark:hover:text-red-400'
+                  "
                   title="Delete Label"
                   @click.stop="handleDeleteLabel(lbl.id)"
                 >
-                  &times;
+                  <CloseIcon class="w-3 h-3 ui-svg" />
                 </button>
               </span>
-              <span v-if="filteredLabels.length === 0" class="text-xs text-slate-400 italic"
-                >No labels found.</span
+              <span
+                v-if="filteredLabels.length === 0"
+                class="text-xs text-slate-400 italic block w-full text-center py-2"
+                >No labels found</span
               >
             </div>
 
@@ -2232,11 +2280,11 @@ async function cancelDownload(modelId: string): Promise<void> {
                 v-model="newLabelName"
                 type="text"
                 placeholder="New label..."
-                class="flex-1 text-sm px-2 py-1 rounded border border-border dark:border-gray-700 bg-background-light dark:bg-background-dark focus:outline-none focus:ring focus:ring-primary/30"
+                class="flex-1 text-sm px-3 py-1.5 rounded-lg border border-slate-200/80 dark:border-white/10 bg-slate-50 dark:bg-black/20 focus:outline-none focus:ring-2 focus:ring-primary/20"
                 @keyup.enter="handleAddLabel"
               />
               <button
-                class="bg-primary hover:bg-primary-light text-white px-3 py-1 rounded text-sm font-semibold transition-colors"
+                class="bg-primary hover:bg-primary-light text-white px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors shadow-sm"
                 @click="handleAddLabel"
               >
                 Add
