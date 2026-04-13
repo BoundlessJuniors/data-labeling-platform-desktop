@@ -92,34 +92,56 @@ const onClose = (): void => {
   <div class="h-screen flex flex-col overflow-hidden">
     <!-- Custom title bar (frameless window) -->
     <header
-      class="flex items-center justify-between px-3 h-8 text-xs bg-slate-900 text-slate-100 dark:bg-slate-950 border-b border-slate-800 shadow-sm select-none"
+      class="flex items-center justify-between pl-4 pr-0 h-10 bg-slate-900 text-slate-100 dark:bg-slate-950 border-b border-slate-800/80 shadow-sm select-none"
       :class="'titlebar-drag'"
     >
-      <div class="flex items-center gap-2 no-drag">
-        <div
-          class="h-5 w-5 rounded bg-primary/10 flex items-center justify-center text-primary font-bold text-[10px]"
-        >
-          LG
+      <div class="flex items-center h-full">
+        <!-- Logo and App Name (Sürüklenebilir alanın bir parçası) -->
+        <div class="flex items-center gap-2 pr-6">
+          <div
+            class="h-5 w-5 rounded bg-blue-500/20 flex items-center justify-center text-blue-400 font-bold text-[11px]"
+          >
+            LG
+          </div>
+          <span class="font-semibold tracking-wide text-[13px] text-slate-200">LabelGun</span>
         </div>
-        <span class="font-semibold tracking-tight">LabelGun</span>
 
-        <button
-          class="ml-3 px-2 py-1 rounded hover:bg-slate-800 text-[11px] border border-slate-700/70"
-          @click="isDatasetModalOpen = true"
-        >
-          Datasets
-        </button>
+        <!-- Datasets Tab (Sekme Görünümü) -->
+        <div class="h-full flex items-center no-drag">
+          <button
+            class="h-full px-5 flex items-center gap-2 transition-colors text-[13px] relative"
+            :class="[
+              isDatasetModalOpen
+                ? 'bg-slate-800 text-white'
+                : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'
+            ]"
+            @click="isDatasetModalOpen = true"
+          >
+            Datasets
+            <!-- Aktif Sekme Alt Çizgisi -->
+            <div
+              v-show="isDatasetModalOpen"
+              class="absolute bottom-0 left-0 right-0 h-[2px] bg-blue-500 rounded-t"
+            ></div>
+          </button>
+        </div>
       </div>
 
-      <div class="flex items-center gap-1 no-drag">
+      <div class="flex items-center h-full no-drag">
         <button class="win-btn" @click="onMinimize">
-          <span class="text-[10px] leading-none translate-y-[1px]">&#8212;</span>
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+            <path d="M0 5H10" stroke="currentColor" stroke-width="1.2" />
+          </svg>
         </button>
-        <button class="win-btn win-btn-max" @click="onToggleMaximize">
-          <span class="sr-only">Maximize</span>
+        <button class="win-btn" @click="onToggleMaximize">
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+            <rect x="0.5" y="0.5" width="9" height="9" stroke="currentColor" stroke-width="1.2" />
+          </svg>
         </button>
         <button class="win-btn win-btn-close" @click="onClose">
-          <span class="text-[10px] leading-none">&#10005;</span>
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+            <path d="M0.5 0.5L9.5 9.5M9.5 0.5L0.5 9.5" stroke="currentColor" stroke-width="1.2" />
+          </svg>
         </button>
       </div>
     </header>
@@ -351,39 +373,33 @@ const onClose = (): void => {
 }
 
 .win-btn {
-  width: 2.25rem; /* w-9 */
-  height: 2rem; /* h-8 */
+  width: 48px;
+  height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #e5e7eb; /* text-slate-200 */
+  color: #94a3b8; /* text-slate-400 */
   background: transparent;
   border: none;
+  transition: all 0.15s ease-in-out;
+  cursor: default;
 }
 
 .win-btn:hover {
-  background-color: #0f172a; /* slate-900-ish */
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #f8fafc;
 }
 
-.win-btn-max {
-  position: relative;
-}
-
-.win-btn-max::before {
-  content: '';
-  position: absolute;
-  box-sizing: border-box;
-  border: 1px solid rgba(226, 232, 240, 0.9);
-  width: 10px;
-  height: 10px;
-  border-radius: 1px;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
+.win-btn:active {
+  background-color: rgba(255, 255, 255, 0.15);
 }
 
 .win-btn-close:hover {
-  background-color: #dc2626; /* red-600 */
-  color: #ffffff;
+  background-color: #e81123; /* Windows native red */
+  color: white;
+}
+
+.win-btn-close:active {
+  background-color: #f1707a;
 }
 </style>

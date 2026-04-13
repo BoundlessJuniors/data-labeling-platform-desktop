@@ -2,9 +2,6 @@
 @import './base.css';
 
 body {
-  display: flex;
-  align-items: center;
-  justify-content: center;
   overflow: hidden;
   background-image: url('./wavy-lines.svg');
   background-size: cover;
@@ -28,11 +25,8 @@ code {
 }
 
 #app {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  margin-bottom: 80px;
+  width: 100vw;
+  height: 100vh;
 }
 
 .logo {

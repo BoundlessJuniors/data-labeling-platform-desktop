@@ -287,34 +287,34 @@ Uygulama yerel bir SQLite veritabanı kullanır (`%APPDATA%/label_gun/db/app.sql
 
 ### `datasets` Tablosu
 
-| Sütun                 | Tip           | Açıklama                           |
-| --------------------- | ------------- | ---------------------------------- |
-| `id`                  | TEXT (PK)     | Dataset benzersiz kimliği          |
-| `name`                | TEXT          | Kullanıcıya görünen isim           |
-| `folder_path`         | TEXT (UNIQUE) | Kaynak klasör yolu                 |
-| `cloud_contract_id`   | TEXT          | Senkronize edilen bulut sözleşmesi |
-| `label_source`        | TEXT          | Etiket Kaynağı (`cloud`/`local`)   |
-| `annotation_format`   | TEXT          | Etiketleme formatı                 |
-| `labeling_spec_json`  | TEXT          | Yönergeler ve UI meta verileri     |
-| `qc_mode`             | TEXT          | Kalite kontrol durumu              |
-| `label_set_name`      | TEXT          | Etiket seti genel adı              |
-| `label_set_version`   | INTEGER       | Etiket seti sürümü                 |
-| `created_at`          | INTEGER       | Oluşturulma zamanı (Unix ms)       |
+| Sütun                | Tip           | Açıklama                           |
+| -------------------- | ------------- | ---------------------------------- |
+| `id`                 | TEXT (PK)     | Dataset benzersiz kimliği          |
+| `name`               | TEXT          | Kullanıcıya görünen isim           |
+| `folder_path`        | TEXT (UNIQUE) | Kaynak klasör yolu                 |
+| `cloud_contract_id`  | TEXT          | Senkronize edilen bulut sözleşmesi |
+| `label_source`       | TEXT          | Etiket Kaynağı (`cloud`/`local`)   |
+| `annotation_format`  | TEXT          | Etiketleme formatı                 |
+| `labeling_spec_json` | TEXT          | Yönergeler ve UI meta verileri     |
+| `qc_mode`            | TEXT          | Kalite kontrol durumu              |
+| `label_set_name`     | TEXT          | Etiket seti genel adı              |
+| `label_set_version`  | INTEGER       | Etiket seti sürümü                 |
+| `created_at`         | INTEGER       | Oluşturulma zamanı (Unix ms)       |
 
 ### `dataset_labels` Tablosu
 
 Dataset'e özel dinamik etiket yapılandırmaları. Cloud dataset'lerinde salt okunurdur, Local dataset'lerinde kullanıcı tarafından yönetilebilir.
 
-| Sütun                    | Tip       | Açıklama                                       |
-| ------------------------ | --------- | ---------------------------------------------- |
-| `id`                     | TEXT (PK) | Etiket kimliği                                 |
-| `dataset_id`             | TEXT (FK) | Bağlı olduğu dataset                           |
-| `name`                   | TEXT      | Etiket adı (ör. "Araç", "Yaya")                |
-| `color`                  | TEXT      | Hex renk kodu (opsiyonel)                      |
-| `attributes_schema_json` | TEXT      | Alt özellik tanımları (JSON formatında)        |
-| `source`                 | TEXT      | Etiket kaynağı (`cloud` veya `local`)          |
-| `created_at`             | INTEGER   | Oluşturulma tarihi                             |
-| `updated_at`             | INTEGER   | Son güncellenme tarihi                         |
+| Sütun                    | Tip       | Açıklama                                |
+| ------------------------ | --------- | --------------------------------------- |
+| `id`                     | TEXT (PK) | Etiket kimliği                          |
+| `dataset_id`             | TEXT (FK) | Bağlı olduğu dataset                    |
+| `name`                   | TEXT      | Etiket adı (ör. "Araç", "Yaya")         |
+| `color`                  | TEXT      | Hex renk kodu (opsiyonel)               |
+| `attributes_schema_json` | TEXT      | Alt özellik tanımları (JSON formatında) |
+| `source`                 | TEXT      | Etiket kaynağı (`cloud` veya `local`)   |
+| `created_at`             | INTEGER   | Oluşturulma tarihi                      |
+| `updated_at`             | INTEGER   | Son güncellenme tarihi                  |
 
 ### `media_items` Tablosu
 
@@ -340,34 +340,35 @@ Dataset'e özel dinamik etiket yapılandırmaları. Cloud dataset'lerinde salt o
 
 ### `annotations` Tablosu
 
-| Sütun                | Tip       | Açıklama                                               |
-| -------------------- | --------- | ------------------------------------------------------ |
-| `id`                 | TEXT (PK) | Anotasyon kimliği (dışa aktarımda `export:MEDIA_ID` / Snapshot)|
-| `media_id`           | TEXT (FK) | Bağlı olduğu görsel                                    |
-| `type`               | TEXT      | Tip: `bbox`, `polygon`, `keypoint`, `circle`, `export` |
-| `category`           | TEXT      | Kategori/sınıf adı                                     |
-| `data_json`          | TEXT      | Anotasyon verisinin JSON formatı                       |
-| `cloud_task_id`      | TEXT      | İlişkili bulut görevi ID                               |
-| `contract_id`        | TEXT      | İlişkili sözleşme ID                                   |
-| `payload_json`       | TEXT      | API'ye gönderilecek JSON yükü                          |
-| `payload_hash`       | TEXT      | Gönderilecek verinin SHA-256 hash özeti                |
-| `last_synced_hash`   | TEXT      | Başarıyla senkronize edilmiş son veri hash'i           |
-| `sync_status`        | TEXT      | Senkronizasyon durumu (pending_insert vb.)             |
-| `attempt_count`      | INTEGER   | Hata sonrası yeniden deneme sayısı                     |
-| `last_error`         | TEXT      | Senkronizasyon hatası sınıflandırması                  |
-| `updated_at`         | INTEGER   | Son güncelleme zamanı (Unix ms)                        |
+| Sütun              | Tip       | Açıklama                                                        |
+| ------------------ | --------- | --------------------------------------------------------------- |
+| `id`               | TEXT (PK) | Anotasyon kimliği (dışa aktarımda `export:MEDIA_ID` / Snapshot) |
+| `media_id`         | TEXT (FK) | Bağlı olduğu görsel                                             |
+| `type`             | TEXT      | Tip: `bbox`, `polygon`, `keypoint`, `circle`, `export`          |
+| `category`         | TEXT      | Kategori/sınıf adı                                              |
+| `data_json`        | TEXT      | Anotasyon verisinin JSON formatı                                |
+| `cloud_task_id`    | TEXT      | İlişkili bulut görevi ID                                        |
+| `contract_id`      | TEXT      | İlişkili sözleşme ID                                            |
+| `payload_json`     | TEXT      | API'ye gönderilecek JSON yükü                                   |
+| `payload_hash`     | TEXT      | Gönderilecek verinin SHA-256 hash özeti                         |
+| `last_synced_hash` | TEXT      | Başarıyla senkronize edilmiş son veri hash'i                    |
+| `sync_status`      | TEXT      | Senkronizasyon durumu (pending_insert vb.)                      |
+| `attempt_count`    | INTEGER   | Hata sonrası yeniden deneme sayısı                              |
+| `last_error`       | TEXT      | Senkronizasyon hatası sınıflandırması                           |
+| `updated_at`       | INTEGER   | Son güncelleme zamanı (Unix ms)                                 |
 
 ### `task_leases` Tablosu
+
 Cloud sync işlemleri sırasında görevleri diğer labeler'lara karşı kilitlemek (race condition önlemek) için kullanılır.
 
-| Sütun          | Tip       | Açıklama                                       |
-| -------------- | --------- | ---------------------------------------------- |
-| `task_id`      | TEXT (PK) | Görev ID'si                                    |
-| `contract_id`  | TEXT      | Sözleşme ID'si                                 |
-| `lease_token`  | TEXT      | Sunucudaki kilit için atanan güvenlik jetonu   |
-| `leased_until` | INTEGER   | Kiralama süresi bitişi                         |
-| `created_at`   | INTEGER   | Oluşturulma tarihi                             |
-| `updated_at`   | INTEGER   | Güncelleme tarihi                              |
+| Sütun          | Tip       | Açıklama                                     |
+| -------------- | --------- | -------------------------------------------- |
+| `task_id`      | TEXT (PK) | Görev ID'si                                  |
+| `contract_id`  | TEXT      | Sözleşme ID'si                               |
+| `lease_token`  | TEXT      | Sunucudaki kilit için atanan güvenlik jetonu |
+| `leased_until` | INTEGER   | Kiralama süresi bitişi                       |
+| `created_at`   | INTEGER   | Oluşturulma tarihi                           |
+| `updated_at`   | INTEGER   | Güncelleme tarihi                            |
 
 ---
 
@@ -375,24 +376,24 @@ Cloud sync işlemleri sırasında görevleri diğer labeler'lara karşı kilitle
 
 ### Veritabanı Kanalları (`dbIpc.ts`)
 
-| Kanal                       | Yön    | Açıklama                                               |
-| --------------------------- | ------ | ------------------------------------------------------ |
-| `db:ping`                   | invoke | Bağlantı kontrolü                                      |
-| `db:datasets:create`        | invoke | Yeni dataset oluşturma                                 |
-| `db:datasets:list`          | invoke | Tüm dataset'leri listeleme                             |
-| `db:datasets:getByFolder`   | invoke | Klasör yoluna göre dataset sorgulama                   |
-| `db:datasets:getLabelingContext`| invoke | Dataset ve etiket ağacını toplu getirme               |
-| `db:datasets:updateLabelingContext`| invoke | Dataset sözleşme meta verilerini güncelleme        |
-| `db:datasets:delete`        | invoke | Dataset + ilişkili media + anotasyonları cascade silme |
-| `db:datasetLabels:replaceAll` | invoke | Bulut etiket listesini atomik yenileme                 |
-| `db:datasetLabels:add`      | invoke | Local dataset'e etiket ekleme                          |
-| `db:datasetLabels:delete`   | invoke | Local dataset'ten kullanımda olmayan etiketi silme     |
-| `db:media:upsert`           | invoke | Görsel ekleme veya güncelleme (UPSERT)                 |
-| `db:media:listByDataset`    | invoke | Dataset'e ait görselleri listeleme                     |
-| `db:media:setStatus`        | invoke | Görsel durumunu güncelleme                             |
-| `db:media:setTime`          | invoke | Görselde harcanan süreyi kaydetme                      |
-| `db:annotations:saveExport` | invoke | Dışa aktarılmış JSON anotasyonu kaydetme               |
-| `db:annotations:getExport`  | invoke | Kaydedilmiş anotasyonu geri yükleme                    |
+| Kanal                               | Yön    | Açıklama                                               |
+| ----------------------------------- | ------ | ------------------------------------------------------ |
+| `db:ping`                           | invoke | Bağlantı kontrolü                                      |
+| `db:datasets:create`                | invoke | Yeni dataset oluşturma                                 |
+| `db:datasets:list`                  | invoke | Tüm dataset'leri listeleme                             |
+| `db:datasets:getByFolder`           | invoke | Klasör yoluna göre dataset sorgulama                   |
+| `db:datasets:getLabelingContext`    | invoke | Dataset ve etiket ağacını toplu getirme                |
+| `db:datasets:updateLabelingContext` | invoke | Dataset sözleşme meta verilerini güncelleme            |
+| `db:datasets:delete`                | invoke | Dataset + ilişkili media + anotasyonları cascade silme |
+| `db:datasetLabels:replaceAll`       | invoke | Bulut etiket listesini atomik yenileme                 |
+| `db:datasetLabels:add`              | invoke | Local dataset'e etiket ekleme                          |
+| `db:datasetLabels:delete`           | invoke | Local dataset'ten kullanımda olmayan etiketi silme     |
+| `db:media:upsert`                   | invoke | Görsel ekleme veya güncelleme (UPSERT)                 |
+| `db:media:listByDataset`            | invoke | Dataset'e ait görselleri listeleme                     |
+| `db:media:setStatus`                | invoke | Görsel durumunu güncelleme                             |
+| `db:media:setTime`                  | invoke | Görselde harcanan süreyi kaydetme                      |
+| `db:annotations:saveExport`         | invoke | Dışa aktarılmış JSON anotasyonu kaydetme               |
+| `db:annotations:getExport`          | invoke | Kaydedilmiş anotasyonu geri yükleme                    |
 
 ### SAM Model Kanalları (`samIpc.ts`)
 
@@ -407,13 +408,13 @@ Cloud sync işlemleri sırasında görevleri diğer labeler'lara karşı kilitle
 
 ### Auth ve Cloud Kanalları (`authIpc.ts` / `cloudTasksIpc.ts`)
 
-| Kanal                        | Yön    | Açıklama                                                  |
-| ---------------------------- | ------ | --------------------------------------------------------- |
-| `auth:login`                 | invoke | Bulut hesabına giriş yapar ve doğrulanmış kullanıcıyı döner |
-| `auth:logout`                | invoke | Bulut hesabından çıkış yapar                              |
-| `cloud:fetchContracts`       | invoke | Kullanıcıya atanmış sözleşmeleri listeler                 |
-| `cloud:downloadContractWork` | invoke | Kiralama (lease-batch) ve asset indirme akışını yürütür   |
-| `cloud:syncNow`              | invoke | Arka planda bekleyen anotasyonları anında senkronize eder |
+| Kanal                        | Yön    | Açıklama                                                      |
+| ---------------------------- | ------ | ------------------------------------------------------------- |
+| `auth:login`                 | invoke | Bulut hesabına giriş yapar ve doğrulanmış kullanıcıyı döner   |
+| `auth:logout`                | invoke | Bulut hesabından çıkış yapar                                  |
+| `cloud:fetchContracts`       | invoke | Kullanıcıya atanmış sözleşmeleri listeler                     |
+| `cloud:downloadContractWork` | invoke | Kiralama (lease-batch) ve asset indirme akışını yürütür       |
+| `cloud:syncNow`              | invoke | Arka planda bekleyen anotasyonları anında senkronize eder     |
 | `cloud:submitContract`       | invoke | Görevleri API'ye teslim eder (Normalize `SubmitResult` döner) |
 
 ### Pencere ve Sistem Kanalları
