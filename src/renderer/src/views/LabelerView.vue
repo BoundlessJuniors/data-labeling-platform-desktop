@@ -1,43 +1,10 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref, nextTick, watch } from 'vue'
-import UndoIcon from '@renderer/assets/icons/custom/undo.svg?component'
-import RedoIcon from '@renderer/assets/icons/custom/redo.svg?component'
-import SelectIcon from '@renderer/assets/icons/custom/touch_app.svg?component'
-import SamIcon from '@renderer/assets/icons/custom/wand_shine.svg?component'
-import ShapesIcon from '@renderer/assets/icons/custom/category.svg?component'
-import ChevronDownIcon from '@renderer/assets/icons/custom/arrow_drop_down.svg?component'
-import ArrowBackIcon from '@renderer/assets/icons/custom/arrow_back.svg?component'
-import ArrowFwdIcon from '@renderer/assets/icons/custom/arrow_forward.svg?component'
-import SunIcon from '@renderer/assets/icons/custom/light_mode.svg?component'
-import MoonIcon from '@renderer/assets/icons/custom/dark_mode.svg?component'
-import TimerIcon from '@renderer/assets/icons/custom/timer.svg?component'
-import SaveIcon from '@renderer/assets/icons/custom/cloud_done.svg?component'
-import ApproveIcon from '@renderer/assets/icons/custom/approval_delegation.svg?component'
-import SearchIcon from '@renderer/assets/icons/custom/search.svg?component'
-import ZoomOutIcon from '@renderer/assets/icons/custom/zoom_out.svg?component'
-import ZoomInIcon from '@renderer/assets/icons/custom/zoom_in.svg?component'
-import FitScreenIcon from '@renderer/assets/icons/custom/fit_screen.svg?component'
-import ResetViewIcon from '@renderer/assets/icons/custom/restart_alt.svg?component'
-import FilterIcon from '@renderer/assets/icons/custom/filter_list.svg?component'
-import PentagonIcon from '@renderer/assets/icons/custom/pentagon.svg?component'
-import CropSquareIcon from '@renderer/assets/icons/custom/crop_square.svg?component'
-import PolyLineIcon from '@renderer/assets/icons/custom/polyline.svg?component'
-import KeypointIcon from '@renderer/assets/icons/custom/adjust.svg?component'
-import CircleIcon from '@renderer/assets/icons/custom/circle.svg?component'
-import DeleteIcon from '@renderer/assets/icons/custom/delete.svg?component'
-import ArrowDropDownIcon from '@renderer/assets/icons/custom/arrow_drop_down.svg?component'
-import PauseIcon from '@renderer/assets/icons/custom/pause.svg?component'
-import PlayIcon from '@renderer/assets/icons/custom/play_arrow.svg?component'
-import CloseIcon from '@renderer/assets/icons/custom/close.svg?component'
+import { onMounted, onBeforeUnmount, ref, watch, computed, shallowRef } from 'vue'
 
 // Tipler
-import type { Annotation, Task } from '@renderer/types/annotation'
+import type { Annotation } from '@renderer/types/annotation'
 
-// Util
-import { loadImage } from '@renderer/utils/image'
-import { qsa } from '@renderer/utils/dom'
-
-// Composable’lar
+// Composable'lar
 import { useLabelerState } from '@renderer/composables/useLabelerState'
 import { useHistory } from '@renderer/composables/useHistory'
 import { useDatasetLabeling } from '@renderer/composables/useDatasetLabeling'
@@ -46,121 +13,86 @@ import { useTasks } from '@renderer/composables/useTasks'
 import { useAnnotationsRenderer } from '@renderer/composables/useAnnotationsRenderer'
 import { useKeyboardShortcuts } from '@renderer/composables/useKeyboardShortcuts'
 import { useLabelerActions, buildAndSaveExport } from '@renderer/composables/useLabelerActions'
-import KonvaCanvas from '@renderer/components/KonvaCanvas.vue'
 import { useFeedback } from '@renderer/composables/useFeedback'
+// FAZ 3 composable'ları
+import { useLabelerToolState } from '@renderer/composables/useLabelerToolState'
+import { useLabelerEditSession } from '@renderer/composables/useLabelerEditSession'
+import { useLabelerSamManager } from '@renderer/composables/useLabelerSamManager'
+import {
+  useLabelerTaskSession,
+  getTaskMediaId,
+  toLocalUrlMaybe
+} from '@renderer/composables/useLabelerTaskSession'
+import { useLabelerAutoSave } from '@renderer/composables/useLabelerAutoSave'
+// Bileşenler
+import TaskSidebar from '@renderer/components/labeler/TaskSidebar.vue'
+import LabelerHeader from '@renderer/components/labeler/LabelerHeader.vue'
+import AnnotationsPanel from '@renderer/components/labeler/AnnotationsPanel.vue'
+import LabelsPanel from '@renderer/components/labeler/LabelsPanel.vue'
+import LabelerToolbar from '@renderer/components/labeler/LabelerToolbar.vue'
+import CanvasWorkspace from '@renderer/components/labeler/CanvasWorkspace.vue'
 
+/* =============================
+   Feedback (dialog / toast)
+   ============================= */
 const { dialog, toast, state: feedbackState } = useFeedback()
 
 /* =============================
-   Refs (DOM erişimi)
+   DOM refs — child bileşen köprüleri
    ============================= */
-const canvasContainer = ref<HTMLDivElement | null>(null)
-// Eski canvas/SVG artık kullanılmıyor, ancak bazı composable'lar tip için referansa ihtiyaç duyuyor
+
+// Legacy canvas/SVG refs — Konva kullandığı için null kalır; composable uyumluluğu için bırakıldı
 const canvasEl = ref<HTMLCanvasElement | null>(null)
 const annotationsSvg = ref<SVGSVGElement | null>(null)
 
-const shapesToolBtn = ref<HTMLButtonElement | null>(null)
-const shapesDropdown = ref<HTMLDivElement | null>(null)
-
-// Filter butonu/düğmesi henüz script tarafında kullanılmıyor; sadece template için mevcut.
-
-// Crosshair ve koordinat overlay'leri şimdilik sadece template tarafında, script içinde
-// kullanılmıyor; bu yüzden burada ref tanımlamıyoruz.
-
-const zoomInBtn = ref<HTMLButtonElement | null>(null)
-const zoomOutBtn = ref<HTMLButtonElement | null>(null)
-const fitScreenBtn = ref<HTMLButtonElement | null>(null)
-const resetViewBtn = ref<HTMLButtonElement | null>(null)
-
-const crosshairH = ref<HTMLDivElement | null>(null)
-const crosshairV = ref<HTMLDivElement | null>(null)
-const coords = ref<HTMLDivElement | null>(null)
-
-const toolGroup = ref<HTMLDivElement | null>(null)
+// Annotation list: AnnotationsPanel slot içinde bu bileşende tanımlıdır
 const annotationList = ref<HTMLDivElement | null>(null)
 
-const undoBtn = ref<HTMLButtonElement | null>(null)
-const redoBtn = ref<HTMLButtonElement | null>(null)
-const saveBtn = ref<HTMLButtonElement | null>(null)
-const themeToggle = ref<HTMLButtonElement | null>(null)
-const submitBtn = ref<HTMLButtonElement | null>(null)
+// Child component refs
+const taskSidebarRef = ref<InstanceType<typeof TaskSidebar> | null>(null)
+const labelerHeaderRef = ref<InstanceType<typeof LabelerHeader> | null>(null)
+const toolbarRef = ref<InstanceType<typeof LabelerToolbar> | null>(null)
+const canvasWorkspaceRef = ref<InstanceType<typeof CanvasWorkspace> | null>(null)
 
-const taskTitle = ref<HTMLHeadingElement | null>(null)
+// Computed accessors — child bileşenlerinden expose edilen DOM refs
+// (vue-tsc defineExpose ref'lerini otomatik unwrap eder, ekstra .value gerekmez)
+const tasksNav = computed<HTMLDivElement | null>(
+  () => (taskSidebarRef.value?.tasksNav ?? null) as HTMLDivElement | null
+)
+const saveBtn = computed(() => labelerHeaderRef.value?.saveBtn ?? null)
+const toolGroup = computed<HTMLDivElement | null>(() => toolbarRef.value?.toolGroup ?? null)
+const shapesToolBtn = computed<HTMLButtonElement | null>(
+  () => toolbarRef.value?.shapesToolBtn ?? null
+)
+const shapesDropdown = computed<HTMLDivElement | null>(
+  () => toolbarRef.value?.shapesDropdown ?? null
+)
+const canvasContainer = computed<HTMLDivElement | null>(
+  () => canvasWorkspaceRef.value?.canvasContainer ?? null
+)
+const autoSaveOverlay = computed<HTMLDivElement | null>(
+  () => canvasWorkspaceRef.value?.autoSaveOverlay ?? null
+)
 
-const prevBtn = ref<HTMLButtonElement | null>(null)
-const nextBtn = ref<HTMLButtonElement | null>(null)
-
-const deleteBtn = ref<HTMLButtonElement | null>(null)
-
-const tasksNav = ref<HTMLElement | null>(null)
-const autoSaveOverlay = ref<HTMLDivElement | null>(null)
-
-// SAM durumu (model indirildi / hazır mı?)
-// SAM durumu (model indirildi / hazır mı?)
-const samReady = ref(false)
-const samDownloading = ref(false)
-const samPaused = ref(false) // Track if download is paused
-const samDownloadProgress = ref(0)
-const samDownloadStage = ref<'idle' | 'encoder' | 'decoder' | 'done'>('idle')
-const samDownloadingModelId = ref<string | null>(null) // Track which model is downloading
-
-const showSamSettings = ref(false)
-// eslint-disable-next-line no-undef
-const samModels = ref<Record<string, SamModelInfo>>({})
-// eslint-disable-next-line no-undef
-const samStatus = ref<SamStatusInfo>({
-  status: 'idle',
-  currentModelId: 'vit_b',
-  modelsStatus: {},
-  error: null
-})
-// (removed downloadConfirmation as it is replaced by Dialog system)
-
-// Polygon düzenleme modu (SAM veya normal polygon)
-const editingAnnotationId = ref<number | null>(null)
-const editingOriginalState = ref<Record<string, unknown> | null>(null)
-// Edit modu için yerel undo/redo geçmişi
-const editHistory = ref<Record<string, unknown>[]>([])
-const editHistoryIndex = ref(-1)
-
-// Edit ipucu (artık genel)
-const showEditHint = ref(false)
-let editHintTimer: number | null = null
-const editHintDismissed = ref(false)
-
-// Label seçilmeden shapes aracı kullanıldığında gösterilecek küçük uyarı
-const showLabelHint = ref(false)
-let labelHintTimer: number | null = null
-
-// Global ve task bazlı zamanlayıcılar (saniye cinsinden)
-const globalSeconds = ref(0)
-const taskSecondsById = ref<Record<string, number>>({})
-
-// Çizgi kalınlığı ayarı (1-10 arası)
-const savedStroke = localStorage.getItem('labelgun-stroke-width')
-const strokeWidth = ref(savedStroke ? parseFloat(savedStroke) : 2)
-
-watch(strokeWidth, (val) => {
-  localStorage.setItem('labelgun-stroke-width', String(val))
-})
+// deleteBtn: useAnnotationsRenderer tarafından disable durumu için kullanılır
+const deleteBtn = shallowRef<HTMLButtonElement | null>(null)
+watch(
+  () => toolbarRef.value?.deleteBtn ?? null,
+  (el) => {
+    deleteBtn.value = el
+  }
+)
 
 /* =============================
-  İç durum
-  ============================= */
-
-// Props & emit (dataset kimliği ve geri dönüş olayı)
+   Props & emits
+   ============================= */
 const props = defineProps<{ datasetId: string | null }>()
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const emit = defineEmits<{ (e: 'back-to-datasets'): void }>()
 
-// Başlangıçta boş; dataset seçilince DB'den doldurulacak
-const initialTasks: Task[] = []
-// Görevler (task listesi) ve aktif indeks
-const { tasks, currentTaskIndex, initFromDb } = useTasks(initialTasks)
-
-// Reactif state
+/* =============================
+   Temel composable'lar
+   ============================= */
+const { tasks, currentTaskIndex, initFromDb } = useTasks([])
 const { state } = useLabelerState()
-
 const {
   loadDatasetLabeling,
   addLocalLabel,
@@ -169,8 +101,162 @@ const {
   isCloudLabelsReadOnly,
   canManageLocalLabels
 } = useDatasetLabeling(state)
+const { recordHistory, undo, redo } = useHistory(state)
+const { fitToScreen } = useCanvasTransform(state, canvasEl, annotationsSvg)
+const {
+  renderAnnotations,
+  exportAnnotationsToImageSpace,
+  clearSelection,
+  deleteSelected,
+  updateDeleteButton
+} = useAnnotationsRenderer(
+  state,
+  { annotationsSvg, annotationList, deleteBtn, canvasEl },
+  recordHistory
+)
 
+/* =============================
+   Çizgi kalınlığı
+   ============================= */
+const savedStroke = localStorage.getItem('labelgun-stroke-width')
+const strokeWidth = ref(savedStroke ? parseFloat(savedStroke) : 2)
+watch(strokeWidth, (val) => {
+  localStorage.setItem('labelgun-stroke-width', String(val))
+})
+
+/* =============================
+   FAZ 3 — Composable zinciri
+   DAG: toolState → editSession → samManager → taskSession → autoSave
+   ============================= */
+
+// Konva canvas köprü fonksiyonları
+const cancelCurrentShape = (): void => canvasWorkspaceRef.value?.cancelCurrentShape?.()
+const finishCurrentShape = (): void => canvasWorkspaceRef.value?.finishCurrentShape?.()
+const hasActiveDrawing = (): boolean => canvasWorkspaceRef.value?.hasActiveDrawing?.() ?? false
+
+// 1) Tool state
+const toolState = useLabelerToolState(state, {
+  canvasContainer,
+  toolGroup,
+  shapesDropdown,
+  shapesToolBtn,
+  cancelCurrentShape
+})
+
+// 2) Edit session
+const editSession = useLabelerEditSession({
+  state,
+  recordHistory,
+  renderAnnotations,
+  updateDeleteButton,
+  enterPanMode: toolState.enterPanMode,
+  updateCursor: toolState.updateCursor,
+  cancelCurrentShape,
+  finishCurrentShape,
+  hasActiveDrawing
+})
+
+// 3) SAM manager
+const samManager = useLabelerSamManager({
+  state,
+  tasks,
+  currentTaskIndex,
+  recordHistory,
+  renderAnnotations,
+  updateDeleteButton,
+  showEditHint: editSession.showEditHint,
+  editHintDismissed: editSession.editHintDismissed,
+  dialog,
+  toast,
+  feedbackState
+})
+
+// 4) Task session
+const taskSession = useLabelerTaskSession({
+  state,
+  tasks,
+  currentTaskIndex,
+  recordHistory,
+  renderAnnotations,
+  setActiveTool: toolState.setActiveTool,
+  updateDeleteButton,
+  clearSelection,
+  fitToScreen,
+  tasksNav,
+  shapesDropdown,
+  toolGroup,
+  showLabelHint: toolState.showLabelHint,
+  editingAnnotationId: editSession.editingAnnotationId,
+  toast
+})
+
+// 5) Auto-save
+const autoSave = useLabelerAutoSave({
+  tasks,
+  currentTaskIndex,
+  localAnnotationsByTask: taskSession.localAnnotationsByTask,
+  getTaskMediaId,
+  exportAnnotationsToImageSpace,
+  saveBtn,
+  autoSaveOverlay
+})
+
+/* =============================
+   useLabelerActions (kaydetme / gönderme)
+   ============================= */
+const undoAndRender = (): void => {
+  undo()
+  renderAnnotations()
+}
+const redoAndRender = (): void => {
+  redo()
+  renderAnnotations()
+}
+
+const { onUndo, onRedo, onDelete, onSaveDraft, onSubmit } = useLabelerActions({
+  tasks,
+  currentTaskIndex,
+  canvasEl,
+  undo: undoAndRender,
+  redo: redoAndRender,
+  deleteSelected,
+  exportAnnotationsToImageSpace,
+  fitToScreen
+})
+
+// saveDraftAndReset: onSaveDraft artık hazır
+function saveDraftAndReset(): void {
+  onSaveDraft()
+  autoSave.autoSaveProgress.value = 0
+  void autoSave.flushTimeToDb()
+  autoSave.playAutoSaveOverlayAnimation()
+}
+
+/* =============================
+   Klavye kısayolları
+   ============================= */
+const { attachKeyboardShortcuts, detachKeyboardShortcuts } = useKeyboardShortcuts({
+  state,
+  undo: undoAndRender,
+  redo: redoAndRender,
+  deleteSelected,
+  commitPoly: editSession.commitPoly,
+  cancelPoly: editSession.cancelPoly,
+  clearSelection,
+  enterPanMode: toolState.enterPanMode,
+  saveDraft: saveDraftAndReset,
+  goPrevTask: taskSession.goPrevTask,
+  goNextTask: taskSession.goNextTask,
+  hasLocalEditing: () => editSession.editingAnnotationId.value != null,
+  undoLocalEdit: editSession.undoLocalEdit,
+  redoLocalEdit: editSession.redoLocalEdit
+})
+
+/* =============================
+   Label paneli
+   ============================= */
 const newLabelName = ref('')
+
 const handleAddLabel = async (): Promise<void> => {
   if (!newLabelName.value.trim() || !props.datasetId) return
   try {
@@ -188,7 +274,6 @@ const handleDeleteLabel = async (labelId: string): Promise<void> => {
     message: 'Are you sure you want to delete this label?'
   })
   if (!ok) return
-
   try {
     await deleteLocalLabel(props.datasetId, labelId)
   } catch (err: unknown) {
@@ -198,335 +283,28 @@ const handleDeleteLabel = async (labelId: string): Promise<void> => {
 
 function setActiveLabelByName(name: string | null): void {
   state.activeLabel = name
-  showLabelHint.value = false
-  updateCursor()
-}
-
-function hasValidActiveLabel(): boolean {
-  if (state.labelingLoadError) return false
-  if (!state.activeLabel) return false
-  return state.availableLabels.some((l) => l.name === state.activeLabel)
-}
-
-const konvaCanvasRef = ref<InstanceType<typeof KonvaCanvas> | null>(null)
-
-// Uygulama açıkken, her task için geçici (kaydedilmemiş) annotation'ları hafızada tutmak için
-// basit bir cache. Key: media_id (şu an Task.title), Value: Annotation[] snapshot.
-const localAnnotationsByTask = new Map<string, Annotation[]>()
-
-// Undo/Redo vb. geçmiş yönetimi
-const { recordHistory, undo, redo } = useHistory(state)
-
-// Canvas transform & zoom yönetimi (eski canvas için). Şu an KonvaCanvas zoom/pan'i
-// yönettiği için buradan sadece fitToScreen kullanılıyor.
-const { fitToScreen } = useCanvasTransform(state, canvasEl, annotationsSvg)
-
-const {
-  renderAnnotations,
-  exportAnnotationsToImageSpace,
-  clearSelection,
-  deleteSelected,
-  updateDeleteButton
-} = useAnnotationsRenderer(
-  state,
-  {
-    annotationsSvg,
-    annotationList,
-    deleteBtn,
-    canvasEl
-  },
-  recordHistory
-)
-
-const undoAndRender = (): void => {
-  undo()
-  renderAnnotations()
-}
-
-const redoAndRender = (): void => {
-  redo()
-  renderAnnotations()
-}
-
-function getTaskMediaId(t: Task): string {
-  return t.mediaId ?? t.title ?? String(t.id)
-}
-
-function getTaskSeconds(t: Task): number {
-  const id = getTaskMediaId(t)
-  return taskSecondsById.value[id] ?? 0
-}
-
-function formatTime(total: number): string {
-  const sec = Math.max(0, Math.floor(total))
-  const h = Math.floor(sec / 3600)
-  const m = Math.floor((sec % 3600) / 60)
-  const s = sec % 60
-  const pad = (n: number): string => (n < 10 ? `0${n}` : String(n))
-  return `${pad(h)}:${pad(m)}:${pad(s)}`
-}
-
-const { onUndo, onRedo, onDelete, onSaveDraft, onSubmit } = useLabelerActions({
-  tasks,
-  currentTaskIndex,
-  canvasEl,
-  undo: undoAndRender,
-  redo: redoAndRender,
-  deleteSelected,
-  exportAnnotationsToImageSpace,
-  fitToScreen
-})
-
-const autoSaveProgress = ref(0)
-let autoSaveTimer: number | null = null
-let timerInterval: number | null = null
-let onThemeToggleClick: (() => void) | null = null
-let samProgressUnsub: (() => void) | null = null
-
-function playAutoSaveOverlayAnimation(): void {
-  const el = autoSaveOverlay.value
-  if (!el) return
-
-  el.classList.remove('show')
-  // Force reflow so the animation can restart even if class was already present
-
-  void el.offsetWidth
-  el.classList.add('show')
-}
-
-async function restartCurrentTask(): Promise<void> {
-  const current = tasks.value[currentTaskIndex.value]
-  if (!current) return
-
-  // 1) Görünümü ekrana sığdır
-  konvaCanvasRef.value?.fitToContainer()
-
-  // 2) Mevcut task için tüm etiketleri temizle (hafıza + UI)
-  state.annotations = []
-  state.selectedAnnotationId = null
-  state.history = []
-  state.historyIndex = -1
-  clearSelection()
-  renderAnnotations()
-  updateDeleteButton()
-
-  const mediaId = getTaskMediaId(current)
-  localAnnotationsByTask.delete(mediaId)
-
-  // 3) DB'deki kaydı da boş bir liste ile overwrite et (tam temizlik)
-  try {
-    await buildAndSaveExport(current, [])
-  } catch (e) {
-    console.error('[Restart] failed to clear annotations in DB:', e)
-  }
+  toolState.showLabelHint.value = false
+  toolState.updateCursor()
 }
 
 /* =============================
-   Shapes Dropdown Control
+   Tema
    ============================= */
-let isShapesOpen = false
-let onShapesDocClick: ((e: MouseEvent) => void) | null = null
-let onSamSettingsDocClick: ((e: MouseEvent) => void) | null = null
-let onEsc: ((e: KeyboardEvent) => void) | null = null
-
-function openShapes(): void {
-  if (!shapesDropdown.value) return
-  shapesDropdown.value.classList.add('show')
-  isShapesOpen = true
-}
-
-function closeShapes(): void {
-  if (!shapesDropdown.value) return
-  shapesDropdown.value.classList.remove('show')
-  isShapesOpen = false
-}
-
-function toggleShapes(e?: Event): void {
-  e?.preventDefault()
-  e?.stopPropagation()
-  isShapesOpen ? closeShapes() : openShapes()
+function onThemeToggleClick(): void {
+  const nextDark = !document.documentElement.classList.contains('dark')
+  document.documentElement.classList.toggle('dark', nextDark)
+  localStorage.setItem('theme', nextDark ? 'dark' : 'light')
 }
 
 /* =============================
-   Yardımcılar
-   ============================= */
-
-function enterPanMode(): void {
-  // KonvaCanvas üzerinde devam eden bir çizim varsa iptal et
-  konvaCanvasRef.value?.cancelCurrentShape?.()
-
-  const temp = annotationsSvg.value?.querySelector('#temp-shape')
-  temp?.remove()
-
-  state.isDrawing = false
-  state.drawingShape = null
-  state.polyPoints = []
-
-  const selectTool = toolGroup.value?.querySelector(
-    '.annotation-tool[data-tool="select"]'
-  ) as HTMLElement | null
-  setActiveTool(selectTool)
-  updateCursor()
-}
-
-function setActiveTool(el: HTMLElement | null): void {
-  if (!toolGroup.value) return
-  qsa<HTMLElement>(toolGroup.value, '.annotation-tool').forEach((e) => e.classList.remove('active'))
-  if (!el) {
-    updateCursor()
-    return
-  }
-
-  const tool = el.dataset.tool
-
-  // Shapes dropdown içindeki gerçek şekil seçimi
-  if (el.closest('#shapes-dropdown')) {
-    // Henüz label seçili değilse: shapes moduna geçme, sadece küçük bir uyarı göster
-    if (!hasValidActiveLabel()) {
-      showLabelHint.value = true
-      if (labelHintTimer != null) window.clearTimeout(labelHintTimer)
-      labelHintTimer = window.setTimeout(() => {
-        showLabelHint.value = false
-        labelHintTimer = null
-      }, 3000)
-      updateCursor()
-      return
-    }
-
-    // Label seçiliyse shapes aracı ve ilgili şekli gerçekten aktif et
-    shapesToolBtn.value?.classList.add('active')
-    el.classList.add('active')
-
-    if (
-      tool === 'bbox' ||
-      tool === 'polygon' ||
-      tool === 'polyline' ||
-      tool === 'keypoint' ||
-      tool === 'circle'
-    ) {
-      state.lastUsedShape = tool
-    } else {
-      state.lastUsedShape = 'bbox'
-    }
-
-    state.lastUsedTool = 'shapes'
-    updateCursor()
-    return
-  }
-
-  // Dropdown dışında: select / sam / ana shapes butonu
-  if ((tool === 'shapes' || tool === 'sam') && !hasValidActiveLabel()) {
-    // Label yokken shapes veya sam moduna hiç geçme, uyarı göster
-    showLabelHint.value = true
-    if (labelHintTimer != null) window.clearTimeout(labelHintTimer)
-    labelHintTimer = window.setTimeout(() => {
-      showLabelHint.value = false
-      labelHintTimer = null
-    }, 3000)
-    updateCursor()
-    return
-  }
-
-  // Buraya gelmişsek, ya select/sam seçiliyor ya da label zaten seçiliyken ana shapes butonu basıldı
-  el.classList.add('active')
-
-  if (tool === 'select' || tool === 'sam' || tool === 'shapes') {
-    state.lastUsedTool = tool
-  } else {
-    state.lastUsedTool = 'select'
-  }
-
-  updateCursor()
-}
-
-function toLocalUrlMaybe(p: string): string {
-  if (p.startsWith('http://') || p.startsWith('https://') || p.startsWith('local://')) return p
-
-  const isWinAbs = /^[a-zA-Z]:[\\/]/.test(p) || p.startsWith('\\\\')
-  const isPosixAbs = p.startsWith('/')
-
-  if (isWinAbs) {
-    const normalized = p.replace(/\\/g, '/')
-    // local:///C:/Users/... (3 slash) + boşlukları güvenli taşı
-    return `local:///${encodeURI(normalized)}`
-  }
-
-  if (isPosixAbs) {
-    // local:///home/... formatını garanti et
-    return `local:///${encodeURI(p.replace(/^\/+/, ''))}`
-  }
-
-  return p
-}
-
-/* =============================
-   Seçim & Cursor
-   ============================= */
-
-// Removed setActiveLabel as it's replaced by setActiveLabelByName
-
-function updateCursor(): void {
-  const target = canvasContainer.value
-  if (!target) return
-  const isToolActive =
-    !!state.activeLabel && (state.lastUsedTool === 'shapes' || state.lastUsedTool === 'sam')
-  target.classList.toggle('tool-active', isToolActive)
-
-  if (state.isPanning) {
-    target.style.cursor = 'grabbing'
-  } else if (
-    state.isDrawing &&
-    (state.drawingShape === 'polygon' || state.drawingShape === 'polyline')
-  ) {
-    target.style.cursor = 'crosshair'
-  } else {
-    target.style.cursor = isToolActive ? 'crosshair' : 'grab'
-  }
-}
-
-function handlePointerMove(payload: {
-  screenX: number
-  screenY: number
-  imgX: number | null
-  imgY: number | null
-}): void {
-  const container = canvasContainer.value
-  if (!container) return
-
-  container.classList.add('has-pointer')
-
-  if (crosshairH.value) crosshairH.value.style.top = `${payload.screenY}px`
-  if (crosshairV.value) crosshairV.value.style.left = `${payload.screenX}px`
-
-  if (coords.value) {
-    if (payload.imgX != null && payload.imgY != null) {
-      const x = Math.round(payload.imgX)
-      const y = Math.round(payload.imgY)
-      coords.value.textContent = `X: ${x}, Y: ${y}`
-    } else {
-      coords.value.textContent = 'X: -, Y: -'
-    }
-  }
-}
-
-function handlePointerLeave(): void {
-  const container = canvasContainer.value
-  if (container) container.classList.remove('has-pointer')
-
-  if (coords.value) {
-    coords.value.textContent = 'X: -, Y: -'
-  }
-}
-
-/* =============================
-   Render
+   Annotation olayları — thin orchestrators
    ============================= */
 function selectAnnotation(id: number): void {
   state.selectedAnnotationId = id
   const selectTool = toolGroup.value?.querySelector(
     '.annotation-tool[data-tool="select"]'
   ) as HTMLElement | null
-  setActiveTool(selectTool)
+  toolState.setActiveTool(selectTool)
   renderAnnotations()
 }
 
@@ -542,392 +320,88 @@ function handleSelectAnnotationFromKonva(id: number | null): void {
     state.selectedAnnotationId = null
     clearSelection()
   } else {
-    // FIX: Eğer zaten düzenleme modundaysak ve aynı etikete tıklandıysa (long-press sonrası click),
-    // araç değişimini (pan moda geçişi) engellemek için işlem yapma.
-    if (editingAnnotationId.value === id) {
-      return
-    }
+    if (editSession.editingAnnotationId.value === id) return
     selectAnnotation(id)
   }
 }
 
-async function handleSamClickFromKonva(payload: { imgX: number; imgY: number }): Promise<void> {
-  if (!tasks.value.length) return
-  if (!hasValidActiveLabel()) return
-
-  // SAM aracı seçiliyken, her tıklamada önceden hazır olduğunu varsayıyoruz.
-  if (!samReady.value) {
-    // Modeli yüklemeyi dene (sessizce veya loading göstererek)
-    try {
-      await window.api.sam.ensureReady()
-      // samReady should be updated by polling or state sync?
-      // We rely on status polling or the resolve of ensureReady updating state?
-      // Let's manually double check or re-fetch status
-      const s = await window.api.sam.status()
-      samStatus.value = s
-      samReady.value = s.status === 'ready'
-      if (!samReady.value) return
-    } catch (e) {
-      console.error('Auto-ensure ready failed', e)
-      return
-    }
-  }
-
+/* =============================
+   Task yeniden başlatma (reset-view)
+   ============================= */
+async function restartCurrentTask(): Promise<void> {
   const current = tasks.value[currentTaskIndex.value]
   if (!current) return
 
-  // Eğer tıklanan nokta hali hazırda bir polygon etiketinin içindeyse
-  // yeni SAM isteği üretme (mevcut maske üzerinde sadece düzenleme beklenir).
-  const px = payload.imgX
-  const py = payload.imgY
-  const isInsideExistingPolygon = state.annotations.some((a) => {
-    if (a.type !== 'polygon' || !Array.isArray(a.points) || a.points.length < 3) return false
-    let inside = false
-    for (let i = 0, j = a.points.length - 1; i < a.points.length; j = i++) {
-      const xi = a.points[i].x
-      const yi = a.points[i].y
-      const xj = a.points[j].x
-      const yj = a.points[j].y
+  canvasWorkspaceRef.value?.fitToContainer()
 
-      const intersect = yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi + 1e-9) + xi
-      if (intersect) inside = !inside
-    }
-    return inside
-  })
-
-  if (isInsideExistingPolygon) {
-    return
-  }
-
-  try {
-    const res = await window.api.sam.run({
-      imagePath: current.image,
-      points: [{ x: payload.imgX, y: payload.imgY }]
-    })
-
-    if (!res.ok || !res.mask || !Array.isArray(res.mask.points) || res.mask.points.length < 3) {
-      console.warn('[SAM] invalid mask result:', res)
-      return
-    }
-
-    const polygonAnn: Annotation = {
-      id: Date.now(),
-      type: 'polygon',
-      label: state.activeLabel,
-      points: res.mask.points.map((p) => ({ x: p.x, y: p.y }))
-    } as Annotation
-
-    state.annotations.push(polygonAnn)
-    state.selectedAnnotationId = polygonAnn.id
-    recordHistory()
-    renderAnnotations()
-    updateDeleteButton()
-
-    // Kullanıcıya maskeyi düzenleyebileceğini göster
-    if (!editHintDismissed.value) {
-      showEditHint.value = true
-      if (editHintTimer != null) window.clearTimeout(editHintTimer)
-      editHintTimer = window.setTimeout(() => {
-        showEditHint.value = false
-        editHintTimer = null
-      }, 2600)
-    }
-  } catch (e) {
-    console.error('[SAM] run failed:', e)
-    toast.error(
-      'SAM Error',
-      'SAM ile maske oluşturulurken bir hata oluştu. Ayrıntılar için konsolu kontrol edin.'
-    )
-  }
-}
-
-async function handleSamDrawFromKonva(payload: {
-  points: { x: number; y: number }[]
-  labels: number[]
-}): Promise<void> {
-  if (!tasks.value.length) return
-  if (!hasValidActiveLabel()) return
-
-  // Ensure tool is ready
-  if (!samReady.value) {
-    try {
-      await window.api.sam.ensureReady()
-      const s = await window.api.sam.status()
-      samReady.value = s.status === 'ready'
-      if (!samReady.value) return
-    } catch (e) {
-      console.error('Auto-ensure ready failed', e)
-      return
-    }
-  }
-
-  const current = tasks.value[currentTaskIndex.value]
-  if (!current) return
-
-  try {
-    const res = await window.api.sam.run({
-      imagePath: current.image,
-      points: payload.points,
-      labels: payload.labels
-    })
-
-    if (!res.ok || !res.mask || !Array.isArray(res.mask.points) || res.mask.points.length < 3) {
-      console.warn('[SAM] invalid mask result:', res)
-      return
-    }
-
-    const polygonAnn: Annotation = {
-      id: Date.now(),
-      type: 'polygon',
-      label: state.activeLabel,
-      points: res.mask.points.map((p) => ({ x: p.x, y: p.y }))
-    } as Annotation
-
-    state.annotations.push(polygonAnn)
-    state.selectedAnnotationId = polygonAnn.id
-    recordHistory()
-    renderAnnotations()
-    updateDeleteButton()
-
-    if (!editHintDismissed.value) {
-      showEditHint.value = true
-      if (editHintTimer != null) window.clearTimeout(editHintTimer)
-      editHintTimer = window.setTimeout(() => {
-        showEditHint.value = false
-        editHintTimer = null
-      }, 2600)
-    }
-  } catch (e) {
-    console.error('[SAM] run failed:', e)
-  }
-}
-
-function handleEditRequestFromKonva(id: number): void {
-  const ann = state.annotations.find((a) => a.id === id)
-  if (!ann) return
-
-  editingAnnotationId.value = id
-
-  // Tipe göre orijinal hali sakla
-  if (ann.type === 'polygon' || ann.type === 'polyline') {
-    editingOriginalState.value = { points: ann.points.map((p) => ({ ...p })) }
-    editHistory.value = [{ points: ann.points.map((p) => ({ ...p })) }]
-  } else if (ann.type === 'bbox') {
-    editingOriginalState.value = { x: ann.x, y: ann.y, width: ann.width, height: ann.height }
-    editHistory.value = [{ x: ann.x, y: ann.y, width: ann.width, height: ann.height }]
-  } else if (ann.type === 'circle') {
-    editingOriginalState.value = { cx: ann.cx, cy: ann.cy, r: ann.r }
-    editHistory.value = [{ cx: ann.cx, cy: ann.cy, r: ann.r }]
-  } else if (ann.type === 'keypoint') {
-    editingOriginalState.value = { x: ann.x, y: ann.y, r: ann.r || 5 }
-    editHistory.value = [{ x: ann.x, y: ann.y, r: ann.r || 5 }]
-  }
-
-  editHistoryIndex.value = 0
-  state.selectedAnnotationId = id
+  state.annotations = []
+  state.selectedAnnotationId = null
+  state.history = []
+  state.historyIndex = -1
+  clearSelection()
   renderAnnotations()
   updateDeleteButton()
-}
 
-function handleUpdateAnnotationStateFromKonva(payload: {
-  id: number
-  patch: Record<string, unknown>
-}): void {
-  const idx = state.annotations.findIndex((a) => a.id === payload.id)
-  if (idx === -1) return
-
-  const updated = {
-    ...state.annotations[idx],
-    ...payload.patch
-  }
-
-  const next = state.annotations.slice()
-  next[idx] = updated as Annotation
-  state.annotations = next
-
-  // Eğer SAM edit modundaysak, her geometri güncellemesini yerel geçmişe ekle
-  // Ancak "sürükleme sırasında" yüzlerce kez tetiklenmemesi için
-  // KonvaCanvas tarafında "annotation-transform-end" kullanacağız.
-  // FAKAT burada basitlik adına ve "Ctrl+Z"nin anlık çalışması için:
-  // Mouse sürüklerken sürekli update gelir. Bunu history'ye yazmak yerine
-  // sadece interaction bittiğinde yazmak daha doğru.
-  // O yüzden buraya eklemiyoruz. KonvaCanvas'tan gelen özel bir event bekleyeceğiz.
-  // YA DA: Kullanıcı isteği "noktaları düzenlerken" yani drag+drop sonrasında.
-  // KonvaCanvas güncellemesi drag sırasında sürekli akar. Biz bunu anlık state'e yansıttık.
-  // History kaydını ise handleAnnotationTransformEndFromKonva'da yapacağız.
-}
-
-function handleAnnotationTransformEndFromKonva(): void {
-  // Eğer edit modundaysak, bu bitişi yerel history'ye ekle
-  if (editingAnnotationId.value != null) {
-    const ann = state.annotations.find((a) => a.id === editingAnnotationId.value)
-    if (ann) {
-      let snapshot: Record<string, unknown> = {}
-      if (ann.type === 'polygon' || ann.type === 'polyline') {
-        snapshot = { points: ann.points.map((p) => ({ ...p })) }
-      } else if (ann.type === 'bbox') {
-        snapshot = { x: ann.x, y: ann.y, width: ann.width, height: ann.height }
-      } else if (ann.type === 'circle') {
-        snapshot = { cx: ann.cx, cy: ann.cy, r: ann.r }
-      } else if (ann.type === 'keypoint') {
-        snapshot = { x: ann.x, y: ann.y, r: ann.r }
-      }
-
-      editHistory.value = editHistory.value.slice(0, editHistoryIndex.value + 1)
-      editHistory.value.push(snapshot)
-      editHistoryIndex.value++
-    }
-    return
-  }
-
-  // Normal modda (BBox resize vb.) global history kaydı al
-  recordHistory()
-}
-
-// Local Undo
-function undoLocalEdit(): void {
-  if (editHistoryIndex.value > 0) {
-    editHistoryIndex.value--
-    const stateSnapshot = editHistory.value[editHistoryIndex.value]
-    applyLocalState(stateSnapshot)
-  }
-}
-
-// Local Redo
-function redoLocalEdit(): void {
-  if (editHistoryIndex.value < editHistory.value.length - 1) {
-    editHistoryIndex.value++
-    const stateSnapshot = editHistory.value[editHistoryIndex.value]
-    applyLocalState(stateSnapshot)
-  }
-}
-
-function applyLocalState(snapshot: Record<string, unknown>): void {
-  if (editingAnnotationId.value == null) return
-  const idx = state.annotations.findIndex((a) => a.id === editingAnnotationId.value)
-  if (idx === -1) return
-
-  const updated = { ...state.annotations[idx], ...snapshot }
-  const next = state.annotations.slice()
-  next[idx] = updated as Annotation
-  state.annotations = next
-}
-
-function dismissEditHint(): void {
-  editHintDismissed.value = true
-  showEditHint.value = false
-  if (editHintTimer != null) {
-    window.clearTimeout(editHintTimer)
-    editHintTimer = null
-  }
-  localStorage.setItem('editHintDismissed', '1')
-}
-
-/* =============================
-   Polygon / Polyline Tamamlama
-   ============================= */
-const cancelPoly = (): void => {
-  // Önce düzenleme modundan çıkmak gerekiyorsa onu ele al
-  if (editingAnnotationId.value != null) {
-    if (editingOriginalState.value) {
-      applyLocalState(editingOriginalState.value)
-    }
-    editingAnnotationId.value = null
-    editingOriginalState.value = null
-    editHistory.value = []
-    return
-  }
-
-  // Eğer Konva tarafında devam eden bir polygon/polyline çizimi varsa
-  // önce sadece o çizimi iptal et (shapes modunda kal).
-  const konva = konvaCanvasRef.value as {
-    hasActiveDrawing?: () => boolean
-    cancelCurrentShape?: () => void
-  } | null
-
-  if (konva?.hasActiveDrawing?.()) {
-    konva.cancelCurrentShape?.()
-
-    // Global state'i de temizle (cursor vs. için)
-    state.polyPoints = []
-    state.drawingShape = null
-    state.isDrawing = false
-    updateCursor()
-    return
-  }
-
-  // Herhangi bir aktif çizim yoksa normal pan/select moduna geç
-  enterPanMode()
-}
-
-const commitPoly = (): void => {
-  // Düzenleme modunda Enter: son halini kabul et
-  if (editingAnnotationId.value != null) {
-    editingAnnotationId.value = null
-    editingOriginalState.value = null
-    editHistory.value = []
-    recordHistory()
-    return
-  }
-
-  // Enter ile mevcut Konva çizimini (bbox/polygon/polyline) tamamla
-  konvaCanvasRef.value?.finishCurrentShape?.()
-
-  // Eski state bayraklarını resetle
-  state.polyPoints = []
-  state.drawingShape = null
-  state.isDrawing = false
-  updateCursor()
-}
-
-const saveDraftAndReset = (): void => {
-  onSaveDraft()
-  // Manuel kayıttan sonra otomatik kaydetme sayacını sıfırla ve süreleri kaydet
-  autoSaveProgress.value = 0
-  void flushTimeToDb()
-  playAutoSaveOverlayAnimation()
-}
-
-async function flushTimeToDb(): Promise<void> {
-  if (!tasks.value.length) return
+  const mediaId = getTaskMediaId(current)
+  taskSession.localAnnotationsByTask.delete(mediaId)
 
   try {
-    for (const t of tasks.value) {
-      const mediaId = getTaskMediaId(t)
-      const secs = taskSecondsById.value[mediaId] ?? 0
-      await window.api.db.media.setTime({ media_id: mediaId, seconds: secs })
-    }
+    await buildAndSaveExport(current, [])
   } catch (e) {
-    console.error('[DB] flush time failed:', e)
+    console.error('[Restart] failed to clear annotations in DB:', e)
   }
 }
 
-const { attachKeyboardShortcuts, detachKeyboardShortcuts } = useKeyboardShortcuts({
-  state,
-  undo: undoAndRender,
-  redo: redoAndRender,
-  deleteSelected,
-  commitPoly,
-  cancelPoly,
-  clearSelection,
-  enterPanMode,
-  saveDraft: saveDraftAndReset,
-  goPrevTask,
-  goNextTask,
-  hasLocalEditing: () => editingAnnotationId.value != null,
-  undoLocalEdit,
-  redoLocalEdit
-})
+/* =============================
+   Toolbar event handlers
+   ============================= */
+function handleToolbarSetTool(tool: string): void {
+  const toolEl = toolGroup.value?.querySelector(
+    `.annotation-tool[data-tool="${tool}"]`
+  ) as HTMLElement | null
 
-// Eski canvas etkileşimleri (useCanvasInteractions) Konva geçişiyle birlikte devre dışı bırakıldı.
+  if (tool === 'sam') {
+    const currentModelId = samManager.samStatus.value.currentModelId
+    const isAvailable = samManager.samStatus.value.modelsStatus[currentModelId] === 'available'
+
+    if (isAvailable) {
+      toolState.setActiveTool(toolEl)
+      if (
+        samManager.samStatus.value.status !== 'ready' &&
+        samManager.samStatus.value.status !== 'loading'
+      ) {
+        samManager.samStatus.value.status = 'loading'
+        window.api.sam.ensureReady().then((res) => {
+          samManager.samStatus.value = res.state
+          samManager.samReady.value = res.state.status === 'ready'
+        })
+      }
+    } else {
+      void samManager.handleSamModelSelect(currentModelId)
+      toolState.enterPanMode()
+    }
+    return
+  }
+
+  toolState.setActiveTool(toolEl)
+}
 
 /* =============================
-   Lifecycle: watch / onMounted / onBeforeUnmount
+   Annotation listesi tıklama — AnnotationsPanel slot içindeki div
+   ============================= */
+function handleAnnotationListClick(e: MouseEvent): void {
+  const el = (e.target as HTMLElement).closest('.annotation-item') as HTMLElement | null
+  if (el) selectAnnotation(parseInt(el.dataset.id!))
+  else clearSelection()
+}
+
+/* =============================
+   Dataset watch + lifecycle
    ============================= */
 watch(
   () => props.datasetId,
   async (newId) => {
-    // 1) Clear cross-dataset bleeding state
+    // Dataset geçişinde bleeding state temizlenir
     state.availableLabels = []
     state.activeLabel = null
     state.labelSearchTerm = ''
@@ -938,7 +412,7 @@ watch(
     state.labelSetName = null
     state.labelSetVersion = null
     state.labelingLoadError = null
-    localAnnotationsByTask.clear()
+    taskSession.localAnnotationsByTask.clear()
     state.annotations = []
     state.history = []
     state.historyIndex = -1
@@ -952,20 +426,16 @@ watch(
     }
 
     try {
-      // 2) Load labeling context strictly before task logic
       await loadDatasetLabeling(newId)
-
-      // 3) Initialize tasks from DB
       await initFromDb(newId)
 
       if (tasks.value.length === 0) {
         console.warn('[UI] ⚠️ NO TASKS FOUND! Dataset might be empty.')
         if (state.img) state.img.src = ''
       } else {
-        await loadTaskByIndex(0)
+        await taskSession.loadTaskByIndex(0)
       }
 
-      // 4) SAM Prefetch (only if needed/supported)
       try {
         await window.electron.ipcRenderer.invoke('sam:ensureReady')
         await window.electron.ipcRenderer.invoke('sam:startPrefetch')
@@ -988,631 +458,80 @@ watch(
   },
   { immediate: true }
 )
+
 onMounted(async (): Promise<void> => {
-  // === THEME INIT (light/dark) ===
+  // Tema
   const saved = localStorage.getItem('theme')
   const prefersDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false
-  const shouldDark = saved ? saved === 'dark' : prefersDark
-  document.documentElement.classList.toggle('dark', shouldDark)
+  document.documentElement.classList.toggle('dark', saved ? saved === 'dark' : prefersDark)
 
-  // SAM edit ipucu daha önce kapatıldıysa tekrar gösterme
-  const dismissed = localStorage.getItem('editHintDismissed')
-  if (dismissed === '1') {
-    editHintDismissed.value = true
-  }
-
-  // === THEME TOGGLE BUTTON ===
-  onThemeToggleClick = (): void => {
-    const nextDark = !document.documentElement.classList.contains('dark')
-    document.documentElement.classList.toggle('dark', nextDark)
-    localStorage.setItem('theme', nextDark ? 'dark' : 'light')
-  }
-  themeToggle.value?.addEventListener('click', onThemeToggleClick)
-
-  if (taskTitle.value) taskTitle.value.textContent = 'Image Annotation - Task 1'
-
-  if (shapesToolBtn.value && shapesDropdown.value) {
-    shapesToolBtn.value.addEventListener('click', toggleShapes)
-    shapesDropdown.value.addEventListener('click', (e): void => {
-      const t = (e.target as HTMLElement).closest('.annotation-tool') as HTMLElement | null
-      if (t) {
-        e.preventDefault()
-        setActiveTool(t)
-        closeShapes()
-      }
-      ;(e as MouseEvent).stopPropagation()
-    })
-    onShapesDocClick = (e: MouseEvent): void => {
-      const t = e.target as Node
-      if (!shapesDropdown.value!.contains(t) && !shapesToolBtn.value!.contains(t)) {
-        closeShapes()
-      }
-    }
-    document.addEventListener('click', onShapesDocClick)
-    onEsc = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') closeShapes()
-    }
-    document.addEventListener('keydown', onEsc)
-  }
-  // Global klavye kısayolları
+  // Klavye kısayolları
   attachKeyboardShortcuts()
 
-  annotationList.value?.addEventListener('click', (e): void => {
-    const t = (e.target as HTMLElement).closest('.annotation-item') as HTMLElement | null
-    if (t) selectAnnotation(parseInt(t.dataset.id!))
-    else clearSelection()
-  })
-
-  canvasEl.value?.addEventListener('click', (): void => {
-    if (!state.isDrawing && !state.isPanning && state.lastUsedTool === 'select') {
-      clearSelection()
-    }
-  })
-
-  toolGroup.value?.addEventListener('click', (e): void => {
-    const target = (e.target as HTMLElement).closest('.annotation-tool') as HTMLElement | null
-    if (!target) return
-    if ((target as HTMLElement).tagName === 'A') (e as MouseEvent).preventDefault()
-    const tool = target.dataset.tool
-    if (tool === 'sam') {
-      const currentModelId = samStatus.value.currentModelId
-      const isAvailable = samStatus.value.modelsStatus[currentModelId] === 'available'
-
-      if (isAvailable) {
-        setActiveTool(target)
-        // Eğer session yüklü değilse (idle), arkada yüklemeye başla
-        if (samStatus.value.status !== 'ready' && samStatus.value.status !== 'loading') {
-          samStatus.value.status = 'loading' // Optimistic UI
-          window.api.sam.ensureReady().then((res) => {
-            samStatus.value = res.state // Update full state
-            samReady.value = res.state.status === 'ready'
-          })
-        }
-      } else {
-        // Model yoksa indirme onayı aç
-        void handleSamModelSelect(currentModelId)
-        // Aracı aktif etme, Pan moduna geç (veya kal)
-        enterPanMode()
-      }
-    } else {
-      setActiveTool(target)
-    }
-    if ((target as HTMLElement).closest('#shapes-dropdown')) closeShapes()
-  })
-
-  // Removed labelList.value?.addEventListener('click', ...) as it is now handled by v-for @click
-
-  annotationsSvg.value?.addEventListener('click', (e): void => {
-    const t = (e.target as HTMLElement).closest('.annotation-shape') as HTMLElement | null
-    if (t) selectAnnotation(parseInt(t.dataset.id!))
-  })
-
-  undoBtn.value?.addEventListener('click', onUndo)
-  redoBtn.value?.addEventListener('click', onRedo)
-  deleteBtn.value?.addEventListener('click', onDelete)
-  saveBtn.value?.addEventListener('click', saveDraftAndReset)
-  submitBtn.value?.addEventListener('click', onSubmit)
-
-  // Zoom butonlarını şimdilik KonvaCanvas üzerinden elle yöneteceğiz
-  zoomInBtn.value?.addEventListener('click', () => {
-    konvaCanvasRef.value?.zoomBy(0.1)
-  })
-  zoomOutBtn.value?.addEventListener('click', () => {
-    konvaCanvasRef.value?.zoomBy(-0.1)
-  })
-  fitScreenBtn.value?.addEventListener('click', () => {
-    konvaCanvasRef.value?.fitToContainer()
-  })
-  resetViewBtn.value?.addEventListener('click', () => {
-    void restartCurrentTask()
-  })
-
-  // Eski canvas tabanlı fitToScreen/zoom artık KonvaCanvas içinde yönetiliyor.
-  // window.addEventListener('resize', fitToScreen)
-
-  // Eski canvas etkileşimleri (pan/zoom/çizim) devre dışı; KonvaCanvas bunları devralıyor.
-  // containerRO = new ResizeObserver((): void => {
-  //   requestAnimationFrame(fitToScreen)
-  // })
-  // if (canvasContainer.value) containerRO.observe(canvasContainer.value)
-  // attachCanvasInteractions()
-
-  prevBtn.value?.addEventListener('click', (): void => goPrevTask())
-  nextBtn.value?.addEventListener('click', (): void => goNextTask())
-
-  if (tasks.value.length > 0) {
-    await loadTaskByIndex(0)
-  }
+  if (tasks.value.length > 0) await taskSession.loadTaskByIndex(0)
   updateDeleteButton()
 
-  // DB'den gelen sürelerle zamanlayıcıları başlat
-  const byId: Record<string, number> = {}
-  let totalSeconds = 0
-  for (const t of tasks.value) {
-    const id = getTaskMediaId(t)
-    const secs = t.timeSeconds ?? 0
-    byId[id] = secs
-    totalSeconds += secs
-  }
-  taskSecondsById.value = byId
-  globalSeconds.value = totalSeconds
+  // Zamanlayıcılar ve otomatik kayıt
+  autoSave.initTimers()
 
-  // 1 dakikalık döngüde, Save Draft butonu üzerinde saat yönünde ilerleyen bir
-  // progress halkası ve tam dolduğunda otomatik DB kaydı (oto-kayıt).
-  const AUTO_SAVE_INTERVAL_MS = 1 * 60 * 1000
-  const AUTO_SAVE_TICK_MS = 200
-
-  const triggerAutoSave = async (): Promise<void> => {
-    if (!tasks.value.length) return
-
-    // Küçük bir görsel geri bildirim için Save Draft butonuna animasyon sınıfı ekle
-    const btn = saveBtn.value
-    if (btn) {
-      btn.classList.add('save-autosaving')
-    }
-
-    try {
-      for (const t of tasks.value) {
-        const mediaId = t.mediaId ?? t.title ?? String(t.id)
-
-        let anns: Annotation[] | null = null
-        // Aktif task ise export fonksiyonunu kullan (image-space rounding için)
-        if (t === tasks.value[currentTaskIndex.value]) {
-          anns = exportAnnotationsToImageSpace() as Annotation[]
-        } else {
-          const cached = localAnnotationsByTask.get(mediaId)
-          if (cached) {
-            anns = JSON.parse(JSON.stringify(cached)) as Annotation[]
-          }
-        }
-
-        if (anns) {
-          await buildAndSaveExport(t, anns)
-        }
-      }
-
-      // Süreleri de periyodik olarak DB'ye yaz
-      await flushTimeToDb()
-
-      // Canvas üzerinde belirgin bir oto-kayıt bildirimi göster
-      playAutoSaveOverlayAnimation()
-    } catch (e) {
-      console.error('[AutoSave] failed:', e)
-    } finally {
-      if (btn) {
-        // Animasyon sınıfını kısa bir süre sonra kaldır
-        window.setTimeout(() => {
-          btn.classList.remove('save-autosaving')
-        }, 900)
-      }
-    }
-  }
-
-  let elapsed = 0
-  autoSaveProgress.value = 0
-
-  if (timerInterval == null) {
-    timerInterval = window.setInterval(() => {
-      if (!tasks.value.length) return
-      globalSeconds.value += 1
-
-      const current = tasks.value[currentTaskIndex.value]
-      if (!current) return
-
-      const mediaId = getTaskMediaId(current)
-      const prevTaskSeconds = taskSecondsById.value[mediaId] ?? 0
-      taskSecondsById.value = {
-        ...taskSecondsById.value,
-        [mediaId]: prevTaskSeconds + 1
-      }
-
-      // Bu görsel üzerinde ilk kez zaman geçirilirse, status'u queued'dan in_progress'a çek
-      if (prevTaskSeconds === 0 && current.status !== 'completed') {
-        current.status = 'in_progress'
-      }
-    }, 1000)
-  }
-
-  autoSaveTimer = window.setInterval(() => {
-    elapsed += AUTO_SAVE_TICK_MS
-    if (elapsed >= AUTO_SAVE_INTERVAL_MS) {
-      elapsed = 0
-      autoSaveProgress.value = 0
-      void triggerAutoSave()
-    } else {
-      autoSaveProgress.value = elapsed / AUTO_SAVE_INTERVAL_MS
-    }
-  }, AUTO_SAVE_TICK_MS)
-
-  // Fetch SAM Status & Models
-  await window.api.sam.getModels().then((models) => {
-    samModels.value = models
-  })
-
-  // Initial Status Check & Auto-Select Logic
-  await window.api.sam.status().then(async (status) => {
-    samStatus.value = status
-    samReady.value = status.status === 'ready'
-
-    // 1. Try to restore last used model
-    const savedModel = localStorage.getItem('lastSamModel')
-    let targetModel = savedModel
-
-    // 2. If no saved model (or invalid), look for ANY downloaded model
-    if (!targetModel || !samModels.value[targetModel]) {
-      // Find first available 'available' model
-      const available = Object.entries(status.modelsStatus).find(([, st]) => st === 'available')
-      if (available) {
-        targetModel = available[0]
-      } else {
-        targetModel = 'vit_b' // Default fallback
-      }
-    }
-
-    // 3. Switch if needed (and valid)
-    if (targetModel && targetModel !== status.currentModelId) {
-      // If we prioritize downloaded, we just switch.
-      // We don't trigger download here, just selection.
-      console.log('[SAM] Auto-switching to preferred model:', targetModel)
-      await performModelSwitch(targetModel)
-    } else if (targetModel) {
-      // Ensure localStorage is synced if we fell back to a default
-      localStorage.setItem('lastSamModel', targetModel)
-    }
-  })
-
-  // Setup Download Listener
-  samProgressUnsub = window.api.sam.onDownloadProgress((payload) => {
-    // If the progress event matches the intended model or just generally update UI
-    if (payload.total && payload.total > 0) {
-      samDownloadProgress.value = payload.loaded / payload.total
-    }
-    samDownloadStage.value = payload.stage
-  })
-
-  // Listen for global click to close dropdowns
-  onSamSettingsDocClick = (e: Event) => {
-    const target = e.target as HTMLElement
-    // Also close SAM settings if clicked outside
-    if (
-      showSamSettings.value &&
-      !target.closest('.sam-settings-container') &&
-      !target.closest('.sam-split-button')
-    ) {
-      showSamSettings.value = false
-    }
-  }
-  document.addEventListener('click', onSamSettingsDocClick)
+  // SAM modelleri ve durum
+  await samManager.initSam()
 })
 
 onBeforeUnmount((): void => {
-  if (onThemeToggleClick) themeToggle.value?.removeEventListener('click', onThemeToggleClick)
-  // window.removeEventListener('resize', fitToScreen)
-  // containerRO?.disconnect()
-  shapesToolBtn.value?.removeEventListener('click', toggleShapes)
-  if (onShapesDocClick)
-    document.removeEventListener('click', onShapesDocClick as unknown as (e: Event) => void)
-  if (onSamSettingsDocClick)
-    document.removeEventListener('click', onSamSettingsDocClick as unknown as (e: Event) => void)
-  if (onEsc) document.removeEventListener('keydown', onEsc)
   detachKeyboardShortcuts()
-  // detachCanvasInteractions()
-
-  undoBtn.value?.removeEventListener('click', onUndo)
-  redoBtn.value?.removeEventListener('click', onRedo)
-  deleteBtn.value?.removeEventListener('click', onDelete)
-  saveBtn.value?.removeEventListener('click', saveDraftAndReset)
-  submitBtn.value?.removeEventListener('click', onSubmit)
-
-  if (labelHintTimer != null) {
-    window.clearTimeout(labelHintTimer)
-    labelHintTimer = null
-  }
-
-  if (autoSaveTimer != null) {
-    window.clearInterval(autoSaveTimer)
-    autoSaveTimer = null
-  }
-
-  if (timerInterval != null) {
-    window.clearInterval(timerInterval)
-    timerInterval = null
-  }
-
-  if (editHintTimer != null) {
-    window.clearTimeout(editHintTimer)
-    editHintTimer = null
-  }
-
-  if (samProgressUnsub) {
-    samProgressUnsub()
-    samProgressUnsub = null
-  }
-
-  // Çıkarken en son süreleri de sakla (fire-and-forget)
-  void flushTimeToDb()
-
-  // Zoom/reset butonları için addEventListener'da anonim fonksiyon kullandığımız için
-  // burada removeEventListener ile temizleyemiyoruz; bu, sadece küçük bir sızıntı ve
-  // Konva geçişi tamamlanırken ayrı bir refaktörde ele alınabilir.
+  toolState.teardown()
+  editSession.teardown()
+  samManager.teardown()
+  autoSave.teardown() // flushTimeToDb dahil
 })
 
 /* =============================
-   Task Yükleme & Navigasyon
+   Template binding aliases
+   Vue template yalnızca script-setup'ın üst seviye tanımlamalarına erişir.
+   Composable sonuçları buraya yeniden bağlanır.
    ============================= */
-async function loadTaskByIndex(i: number): Promise<void> {
-  if (tasks.value.length === 0) return
 
-  const prevTool = state.lastUsedTool
-  const prevShape = state.lastUsedShape
-  const prevLabel = state.activeLabel
+// autoSave
+const { globalSeconds, taskSecondsById, autoSaveProgress } = autoSave
 
-  // Önce mevcut task'in annotation'larını hafızaya yaz (uygulama açıkken geçerli).
-  const currentTask = tasks.value[currentTaskIndex.value]
-  if (currentTask && state.img?.src) {
-    const currentMediaId = currentTask.mediaId ?? currentTask.title ?? String(currentTask.id)
-    const snapshot = JSON.parse(JSON.stringify(state.annotations)) as Annotation[]
-    localAnnotationsByTask.set(currentMediaId, snapshot)
-  }
+// samManager
+const {
+  samStatus,
+  samModels,
+  samDownloading,
+  samPaused,
+  samDownloadProgress,
+  samDownloadStage,
+  samDownloadingModelId,
+  showSamSettings,
+  handleSamModelSelect,
+  togglePauseDownload,
+  cancelDownload,
+  handleSamClickFromKonva,
+  handleSamDrawFromKonva
+} = samManager
 
-  const clamped = Math.max(0, Math.min(tasks.value.length - 1, i))
-  // Aynı task'e tekrar tıklanıyorsa, mevcut (kaydedilmemiş) etiketleri silmemek için yeniden yükleme
-  // yapma. Böylece tek task senaryosunda etiketler korunur.
-  if (clamped === currentTaskIndex.value && state.img?.src) return
+// editSession
+const {
+  editingAnnotationId,
+  showEditHint,
+  dismissEditHint,
+  handleEditRequestFromKonva,
+  handleUpdateAnnotationStateFromKonva,
+  handleAnnotationTransformEndFromKonva
+} = editSession
 
-  currentTaskIndex.value = clamped
-  const t = tasks.value[clamped]
-
-  if (taskTitle.value) {
-    taskTitle.value.textContent = `Image Annotation - ${t.title}`
-  }
-
-  state.annotations = []
-  state.history = []
-  state.historyIndex = -1
-  state.selectedAnnotationId = null
-
-  try {
-    const imgSrc = toLocalUrlMaybe(t.image)
-    console.log('IMG SRC =>', imgSrc)
-    const img = await loadImage(imgSrc)
-    state.img = img
-
-    // Eğer görev zaten orijinal çözünürlüğü biliyorsa, dokunma.
-    // Bilmiyorsa fallback olarak naturalWidth/naturalHeight kullan.
-    if (!t.originalWidth) {
-      t.originalWidth = img.naturalWidth
-    }
-    if (!t.originalHeight) {
-      t.originalHeight = img.naturalHeight
-    }
-    fitToScreen()
-
-    const mediaId = t.mediaId ?? t.title ?? String(t.id) // en sağlam kimlik
-
-    // Önce, bu task için oturum içi cache'te var mı diye bak.
-    if (localAnnotationsByTask.has(mediaId)) {
-      const cached = localAnnotationsByTask.get(mediaId)
-      state.annotations = JSON.parse(JSON.stringify(cached)) as Annotation[]
-    } else {
-      // === RESTORE SAVED ANNOTATIONS (DB) ===
-      try {
-        const saved = await window.api.db.annotations.getExport(mediaId)
-        if (saved?.data_json) {
-          const parsed = JSON.parse(saved.data_json)
-          if (Array.isArray(parsed)) {
-            // parsed beklenen format: Annotation[]
-            state.annotations = parsed
-          } else {
-            state.annotations = []
-          }
-        } else {
-          state.annotations = []
-        }
-      } catch (e) {
-        console.error('[DB] restore annotations failed:', e)
-        state.annotations = []
-      }
-    }
-    if (prevLabel && state.availableLabels.find((l) => l.name === prevLabel)) {
-      state.activeLabel = prevLabel
-    } else if (state.availableLabels.length > 0) {
-      state.activeLabel = state.availableLabels[0].name
-    } else {
-      state.activeLabel = null
-    }
-
-    showLabelHint.value = false
-    updateCursor()
-
-    let toolEl: HTMLElement | null = null
-    if (prevTool === 'shapes') {
-      const shape = prevShape ?? 'bbox'
-      toolEl = shapesDropdown.value?.querySelector(
-        `.annotation-tool[data-tool="${shape}"]`
-      ) as HTMLElement | null
-    } else {
-      toolEl = toolGroup.value?.querySelector(
-        `.annotation-tool[data-tool="${prevTool}"]`
-      ) as HTMLElement | null
-    }
-
-    if (!toolEl) {
-      toolEl = toolGroup.value?.querySelector(
-        '.annotation-tool[data-tool="select"]'
-      ) as HTMLElement | null
-    }
-    setActiveTool(toolEl)
-    // Restore sonrası UI güncelle
-    renderAnnotations()
-    recordHistory()
-
-    void nextTick(() => {
-      const container = tasksNav.value
-      if (!container) return
-
-      // Eğer 1. göreve geldiysek (Task 1), sidebar'ı tamamen en üste sar
-      if (currentTaskIndex.value === 0) {
-        container.scrollTo({ top: 0, behavior: 'smooth' })
-        return
-      }
-
-      const active = container.querySelector('a[data-active="true"]') as HTMLElement | null
-      if (!active) return
-
-      const cRect = container.getBoundingClientRect()
-      const aRect = active.getBoundingClientRect()
-
-      if (aRect.top >= cRect.top && aRect.bottom <= cRect.bottom) return
-
-      active.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-    })
-
-    // ⚡ PREFETCH: Record user activity and update cache plan
-    const timestamp = new Date().toISOString().split('T')[1].slice(0, -1)
-    const taskImage = t.image.split(/[\\/]/).pop() || t.image
-    console.log(`\n[${timestamp}] [UI] 📄 Task ${i} loaded: ${taskImage}`)
-
-    window.electron.ipcRenderer.invoke('sam:recordPrefetchActivity')
-    // Send simplified task data (only serializable properties)
-    const simplifiedTasks = tasks.value.map((task) => ({ image: task.image }))
-    window.electron.ipcRenderer.invoke(
-      'sam:updatePrefetchPlan',
-      i,
-      tasks.value.length,
-      simplifiedTasks
-    )
-  } catch (err) {
-    console.error('Image load failed:', err)
-  }
-}
-
+// taskSession
+const { goPrevTask, goNextTask } = taskSession
 function handleTaskNavigation(idx: number): void {
-  if (editingAnnotationId.value !== null) {
-    toast.warning('Not Saved', 'Finish editing first! Press ESC to cancel or Enter to save.')
-    return
-  }
-  loadTaskByIndex(idx)
+  taskSession.handleTaskNavigation(idx)
 }
 
-function goPrevTask(): void {
-  handleTaskNavigation((currentTaskIndex.value - 1 + tasks.value.length) % tasks.value.length)
-}
-
-function goNextTask(): void {
-  handleTaskNavigation((currentTaskIndex.value + 1) % tasks.value.length)
-}
-
-function handleStrokeWidthScroll(e: WheelEvent): void {
-  const delta = Math.sign(e.deltaY) * -1 // Aşağı scroll -> değer azalır, Yukarı scroll -> değer artar
-  let newVal = strokeWidth.value + delta * 0.5
-  newVal = Math.max(1, Math.min(10, newVal))
-  strokeWidth.value = newVal
-}
-
-async function handleSamModelSelect(modelId: string): Promise<void> {
-  // Guard: Confirm dialog is already open
-  if (feedbackState.dialog.isOpen) return
-
-  // Guard: Download in progress
-  if (samDownloading.value || samPaused.value) {
-    if (samDownloadingModelId.value === modelId) {
-      // Already downloading this model, ignore click
-      return
-    } else {
-      // Downloading a DIFFERENT model, block switching
-      toast.warning(
-        'Download in progress',
-        'Please wait for the current download to complete or cancel it first.'
-      )
-      return
-    }
-  }
-
-  if (samStatus.value.currentModelId === modelId && samStatus.value.status === 'ready') return
-
-  // Check if downloaded
-  const isDownloaded = samStatus.value.modelsStatus?.[modelId] === 'available'
-
-  if (!isDownloaded) {
-    // Return early to close settings dropdown visually, then show dialog asynchronously
-    showSamSettings.value = false
-    const model = samModels.value[modelId]
-
-    // Slight delay so the close animation of the settings popover completes
-    setTimeout(async () => {
-      const ok = await dialog.confirm({
-        title: 'Download Model',
-        message: `Are you sure you want to download the <strong>${model?.name || modelId}</strong> model?`,
-        detail: `Size: ${model?.size || 'Unknown'}`
-      })
-      if (ok) {
-        performModelSwitch(modelId, true)
-      }
-    }, 100)
-    return
-  }
-
-  performModelSwitch(modelId)
-}
-
-async function performModelSwitch(modelId: string, downloadFirst = false): Promise<void> {
-  // Optimistic update
-  samStatus.value.currentModelId = modelId
-  samStatus.value.status = 'idle' // Reset ready status until loaded
-  samReady.value = false
-
-  if (downloadFirst) {
-    samDownloading.value = true
-    samDownloadingModelId.value = modelId // Track ID
-    samPaused.value = false
-    samDownloadProgress.value = 0
-    try {
-      await window.api.sam.download(modelId)
-      // Refresh status after download
-      await window.api.sam.status()
-      samStatus.value.modelsStatus[modelId] = 'available'
-    } catch (e) {
-      console.error('Download failed or paused', e)
-      // Status check handles pause/cancel state logic in UI
-    } finally {
-      if (!samPaused.value) {
-        samDownloading.value = false
-        samDownloadingModelId.value = null
-      }
-    }
-  }
-
-  // Set model (this also unloads previous)
-  const res = await window.api.sam.setModel(modelId)
-  samStatus.value = res.state
-
-  // Persist user preference
-  localStorage.setItem('lastSamModel', modelId)
-}
-
-async function togglePauseDownload(modelId: string): Promise<void> {
-  if (samPaused.value) {
-    // Resume
-    samPaused.value = false
-    performModelSwitch(modelId, true)
-  } else {
-    // Pause
-    samPaused.value = true
-    samDownloading.value = false // Stop spinner
-    await window.api.sam.pauseDownload(modelId)
-  }
-}
-
-async function cancelDownload(modelId: string): Promise<void> {
-  samDownloading.value = false
-  samDownloadingModelId.value = null
-  samPaused.value = false
-  samDownloadProgress.value = 0
-  await window.api.sam.cancelDownload(modelId)
-  // Update status
-  const newStatus = await window.api.sam.status()
-  samStatus.value = newStatus
+// toolState
+const { showLabelHint } = toolState
+function handleToolbarSetShape(shape: string): void {
+  toolState.handleToolbarSetShape(shape)
 }
 </script>
 
@@ -1620,677 +539,114 @@ async function cancelDownload(modelId: string): Promise<void> {
   <div
     class="flex h-full bg-background-light dark:bg-[#0f1115] font-display text-text-primary dark:text-white"
   >
-    <!-- Sidebar (kısa) -->
-    <aside
-      class="flex flex-col w-72 bg-surface/90 dark:bg-[#161920]/90 backdrop-blur-md border-r border-border/50 dark:border-white/5 z-10 shadow-[2px_0_12px_rgba(0,0,0,0.02)]"
-    >
-      <div class="px-6 py-5">
-        <h1
-          class="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary to-primary-light"
-        >
-          LabelGun
-        </h1>
-      </div>
-
-      <nav ref="tasksNav" class="flex-1 px-4 space-y-3 overflow-y-auto pb-4 tasks-scroll">
-        <div
-          class="px-1 mb-2 flex items-center justify-between text-[11px] font-bold text-slate-400 dark:text-gray-500 uppercase tracking-wider"
-        >
-          <h2>Tasks</h2>
-          <div class="flex items-center gap-1">
-            <button
-              ref="prevBtn"
-              class="p-1 rounded-md bg-slate-100 dark:bg-gray-800 hover:bg-slate-200"
-              title="Previous Task (←)"
-            >
-              <ArrowBackIcon class="ui-svg h-4 w-4 text-gray-700 dark:text-gray-200" />
-            </button>
-            <button
-              ref="nextBtn"
-              class="p-1 rounded-md bg-slate-100 dark:bg-gray-800 hover:bg-slate-200"
-              title="Next Task (→)"
-            >
-              <ArrowFwdIcon class="ui-svg h-4 w-4 text-gray-700 dark:text-gray-200" />
-            </button>
-          </div>
-        </div>
-        <ul class="space-y-3">
-          <li v-for="(t, idx) in tasks" :key="t.id">
-            <a
-              href="#"
-              :data-active="idx === currentTaskIndex ? 'true' : null"
-              :class="[
-                'block rounded-xl overflow-hidden border transition-all duration-200',
-                idx === currentTaskIndex
-                  ? 'border-primary/40 dark:border-primary/30 bg-primary/5 dark:bg-primary/10 shadow-[0_2px_12px_rgba(37,99,235,0.08)] ring-1 ring-primary/20'
-                  : 'border-border/60 dark:border-white/5 bg-surface dark:bg-[#1c1f26] hover:border-border dark:hover:border-white/10 hover:shadow-sm'
-              ]"
-              @click.prevent="handleTaskNavigation(idx)"
-            >
-              <div
-                class="h-20 bg-slate-100/50 dark:bg-white/5 flex items-center justify-center border-b border-border/40 dark:border-white/5"
-              >
-                <span class="text-xs font-medium text-slate-400 dark:text-gray-500 antialiased"
-                  >Image preview</span
-                >
-              </div>
-              <div class="p-3">
-                <div class="flex justify-between items-start mb-1.5">
-                  <span
-                    class="text-sm font-semibold text-slate-700 dark:text-gray-200 truncate pr-2"
-                    >{{ t.title }}</span
-                  >
-
-                  <span
-                    v-if="t.status === 'in_progress'"
-                    class="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400 whitespace-nowrap"
-                    >In Progress</span
-                  >
-
-                  <span
-                    v-else-if="t.status === 'completed'"
-                    class="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400 whitespace-nowrap"
-                    >Completed</span
-                  >
-
-                  <span
-                    v-else
-                    class="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-500 dark:bg-white/5 dark:text-gray-400 whitespace-nowrap"
-                    >Queued</span
-                  >
-                </div>
-                <div
-                  class="text-[11px] font-medium text-slate-400 dark:text-gray-500 flex items-center gap-1"
-                >
-                  <TimerIcon class="w-3 h-3 ui-svg opacity-70" />
-                  {{ formatTime(getTaskSeconds(t)) }}
-                </div>
-              </div>
-            </a>
-          </li>
-        </ul>
-      </nav>
-
-      <div
-        class="p-4 border-t border-border/50 dark:border-white/5 relative bg-surface/90 dark:bg-[#161920]/90 backdrop-blur-sm"
-      >
-        <button
-          ref="filterBtn"
-          class="w-full flex items-center justify-center gap-2 rounded-xl bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-gray-300 hover:bg-slate-200 dark:hover:bg-white/10 py-2.5 px-4 text-sm font-semibold transition-colors"
-        >
-          <FilterIcon class="ui-svg h-4 w-4" />
-          <span>Filter Tasks</span>
-        </button>
-        <div ref="filterDropdown" class="absolute bottom-full mb-2 w-full left-0 px-4">
-          <!-- demo dropdown -->
-        </div>
-      </div>
-    </aside>
+    <!-- Sidebar -->
+    <TaskSidebar
+      ref="taskSidebarRef"
+      :tasks="tasks"
+      :current-task-index="currentTaskIndex"
+      :task-seconds-by-id="taskSecondsById"
+      @navigate="handleTaskNavigation"
+      @prev="goPrevTask"
+      @next="goNextTask"
+    />
 
     <!-- Main -->
     <main class="flex-1 flex flex-col overflow-hidden">
-      <header
-        class="flex items-center justify-between px-6 py-4 border-b border-border/50 dark:border-white/5 bg-surface/80 dark:bg-[#0f1115]/80 backdrop-blur-md z-10"
-      >
-        <div class="flex items-center gap-4">
-          <h2 ref="taskTitle" class="text-lg font-bold text-slate-800 dark:text-white">
-            Image Annotation - Task 1
-          </h2>
-        </div>
-
-        <div class="flex items-center gap-3">
-          <button
-            ref="themeToggle"
-            class="relative inline-flex items-center h-7 w-12 shrink-0 rounded-full bg-slate-200 dark:bg-white/10 mr-2 transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-primary/30"
-          >
-            <span
-              class="absolute left-1 top-1 h-5 w-5 bg-white dark:bg-gray-800 rounded-full shadow-sm transform transition-transform duration-300 dark:translate-x-5 flex items-center justify-center"
-            >
-              <SunIcon class="ui-svg h-3.5 w-3.5 text-amber-500 opacity-100 dark:opacity-0" />
-              <MoonIcon class="ui-svg h-3 w-3 text-blue-400 absolute opacity-0 dark:opacity-100" />
-            </span>
-          </button>
-
-          <div
-            class="flex items-center gap-1.5 pl-3 pr-4 py-1.5 bg-slate-100/80 dark:bg-white/5 rounded-full border border-slate-200/60 dark:border-white/5"
-          >
-            <TimerIcon class="ui-svg h-4 w-4 text-slate-400 dark:text-gray-400" />
-            <div
-              class="font-mono text-sm font-semibold text-slate-700 dark:text-gray-200 tracking-tight"
-            >
-              {{ formatTime(globalSeconds) }}
-            </div>
-          </div>
-
-          <button
-            ref="saveBtn"
-            class="flex items-center gap-2 rounded-xl bg-white dark:bg-[#1c1f26] border border-slate-200/80 dark:border-white/10 text-slate-700 dark:text-gray-200 hover:bg-slate-50 dark:hover:bg-white/5 py-2 px-4 text-sm font-semibold save-auto-btn shadow-sm transition-all"
-            :style="{ '--save-progress': String(autoSaveProgress) }"
-          >
-            <SaveIcon class="ui-svg h-4 w-4 text-slate-400 dark:text-gray-400" />
-            <span>Save Draft</span>
-          </button>
-
-          <button
-            ref="submitBtn"
-            class="flex items-center gap-2 rounded-xl bg-primary py-2 px-4 text-sm font-semibold text-white hover:bg-primary-light shadow-md shadow-primary/20 hover:shadow-lg hover:shadow-primary/30 transition-all hover:-translate-y-px"
-          >
-            <ApproveIcon class="ui-svg h-4 w-4 text-white" />
-            <span>Submit Work</span>
-          </button>
-        </div>
-      </header>
+      <!-- Header -->
+      <LabelerHeader
+        ref="labelerHeaderRef"
+        :task-title-text="
+          tasks[currentTaskIndex]?.title
+            ? `Image Annotation - ${tasks[currentTaskIndex].title}`
+            : 'Image Annotation - Task 1'
+        "
+        :global-seconds="globalSeconds"
+        :auto-save-progress="autoSaveProgress"
+        @theme-toggle="onThemeToggleClick"
+        @save="saveDraftAndReset"
+        @submit="onSubmit"
+      />
 
       <div class="flex-1 flex p-4 gap-4 min-h-0 relative isolate">
         <div class="flex-1 flex flex-col gap-2 relative z-10">
           <!-- Toolbar -->
-          <div
-            class="flex items-center justify-between p-1.5 bg-white/60 dark:bg-[#161920]/80 backdrop-blur-md rounded-xl border border-slate-200/80 dark:border-white/5 shadow-sm relative z-30"
-          >
-            <div id="tool-group" ref="toolGroup" class="flex items-center gap-0.5">
-              <button
-                class="p-2.5 rounded-lg hover:bg-slate-100 dark:hover:bg-white/5 annotation-tool transition-colors"
-                data-tool="select"
-                title="Select/Edit"
-              >
-                <SelectIcon class="ui-svg h-5 w-5 text-slate-600 dark:text-gray-300" />
-              </button>
+          <LabelerToolbar
+            ref="toolbarRef"
+            :sam-status="samStatus"
+            :sam-models="samModels"
+            :sam-downloading="samDownloading"
+            :sam-paused="samPaused"
+            :sam-download-progress="samDownloadProgress"
+            :sam-download-stage="samDownloadStage"
+            :sam-downloading-model-id="samDownloadingModelId"
+            :show-sam-settings="showSamSettings"
+            :stroke-width="strokeWidth"
+            @set-tool="handleToolbarSetTool"
+            @set-shape="handleToolbarSetShape"
+            @undo="onUndo"
+            @redo="onRedo"
+            @delete="onDelete"
+            @update:stroke-width="(v) => (strokeWidth = v)"
+            @update:show-sam-settings="(v) => (showSamSettings = v)"
+            @sam-model-select="handleSamModelSelect"
+            @sam-toggle-pause="togglePauseDownload"
+            @sam-cancel-download="cancelDownload"
+          />
 
-              <div class="h-5 w-px bg-slate-200 dark:bg-white/10 mx-1.5"></div>
-
-              <div class="relative flex items-center sam-split-button group z-40">
-                <!-- Main Tool Button (Left) -->
-                <button
-                  class="p-2.5 rounded-l-lg hover:bg-slate-100 dark:hover:bg-white/5 annotation-tool border-r border-slate-200/80 dark:border-white/5 flex items-center justify-center relative transition-colors"
-                  data-tool="sam"
-                  :title="`Shoot with labelGun (${samModels[samStatus.currentModelId]?.name || 'Fast'})`"
-                >
-                  <SamIcon
-                    class="ui-svg h-6 w-6 text-slate-600 dark:text-gray-300"
-                    :class="{ 'text-primary': samStatus.status === 'ready' }"
-                  />
-                  <!-- Loading Indicator Overlay -->
-                  <div
-                    v-if="samStatus.status === 'loading'"
-                    class="absolute inset-0 flex items-center justify-center bg-white/50 dark:bg-black/50 rounded-l-lg"
-                  >
-                    <div
-                      class="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin"
-                    ></div>
-                  </div>
-                </button>
-
-                <!-- Dropdown Trigger (Right) -->
-                <button
-                  class="p-1 px-1.5 rounded-r-lg hover:bg-slate-100 dark:hover:bg-white/5 flex items-center justify-center border-l-0 transition-colors"
-                  title="Select Model"
-                  @click.stop="showSamSettings = !showSamSettings"
-                >
-                  <ArrowDropDownIcon class="ui-svg h-5 w-5 text-slate-500 dark:text-gray-400" />
-                </button>
-
-                <!-- Professional Model Menu -->
-                <div
-                  v-if="showSamSettings"
-                  class="absolute top-full left-0 mt-2 w-72 bg-white dark:bg-gray-900 rounded-lg shadow-xl z-50 border border-slate-200 dark:border-gray-700 overflow-hidden"
-                >
-                  <div
-                    class="bg-slate-50 dark:bg-gray-800 px-3 py-2 border-b border-slate-200 dark:border-gray-700"
-                  >
-                    <div
-                      class="text-[10px] font-bold text-slate-500 dark:text-gray-400 uppercase tracking-wider"
-                    >
-                      Active Model
-                    </div>
-                  </div>
-
-                  <div class="p-1">
-                    <div
-                      v-for="(model, id) in samModels"
-                      :key="id"
-                      class="relative group/item flex flex-col gap-1 p-3 rounded-md cursor-pointer transition-all border border-transparent"
-                      :class="{
-                        'bg-primary/5 border-primary/20': samStatus.currentModelId === id,
-                        'hover:bg-slate-50 dark:hover:bg-gray-800': samStatus.currentModelId !== id
-                      }"
-                      @click="handleSamModelSelect(String(id))"
-                    >
-                      <div class="flex items-center justify-between">
-                        <div class="flex items-center gap-2.5">
-                          <!-- Status Indicator -->
-                          <div
-                            class="w-2 h-2 rounded-full"
-                            :class="{
-                              'bg-green-500 shadow-[0_0_4px_rgba(34,197,94,0.4)]':
-                                samStatus.currentModelId === id && samStatus.status === 'ready',
-                              'bg-slate-300 dark:bg-gray-600': samStatus.currentModelId !== id
-                            }"
-                          ></div>
-                          <span
-                            class="text-sm font-semibold"
-                            :class="
-                              samStatus.currentModelId === id
-                                ? 'text-primary'
-                                : 'text-slate-700 dark:text-gray-200'
-                            "
-                            >{{ model.name }}</span
-                          >
-                        </div>
-                        <span
-                          class="text-[10px] font-mono px-1.5 py-0.5 rounded transition-colors"
-                          :class="
-                            samStatus.modelsStatus[id] === 'available'
-                              ? 'text-green-600 bg-green-50 dark:bg-green-900/20 dark:text-green-400'
-                              : 'text-slate-400 bg-slate-100 dark:bg-gray-800'
-                          "
-                        >
-                          {{
-                            samStatus.modelsStatus[id] === 'available' ? 'Downloaded' : model.size
-                          }}
-                        </span>
-                      </div>
-
-                      <p class="text-[11px] text-slate-500 dark:text-gray-400 pl-4 leading-snug">
-                        {{ model.description }}
-                      </p>
-
-                      <!-- Download/Progress Area -->
-                      <div
-                        v-if="(samDownloading || samPaused) && samDownloadingModelId === id"
-                        class="mt-2 pl-4"
-                        @click.stop
-                      >
-                        <div
-                          class="flex items-center justify-between text-[10px] text-slate-500 mb-1"
-                        >
-                          <span>{{
-                            samPaused
-                              ? 'Paused'
-                              : samDownloadStage === 'encoder'
-                                ? 'Downloading Encoder...'
-                                : 'Downloading Decoder...'
-                          }}</span>
-                          <span>{{ Math.floor(samDownloadProgress * 100) }}%</span>
-                        </div>
-                        <div class="flex items-center gap-2">
-                          <!-- Progress Bar Housing -->
-                          <div
-                            class="flex-1 h-1.5 bg-slate-200 dark:bg-gray-700 rounded-full overflow-hidden"
-                          >
-                            <div
-                              class="h-full bg-primary transition-all duration-300 ease-out"
-                              :style="{ width: `${Math.max(5, samDownloadProgress * 100)}%` }"
-                            ></div>
-                          </div>
-
-                          <!-- Controls -->
-                          <div class="flex items-center gap-1">
-                            <button
-                              class="p-0.5 hover:bg-slate-200 dark:hover:bg-gray-600 rounded"
-                              @click="togglePauseDownload(String(id))"
-                            >
-                              <component
-                                :is="samPaused ? PlayIcon : PauseIcon"
-                                class="w-4 h-4 text-slate-600 dark:text-gray-300"
-                              />
-                            </button>
-                            <button
-                              class="p-0.5 hover:bg-red-100 dark:hover:bg-red-900/30 rounded group/cancel"
-                              @click="cancelDownload(String(id))"
-                            >
-                              <CloseIcon
-                                class="w-4 h-4 text-slate-400 group-hover/cancel:text-red-500"
-                              />
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div class="relative ml-0.5 z-40">
-                <button
-                  id="shapes-tool-btn"
-                  ref="shapesToolBtn"
-                  class="p-2.5 rounded-lg hover:bg-slate-100 dark:hover:bg-white/5 flex items-center gap-0.5 transition-colors"
-                  title="Annotation Shapes"
-                >
-                  <ShapesIcon class="ui-svg h-5 w-5 text-slate-600 dark:text-gray-300" />
-                  <ChevronDownIcon class="ui-svg h-3 w-3 text-slate-500 dark:text-gray-400" />
-                </button>
-
-                <div
-                  id="shapes-dropdown"
-                  ref="shapesDropdown"
-                  class="absolute top-full mt-2 w-48 bg-slate-50 dark:bg-gray-800 rounded-lg shadow-xl z-50"
-                >
-                  <a
-                    href="#"
-                    class="flex items-center gap-3 px-4 py-2 text-sm hover:bg-slate-100 annotation-tool"
-                    data-tool="bbox"
-                  >
-                    <CropSquareIcon class="ui-svg h-5 w-5 text-slate-600 dark:text-gray-300" />
-                    <span>Bounding Box</span>
-                  </a>
-                  <a
-                    href="#"
-                    class="flex items-center gap-3 px-4 py-2 text-sm hover:bg-slate-100 annotation-tool"
-                    data-tool="polygon"
-                  >
-                    <PentagonIcon class="ui-svg h-5 w-5 text-slate-600 dark:text-gray-300" />
-                    <span>Polygon</span>
-                  </a>
-                  <a
-                    href="#"
-                    class="flex items-center gap-3 px-4 py-2 text-sm hover:bg-slate-100 annotation-tool"
-                    data-tool="polyline"
-                  >
-                    <PolyLineIcon class="ui-svg h-5 w-5 text-slate-600 dark:text-gray-300" />
-                    <span>Polyline</span>
-                  </a>
-                  <a
-                    href="#"
-                    class="flex items-center gap-3 px-4 py-2 text-sm hover:bg-slate-100 annotation-tool"
-                    data-tool="keypoint"
-                  >
-                    <KeypointIcon class="ui-svg h-5 w-5 text-slate-600 dark:text-gray-300" />
-                    <span>Keypoint</span>
-                  </a>
-                  <a
-                    href="#"
-                    class="flex items-center gap-3 px-4 py-2 text-sm hover:bg-slate-100 annotation-tool"
-                    data-tool="circle"
-                  >
-                    <CircleIcon class="ui-svg h-5 w-5 text-slate-600 dark:text-gray-300" />
-                    <span>Circle</span>
-                  </a>
-                </div>
-              </div>
-
-              <div class="h-5 w-px bg-slate-200 dark:bg-white/10 mx-1.5"></div>
-
-              <button
-                ref="undoBtn"
-                class="p-2.5 rounded-lg hover:bg-slate-100 dark:hover:bg-white/5 disabled:opacity-30 transition-colors"
-                title="Undo (Ctrl+Z)"
-              >
-                <UndoIcon class="ui-svg h-5 w-5 text-slate-600 dark:text-gray-300" />
-              </button>
-
-              <button
-                ref="redoBtn"
-                class="p-2.5 rounded-lg hover:bg-slate-100 dark:hover:bg-white/5 disabled:opacity-30 transition-colors"
-                title="Redo (Ctrl+Y)"
-              >
-                <RedoIcon class="ui-svg h-5 w-5 text-slate-600 dark:text-gray-300" />
-              </button>
-
-              <button
-                ref="deleteBtn"
-                class="p-2.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-30 transition-colors group/del"
-                title="Delete (Del)"
-              >
-                <DeleteIcon
-                  class="ui-svg h-5 w-5 text-slate-600 dark:text-gray-300 group-hover/del:text-red-600 dark:group-hover/del:text-red-400"
-                />
-              </button>
-
-              <div class="h-5 w-px bg-slate-200 dark:bg-white/10 mx-1.5"></div>
-
-              <!-- Stroke Width Slider -->
-              <div
-                class="flex items-center gap-2 px-2"
-                title="Border Thickness (Scroll to adjust)"
-                @wheel.prevent="handleStrokeWidthScroll"
-              >
-                <span
-                  class="text-[11px] font-semibold text-slate-400 dark:text-gray-500 uppercase tracking-wider"
-                  >Size</span
-                >
-                <input
-                  v-model.number="strokeWidth"
-                  type="range"
-                  min="1"
-                  max="10"
-                  step="0.5"
-                  class="w-20 h-1.5 bg-slate-200 rounded-full appearance-none cursor-pointer dark:bg-white/10 accent-primary outline-none focus:ring-1 focus:ring-primary/50 transition-all"
-                />
-                <span class="text-xs font-mono text-slate-500 dark:text-gray-400 w-6 text-right">{{
-                  strokeWidth
-                }}</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Canvas alanı (kart içinde) -->
-          <div
-            class="flex-1 rounded-xl bg-white/60 dark:bg-[#161920]/80 backdrop-blur-sm border border-slate-200/80 dark:border-white/5 shadow-sm p-2 flex flex-col min-h-0"
-          >
-            <div
-              ref="canvasContainer"
-              class="relative w-full h-full rounded-lg bg-slate-50 dark:bg-[#0f1115] overflow-hidden canvas-container shadow-[inset_0_2px_10px_rgba(0,0,0,0.02)] border border-slate-200/50 dark:border-white/5"
-            >
-              <KonvaCanvas
-                ref="konvaCanvasRef"
-                :image-src="
-                  tasks[currentTaskIndex]?.image
-                    ? toLocalUrlMaybe(tasks[currentTaskIndex].image)
-                    : null
-                "
-                :annotations="state.annotations"
-                :active-tool="state.lastUsedTool"
-                :active-shape="state.lastUsedShape"
-                :active-label="state.activeLabel"
-                :selected-id="state.selectedAnnotationId"
-                :editing-id="editingAnnotationId"
-                :stroke-width="strokeWidth"
-                @create-annotation="handleCreateAnnotationFromKonva"
-                @select-annotation="handleSelectAnnotationFromKonva"
-                @pointer-move="handlePointerMove"
-                @pointer-leave="handlePointerLeave"
-                @sam-click="handleSamClickFromKonva"
-                @sam-draw="handleSamDrawFromKonva"
-                @edit-request="handleEditRequestFromKonva"
-                @update-annotation-state="handleUpdateAnnotationStateFromKonva"
-                @annotation-transform-end="handleAnnotationTransformEndFromKonva"
-              />
-
-              <!-- Edit hint toast -->
-              <transition name="fade">
-                <div
-                  v-if="showEditHint"
-                  class="absolute top-4 right-4 bg-black/80 text-white text-xs sm:text-sm px-3 py-2 rounded-lg shadow-lg flex items-center gap-2 max-w-xs"
-                >
-                  <SamIcon class="ui-svg h-4 w-4 text-primary-light" />
-                  <span>Tip: Long-press on a polygon to adjust its shape.</span>
-                  <button
-                    type="button"
-                    class="ml-1 text-[10px] sm:text-xs underline underline-offset-2 decoration-white/60 hover:decoration-white focus:outline-none"
-                    @click.stop="dismissEditHint"
-                  >
-                    Don’t show again
-                  </button>
-                </div>
-              </transition>
-
-              <div class="crosshair-lines">
-                <div ref="crosshairH" class="crosshair-line crosshair-horizontal"></div>
-                <div ref="crosshairV" class="crosshair-line crosshair-vertical"></div>
-              </div>
-
-              <div
-                class="absolute bottom-4 right-4 flex items-center gap-0.5 bg-black/40 dark:bg-black/60 shadow-lg backdrop-blur-md p-1.5 rounded-xl border border-white/10 text-white"
-              >
-                <button
-                  ref="zoomOutBtn"
-                  class="p-1.5 rounded-lg hover:bg-white/20 transition-colors"
-                  title="Zoom Out"
-                >
-                  <ZoomOutIcon class="ui-svg h-5 w-5 text-white" />
-                </button>
-                <button
-                  ref="zoomInBtn"
-                  class="p-1.5 rounded-lg hover:bg-white/20 transition-colors"
-                  title="Zoom In"
-                >
-                  <ZoomInIcon class="ui-svg h-5 w-5 text-white" />
-                </button>
-                <button
-                  ref="fitScreenBtn"
-                  class="p-1.5 rounded-lg hover:bg-white/20 transition-colors"
-                  title="Fit to Screen"
-                >
-                  <FitScreenIcon class="ui-svg h-5 w-5 text-white" />
-                </button>
-                <button
-                  ref="resetViewBtn"
-                  class="p-1.5 rounded-lg hover:bg-white/20 transition-colors"
-                  title="Restart"
-                >
-                  <ResetViewIcon class="ui-svg h-5 w-5 text-white" />
-                </button>
-              </div>
-
-              <div
-                ref="coords"
-                class="absolute bottom-4 left-4 bg-black/40 dark:bg-black/60 shadow-lg backdrop-blur-md text-white/90 text-[11px] font-mono rounded-lg px-3 py-1.5 border border-white/10 tracking-widest"
-              >
-                X: -, Y: -
-              </div>
-
-              <div ref="autoSaveOverlay" class="auto-save-overlay">
-                <div class="auto-save-pill">
-                  <div class="auto-save-icon">
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="3"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    >
-                      <polyline points="20 6 9 17 4 12"></polyline>
-                    </svg>
-                  </div>
-                  <span class="auto-save-text">Auto saved</span>
-                </div>
-              </div>
-            </div>
-          </div>
+          <!-- Canvas Workspace (FAZ 2) -->
+          <CanvasWorkspace
+            ref="canvasWorkspaceRef"
+            :image-src="
+              tasks[currentTaskIndex]?.image ? toLocalUrlMaybe(tasks[currentTaskIndex].image) : null
+            "
+            :annotations="state.annotations"
+            :active-tool="state.lastUsedTool"
+            :active-shape="state.lastUsedShape"
+            :active-label="state.activeLabel"
+            :selected-id="state.selectedAnnotationId"
+            :editing-id="editingAnnotationId"
+            :stroke-width="strokeWidth"
+            :show-edit-hint="showEditHint"
+            @create-annotation="handleCreateAnnotationFromKonva"
+            @select-annotation="handleSelectAnnotationFromKonva"
+            @sam-click="handleSamClickFromKonva"
+            @sam-draw="handleSamDrawFromKonva"
+            @edit-request="handleEditRequestFromKonva"
+            @update-annotation-state="handleUpdateAnnotationStateFromKonva"
+            @annotation-transform-end="handleAnnotationTransformEndFromKonva"
+            @dismiss-edit-hint="dismissEditHint"
+            @zoom-in="canvasWorkspaceRef?.zoomBy(0.1)"
+            @zoom-out="canvasWorkspaceRef?.zoomBy(-0.1)"
+            @fit-screen="canvasWorkspaceRef?.fitToContainer()"
+            @reset-view="restartCurrentTask"
+          />
         </div>
 
         <!-- Sağ paneller -->
         <div class="w-full lg:w-80 flex flex-col gap-4 pt-0 h-full shrink-0 relative z-0">
-          <div
-            class="bg-white/60 dark:bg-[#161920]/80 backdrop-blur-sm p-4 rounded-xl border border-slate-200/80 dark:border-white/5 shadow-sm flex flex-col min-h-0 flex-1"
-          >
-            <div class="flex items-center justify-between mb-4">
-              <h3
-                class="text-sm font-bold text-slate-800 dark:text-gray-200 tracking-wide uppercase"
-              >
-                Annotations
-              </h3>
-            </div>
+          <AnnotationsPanel>
             <div
               ref="annotationList"
               class="space-y-2 overflow-y-auto flex-1 min-h-0 px-1 -mx-1"
+              @click="handleAnnotationListClick"
             ></div>
-          </div>
+          </AnnotationsPanel>
 
-          <div
-            class="bg-white/60 dark:bg-[#161920]/80 backdrop-blur-sm p-4 rounded-xl border border-slate-200/80 dark:border-white/5 shadow-sm flex flex-col shrink-0"
-          >
-            <div class="flex items-center justify-between mb-3">
-              <h3
-                class="text-sm font-bold text-slate-800 dark:text-gray-200 tracking-wide uppercase"
-              >
-                Labels
-              </h3>
-            </div>
-
-            <div
-              v-if="state.labelingLoadError"
-              class="mb-3 p-3 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 rounded-md text-sm"
-            >
-              <strong class="font-bold">Error Loading Labels:</strong><br />
-              {{ state.labelingLoadError }}
-            </div>
-
-            <p v-if="showLabelHint && !state.labelingLoadError" class="text-xs text-amber-500 mb-2">
-              Lütfen önce bir label seçin.
-            </p>
-            <div v-if="!state.labelingLoadError" class="relative mb-3">
-              <SearchIcon
-                class="ui-svg h-4 w-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2"
-              />
-              <input
-                v-model="state.labelSearchTerm"
-                type="search"
-                placeholder="Search..."
-                class="w-full pl-9 pr-3 py-1.5 text-sm rounded-lg border border-slate-200/80 dark:border-white/10 bg-slate-50 dark:bg-black/20 focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-slate-400"
-              />
-            </div>
-
-            <div
-              v-if="isCloudLabelsReadOnly"
-              class="mb-3 text-[11px] uppercase tracking-wide text-blue-600 font-bold bg-blue-50 dark:bg-blue-500/10 dark:text-blue-400 p-2 rounded-lg flex items-center justify-center border border-blue-100 dark:border-blue-500/20"
-            >
-              <span>Cloud Contract (Read-only)</span>
-            </div>
-
-            <div ref="labelList" class="flex flex-wrap gap-1.5 mb-3 max-h-32 overflow-y-auto p-0.5">
-              <span
-                v-for="lbl in filteredLabels"
-                :key="lbl.id"
-                class="cursor-pointer text-xs font-semibold px-2 py-1 rounded-md label-item flex items-center gap-1.5 transition-all border group/chip"
-                :class="[
-                  state.activeLabel === lbl.name
-                    ? 'bg-primary text-white border-primary shadow-md shadow-primary/20'
-                    : 'bg-white dark:bg-white/5 text-slate-700 dark:text-gray-300 border-slate-200/80 dark:border-white/10 hover:border-primary/40 hover:bg-primary/5 hover:text-primary dark:hover:text-primary-light'
-                ]"
-                :data-label="lbl.name"
-                @click="setActiveLabelByName(lbl.name)"
-              >
-                {{ lbl.name }}
-                <button
-                  v-if="canManageLocalLabels"
-                  class="focus:outline-none opacity-50 hover:opacity-100 transition-opacity"
-                  :class="
-                    state.activeLabel === lbl.name
-                      ? 'text-white'
-                      : 'text-slate-400 hover:text-red-500 dark:text-gray-500 dark:hover:text-red-400'
-                  "
-                  title="Delete Label"
-                  @click.stop="handleDeleteLabel(lbl.id)"
-                >
-                  <CloseIcon class="w-3 h-3 ui-svg" />
-                </button>
-              </span>
-              <span
-                v-if="filteredLabels.length === 0"
-                class="text-xs text-slate-400 italic block w-full text-center py-2"
-                >No labels found</span
-              >
-            </div>
-
-            <div v-if="canManageLocalLabels" class="flex gap-2">
-              <input
-                v-model="newLabelName"
-                type="text"
-                placeholder="New label..."
-                class="flex-1 text-sm px-3 py-1.5 rounded-lg border border-slate-200/80 dark:border-white/10 bg-slate-50 dark:bg-black/20 focus:outline-none focus:ring-2 focus:ring-primary/20"
-                @keyup.enter="handleAddLabel"
-              />
-              <button
-                class="bg-primary hover:bg-primary-light text-white px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors shadow-sm"
-                @click="handleAddLabel"
-              >
-                Add
-              </button>
-            </div>
-          </div>
+          <LabelsPanel
+            :labeling-load-error="state.labelingLoadError"
+            :show-label-hint="showLabelHint"
+            :label-search-term="state.labelSearchTerm"
+            :is-cloud-labels-read-only="isCloudLabelsReadOnly"
+            :filtered-labels="filteredLabels"
+            :active-label="state.activeLabel"
+            :can-manage-local-labels="canManageLocalLabels"
+            :new-label-name="newLabelName"
+            @update:label-search-term="(val) => (state.labelSearchTerm = val)"
+            @update:new-label-name="(val) => (newLabelName = val)"
+            @set-active-label="setActiveLabelByName"
+            @delete-label="handleDeleteLabel"
+            @add-label="handleAddLabel"
+          />
         </div>
       </div>
     </main>

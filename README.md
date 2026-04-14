@@ -167,7 +167,7 @@ LabelGun üç ana Electron katmanından oluşur:
 │  │  App.vue      │  │ LabelerView.vue│  │KonvaCanvas   │  │
 │  │ (Dataset Mgmt)│  │ (Ana Labeler)  │  │(2D Canvas)   │  │
 │  └──────────────┘  └────────────────┘  └──────────────┘  │
-│  composables/ ─ useLabelerState, useHistory, useTasks ... │
+│  composables/ ─ useLabelerToolState, useLabelerSamManager, useTasks ...│  │
 ├──────────────────────────────────────────────────────────┤
 │                   PRELOAD (Bridge)                         │
 │  contextBridge → window.api { db, sam, dataset, window }  │
@@ -227,34 +227,47 @@ label_gun/
 │           ├── env.d.ts               # Vite / SVG / Vue ortam tip tanımları
 │           │
 │           ├── views/
-│           │   └── LabelerView.vue    # Ana etiketleme ekranı (~1700 satır):
-│           │                          # sidebar, toolbar, canvas, sağ panel,
-│           │                          # SAM entegrasyonu, auto-save, task navigasyonu
+│           │   └── LabelerView.vue    # Ana etiketleme ekranı (orchestrator):
+│           │                          # sidebar, toolbar, canvas, paneller arası
+│           │                          # iletişimi yöneten merkezi bileşen.
 │           │
 │           ├── components/
+│           │   ├── labeler/           # Labeler'a özel bileşenler
+│           │   │   ├── TaskSidebar.vue      # Görev listesi ve navigasyon
+│           │   │   ├── LabelerHeader.vue    # Başlık alanı, timer ve save kontrolleri
+│           │   │   ├── LabelerToolbar.vue   # Araç seçimi, SAM ayarları, stroke slider
+│           │   │   ├── CanvasWorkspace.vue  # Konva.js tabanlı ana çalışma alanı
+│           │   │   ├── AnnotationsPanel.vue # Anotasyon listesi (sağ panel)
+│           │   │   ├── LabelsPanel.vue      # Etiket listesi ve yönetimi
+│           │   │   └── SamModelMenu.vue     # SAM model indirme ve yönetim modalı
 │           │   ├── ui/
 │           │   │   ├── DialogHost.vue # Global modal iletişim ve onay penceresi yöneticisi
 │           │   │   └── ToastHost.vue  # Global anlık bildirim (toast) arayüzü
 │           │   ├── CloudPanel.vue     # Bulut hesap giriş tabı, sözleşme ve görev listesi paneli
-│           │   ├── KonvaCanvas.vue    # Konva.js tabanlı 2D canvas bileşeni (~1300 satır):
-│           │   │                      # şekil çizimi, düzenleme, drag & drop,
-│           │   │                      # zoom/pan, vertex düzenleme
 │           │   └── Versions.vue       # Electron/Chrome/Node sürüm bilgisi
 │           │
 │           ├── composables/           # Vue 3 Composition API modülleri
-│           │   ├── useAuth.ts               # Kimlik doğrulama state'leri ve login/logout işlemleri
-│           │   ├── useCloud.ts              # Bulut veri iletişimi ve sözleşme durum reaktivitesi
-│           │   ├── useFeedback.ts           # Global dialog ve toast bildirim yönetimi
-│           │   ├── useDatasetLabeling.ts    # Dataset etiket yönetimi ve cloud/local izin izolasyonu
-│           │   ├── useLabelerState.ts       # Merkezi reactive state yönetimi
-│           │   ├── useLabelerActions.ts     # Kullanıcı aksiyonları (save, submit, undo)
-│           │   ├── useHistory.ts            # Snapshot tabanlı undo/redo
-│           │   ├── useCanvasTransform.ts    # Zoom, pan, fit-to-screen
-│           │   ├── useCanvasInteractions.ts # Mouse event handler'ları (eski SVG canvas)
-│           │   ├── useAnnotationsRenderer.ts # SVG anotasyon render + export + seçim
-│           │   ├── useKeyboardShortcuts.ts  # Global klavye kısayolları
-│           │   ├── useTasks.ts              # Task yönetimi, DB senkronizasyonu
-│           │   └── useTheme.ts              # Light/dark tema yönetimi
+│           │   ├── useAuth.ts                # Kimlik doğrulama state'leri ve login/logout işlemleri
+│           │   ├── useCloud.ts               # Bulut veri iletişimi ve sözleşme durum reaktivitesi
+│           │   ├── useFeedback.ts            # Global dialog ve toast bildirim yönetimi
+│           │   ├── useDatasetLabeling.ts     # Dataset etiket yönetimi ve cloud/local izin izolasyonu
+│           │   ├── useLabelerState.ts        # Merkezi reactive state yönetimi
+│           │   │
+│           │   │   # --- Etiketleme Ekranı Mantık Modülleri (Refactored) ---
+│           │   ├── useLabelerToolState.ts    # Aktif araç, imleç ve toolbar seçim mantığı
+│           │   ├── useLabelerEditSession.ts  # Şekil düzenleme, yerel undo/redo ve mod yönetimi
+│           │   ├── useLabelerSamManager.ts   # SAM model lifecycle, indirme ve AI etkileşimi
+│           │   ├── useLabelerTaskSession.ts  # Görev yükleme, navigasyon ve anotasyon cache
+│           │   ├── useLabelerAutoSave.ts     # Zamanlayıcılar, auto-save döngüsü ve DB senkronu
+│           │   │
+│           │   ├── useLabelerActions.ts      # Kullanıcı aksiyonları (undo, redo, delete, submit)
+│           │   ├── useHistory.ts             # Snapshot tabanlı global undo/redo
+│           │   ├── useCanvasTransform.ts     # Zoom, pan, fit-to-screen
+│           │   ├── useCanvasInteractions.ts  # Mouse event handler'ları (alt-seviye)
+│           │   ├── useAnnotationsRenderer.ts  # Anotasyon render ve seçim mantığı
+│           │   ├── useKeyboardShortcuts.ts   # Global klavye kısayolları
+│           │   ├── useTasks.ts               # Görev listesi temel yönetimi
+│           │   └── useTheme.ts               # Light/dark tema yönetimi
 │           │
 │           ├── types/
 │           │   └── annotation.ts      # Tip tanımları: BBox, Polygon, Polyline,
@@ -448,15 +461,23 @@ Cloud sync işlemleri sırasında görevleri diğer labeler'lara karşı kilitle
 | `useFeedback`            | Uygulama genelinde özel diyaloğ (onay/hata) ve toast bildirimlerinin reaktif yönetimi                     |
 | `useDatasetLabeling`     | Dataset etiket havuzu yükleme, aktif etiket seçimi ve cloud(salt-okunur) / local(yönetilebilir) kontrolü  |
 
-| `useLabelerState`        | Merkezi reaktif durum: anotasyonlar, seçim, çizim bayrakları, araç/etiket bilgisi, zoom/pan parametreleri |
+| `useLabelerState`        | Merkezi reaktif durum: anotasyonlar, seçim, araç/etiket bilgisi, zoom/pan parametreleri                    |
 | `useHistory`             | JSON snapshot ile undo/redo geçmişi yönetimi                                                              |
 | `useCanvasTransform`     | Zoom (min 0.6x – max 10x), pan, fit-to-screen hesaplamaları                                               |
-| `useCanvasInteractions`  | Mouse event handler'ları: çizim başlatma/bitirme, pan, contexmenu, wheel zoom                             |
-| `useAnnotationsRenderer` | SVG şekil render, dışa aktarım (image-space), anotasyon seçimi ve silme                                   |
+| `useCanvasInteractions`  | Mouse event handler'ları (alt seviye etkileşimler)                                                        |
+| `useAnnotationsRenderer` | Konva.js anotasyon render, dışa aktarım (image-space), anotasyon seçimi ve silme                          |
 | `useKeyboardShortcuts`   | `Ctrl+Z/Y`, `Ctrl+S`, `Del`, `Enter`, `Escape`, `←/→` ok tuşları                                          |
-| `useTasks`               | Task listesi yönetimi, veritabanı senkronizasyonu (`initFromDb`), task arası navigasyon                   |
+| `useTasks`               | Task listesi yönetimi, veritabanı senkronizasyonu (`initFromDb`)                                           |
 | `useLabelerActions`      | Kullanıcı aksiyonları: undo, redo, delete, draft kaydetme (deterministik payload ve hash), toplu submit   |
 | `useTheme`               | Light/dark tema: OS algılama, localStorage kalıcılığı, CSS class toggle                                   |
+
+| Etiketleme Ekranı Mantık Modülleri (Logic Extraction) | Sorumluluk |
+| --- | --- |
+| `useLabelerToolState` | Aktif araç yönetimi, imleç güncellemeleri ve toolbar etkileşimleri. |
+| `useLabelerEditSession` | Polygon/şekil düzenleme modu state'i, yerel undo/redo geçmişi. |
+| `useLabelerSamManager` | SAM modellerinin indirilmesi, durum takibi ve AI çıkarım koordinasyonu. |
+| `useLabelerTaskSession` | Görevler arası geçiş, görüntü yükleme ve bellek içi anotasyon cache yönetimi. |
+| `useLabelerAutoSave` | Global/Task bazlı sayaçlar, otomatik kayıt döngüsü ve DB persistency. |
 
 ---
 
