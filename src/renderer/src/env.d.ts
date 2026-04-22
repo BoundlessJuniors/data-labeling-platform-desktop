@@ -136,17 +136,18 @@ interface Window {
           height?: number | null
         }) => Promise<{ ok: boolean }>
         listByDataset: (datasetId: string) => Promise<
-          {
+          Array<{
             id: string
             dataset_id: string
             local_path: string
             width: number | null
             height: number | null
-            status: string
-            annotation_seconds: number
-            cloud_task_id?: string | null
-            contract_id?: string | null
-          }[]
+            status: 'in_progress' | 'completed' | string | null
+            annotation_seconds?: number | null
+            cloud_task_id?: string
+            contract_id?: string
+            sync_status?: string | null
+          }>
         >
         setStatus: (payload: {
           media_id: string
@@ -197,6 +198,7 @@ interface Window {
         email: string
         password: string
       }) => Promise<{ id: string; email: string; role: string }>
+      bootstrapSession: () => Promise<{ id: string; email: string; role: string } | null>
       logout: () => Promise<void>
     }
     cloud: {
@@ -212,19 +214,59 @@ interface Window {
       downloadContractWork: (
         contractId: string,
         datasetId: string,
-        amount: number
+        amount: number,
+        expectedTaskCount?: number
       ) => Promise<{
         leased: number
         downloaded: number
         skipped: number
         failed: number
+        status: string
       }>
       syncNow: () => Promise<{ ok: boolean }>
-      submitContract: (contractId: string) => Promise<{
+      getContractHealth: (
+        contractId: string,
+        expectedTaskCount?: number
+      ) => Promise<{
+        expectedTaskCount: number
+        localDownloadedCount: number
+        notDownloadedCount: number
+        inProgressCount: number
+        missingLocalExportCount: number
+        pendingInsertCount: number
+        failedPermanentCount: number
+        leaseExpiredCount: number
+        conflictCount: number
+        totalUnsyncedCount: number
+        canSubmit: boolean
+        primaryBlockReason: string | null
+      }>
+      recoverExpiredTasks: (contractId: string) => Promise<{
         ok: boolean
+        recoveredCount: number
+      }>
+      submitContract: (
+        contractId: string,
+        expectedTaskCount?: number
+      ) => Promise<{
+        ok: boolean
+        data?: unknown
         unsyncedCount?: number
+        pendingInsertCount?: number
         failedCount?: number
+        leaseExpiredCount?: number
+        inProgressCount?: number
+        notDownloadedCount?: number
+        missingLocalExportCount?: number
         error?: string
+      }>
+      resetContractLocalState: (contractId: string) => Promise<{
+        ok: boolean
+        deletedDatasets: number
+        deletedMediaItems: number
+        deletedAnnotations: number
+        deletedLeases: number
+        deletedFiles: number
       }>
     }
     window: {

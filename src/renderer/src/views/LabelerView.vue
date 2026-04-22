@@ -213,7 +213,7 @@ const redoAndRender = (): void => {
   renderAnnotations()
 }
 
-const { onUndo, onRedo, onDelete, onSaveDraft, onSubmit } = useLabelerActions({
+const { onUndo, onRedo, onDelete, onSaveDraft, onCompleteLocalWork } = useLabelerActions({
   tasks,
   currentTaskIndex,
   canvasEl,
@@ -564,7 +564,7 @@ function handleToolbarSetShape(shape: string): void {
         :auto-save-progress="autoSaveProgress"
         @theme-toggle="onThemeToggleClick"
         @save="saveDraftAndReset"
-        @submit="onSubmit"
+        @complete-local="onCompleteLocalWork"
       />
 
       <div class="flex-1 flex p-4 gap-4 min-h-0 relative isolate">

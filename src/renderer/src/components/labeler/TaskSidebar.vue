@@ -107,7 +107,7 @@ function formatTime(total: number): string {
                 >Image preview</span
               >
             </div>
-            <div class="p-3">
+            <div class="p-3 flex flex-col">
               <div class="flex justify-between items-start mb-1.5">
                 <span
                   class="text-sm font-semibold text-slate-700 dark:text-gray-200 truncate pr-2"
@@ -132,6 +132,87 @@ function formatTime(total: number): string {
                   >Queued</span
                 >
               </div>
+
+              <!-- Sync Errors -->
+              <div
+                v-if="t.syncStatus === 'missing_annotation'"
+                class="mb-1.5 flex items-center gap-1 text-[10px] font-bold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-500/10 px-1.5 py-0.5 rounded-md w-fit"
+              >
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  class="shrink-0"
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="8" x2="12" y2="12" />
+                  <line x1="12" y1="16" x2="12.01" y2="16" />
+                </svg>
+                Missing Export
+              </div>
+              <div
+                v-else-if="t.syncStatus === 'lease_expired'"
+                class="mb-1.5 flex items-center gap-1 text-[10px] font-bold text-amber-700 dark:text-amber-500 bg-amber-100 dark:bg-amber-900/30 px-1.5 py-0.5 rounded-md w-fit"
+              >
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  class="shrink-0"
+                >
+                  <path
+                    d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
+                  />
+                  <line x1="12" y1="9" x2="12" y2="13" />
+                  <line x1="12" y1="17" x2="12.01" y2="17" />
+                </svg>
+                Lease Expired
+              </div>
+              <div
+                v-else-if="t.syncStatus === 'failed_permanent'"
+                class="mb-1.5 flex items-center gap-1 text-[10px] font-bold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-500/10 px-1.5 py-0.5 rounded-md w-fit"
+              >
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  class="shrink-0"
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="15" y1="9" x2="9" y2="15" />
+                  <line x1="9" y1="9" x2="15" y2="15" />
+                </svg>
+                Failed
+              </div>
+              <div
+                v-else-if="t.syncStatus === 'pending_insert'"
+                class="mb-1.5 flex items-center gap-1 text-[10px] font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10 px-1.5 py-0.5 rounded-md w-fit"
+              >
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  class="shrink-0"
+                >
+                  <path
+                    d="M21 12a9 9 0 0 1-9 9m9-9a9 9 0 0 0-9-9m9 9H3m9 9a9 9 0 0 1-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 0 1 9-9"
+                  />
+                </svg>
+                Pending
+              </div>
+
               <div
                 class="text-[11px] font-medium text-slate-400 dark:text-gray-500 flex items-center gap-1"
               >

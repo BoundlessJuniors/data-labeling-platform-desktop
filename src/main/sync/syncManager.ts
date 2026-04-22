@@ -24,9 +24,14 @@ function classifyHttpError(status: number, body: string): { retryable: boolean; 
   if (status === 409) {
     return { retryable: false, errorKey: 'already_submitted' }
   }
+  if (status === 400 && body.includes('Cannot submit task with status: submitted')) {
+    return { retryable: false, errorKey: 'already_submitted' }
+  }
   if (status === 403) {
     const lower = body.toLowerCase()
     if (lower.includes('expired') || lower.includes('lease')) {
+      // lease_expired is a distinct non-retryable error — kept separate from generic 'forbidden'
+      // so UI/recovery logic can identify and handle it differently in the future.
       return { retryable: false, errorKey: 'lease_expired' }
     }
     return { retryable: false, errorKey: 'forbidden' }
@@ -59,7 +64,7 @@ export async function runSyncCycle(): Promise<void> {
 
   // Lazy import to avoid circular dependency at module load time
 
-  const { getLease, deleteLease } = await import('../api/cloudTasksIpc')
+  const { getLease } = await import('../api/cloudTasksIpc')
 
   // Query pending annotations with cloud_task_id — NO media_items join
   const pending = db
@@ -127,12 +132,26 @@ export async function runSyncCycle(): Promise<void> {
     const lease = getLease(row.cloud_task_id)
     if (!lease) {
       db.prepare(
-        `UPDATE annotations SET sync_status = 'failed_permanent', last_error = 'missing_lease_token' WHERE id = ?`
+        `UPDATE annotations SET sync_status = 'lease_expired', last_error = 'missing_lease_token' WHERE id = ?`
       ).run(row.annotation_id)
       console.error(
-        `[syncManager] ${row.annotation_id}: no lease for task ${row.cloud_task_id}, marking failed_permanent`
+        `[syncManager] ${row.annotation_id}: no lease for task ${row.cloud_task_id}, marking lease_expired`
       )
       continue
+    }
+
+    // Step c.1: Local lease expiry guard
+    if (lease.leased_until) {
+      const leasedUntilMs = new Date(lease.leased_until).getTime()
+      if (Date.now() > leasedUntilMs) {
+        db.prepare(
+          `UPDATE annotations SET sync_status = 'lease_expired', last_error = 'lease_expired_local' WHERE id = ?`
+        ).run(row.annotation_id)
+        console.warn(
+          `[syncManager] ${row.annotation_id}: local lease expired for task ${row.cloud_task_id}, marking lease_expired_local`
+        )
+        continue
+      }
     }
 
     // Step d: POST /api/v1/tasks/:id/submit
@@ -150,12 +169,6 @@ export async function runSyncCycle(): Promise<void> {
         `UPDATE annotations SET sync_status = 'synced', last_synced_hash = payload_hash, last_error = NULL WHERE id = ?`
       ).run(row.annotation_id)
 
-      deleteLease(row.cloud_task_id)
-
-      db.prepare(`UPDATE media_items SET status = 'completed' WHERE cloud_task_id = ?`).run(
-        row.cloud_task_id
-      )
-
       console.log(
         `[syncManager] ${row.annotation_id}: submitted successfully for task ${row.cloud_task_id}`
       )
@@ -170,19 +183,24 @@ export async function runSyncCycle(): Promise<void> {
 
       const classification = classifyHttpError(status, bodyStr)
 
-      // Step f: 409 = idempotent success
-      if (status === 409) {
-        db.prepare(
-          `UPDATE annotations SET sync_status = 'synced', last_synced_hash = payload_hash, last_error = NULL WHERE id = ?`
-        ).run(row.annotation_id)
-
-        deleteLease(row.cloud_task_id)
-
-        db.prepare(`UPDATE media_items SET status = 'completed' WHERE cloud_task_id = ?`).run(
-          row.cloud_task_id
-        )
-
-        console.log(`[syncManager] ${row.annotation_id}: 409 (already submitted) → marking synced`)
+      // Step f: idempotent success or conflict check
+      if (classification.errorKey === 'already_submitted') {
+        if (row.last_synced_hash && row.payload_hash !== row.last_synced_hash) {
+          // Task already submitted on backend, but local user has made newer changes (hashes don't match).
+          // We mark it as conflict rather than failed_permanent so data is not blindly lost.
+          db.prepare(
+            `UPDATE annotations SET sync_status = 'task_already_submitted_conflict', last_error = 'task_already_submitted_conflict' WHERE id = ?`
+          ).run(row.annotation_id)
+          console.warn(
+            `[syncManager] ${row.annotation_id}: payload changed locally but backend already submitted (conflict)`
+          )
+        } else {
+          // Either same hash (idempotent) or first sync but backend says submitted.
+          db.prepare(
+            `UPDATE annotations SET sync_status = 'synced', last_synced_hash = payload_hash, last_error = NULL WHERE id = ?`
+          ).run(row.annotation_id)
+          console.log(`[syncManager] ${row.annotation_id}: already submitted, marking synced`)
+        }
         continue
       }
 
@@ -194,8 +212,18 @@ export async function runSyncCycle(): Promise<void> {
         console.log(
           `[syncManager] ${row.annotation_id}: retryable error (${classification.errorKey}), will retry`
         )
+      } else if (classification.errorKey === 'lease_expired') {
+        // Step h-lease: lease_expired — kept as a distinct, recoverable-in-future status.
+        // Do NOT mark as failed_permanent: annotation data is preserved, and the task
+        // may be re-leased manually in a future recovery flow.
+        db.prepare(
+          `UPDATE annotations SET sync_status = 'lease_expired', last_error = 'lease_expired' WHERE id = ?`
+        ).run(row.annotation_id)
+        console.warn(
+          `[syncManager] ${row.annotation_id}: lease expired for task ${row.cloud_task_id} — marking sync_status='lease_expired' (recoverable)`
+        )
       } else {
-        // Step h: Non-retryable
+        // Step h: Non-retryable (permanent)
         db.prepare(
           `UPDATE annotations SET sync_status = 'failed_permanent', last_error = ? WHERE id = ?`
         ).run(classification.errorKey, row.annotation_id)

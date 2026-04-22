@@ -25,6 +25,7 @@ export function useAuth(): {
   login: (email: string, password: string) => Promise<void>
   logout: () => Promise<void>
   clearError: () => void
+  bootstrapSession: () => Promise<void>
 } {
   const isAuthenticated = computed(() => user.value !== null)
 
@@ -68,6 +69,26 @@ export function useAuth(): {
     error.value = null
   }
 
+  /**
+   * Session'u diske/cookie'ye güvenerek initialize eder.
+   */
+  const bootstrapSession = async (): Promise<void> => {
+    isLoading.value = true
+    error.value = null
+    try {
+      const profile = await window.api.auth.bootstrapSession()
+      if (profile) {
+        user.value = profile
+      } else {
+        user.value = null
+      }
+    } catch (err: unknown) {
+      error.value = err instanceof Error ? err.message : 'Session could not be verified'
+    } finally {
+      isLoading.value = false
+    }
+  }
+
   return {
     // State (readonly expose)
     user,
@@ -78,6 +99,7 @@ export function useAuth(): {
     // Actions
     login,
     logout,
-    clearError
+    clearError,
+    bootstrapSession
   }
 }

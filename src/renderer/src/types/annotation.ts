@@ -58,6 +58,7 @@ export type Task = {
   // Cloud fields (cloud-originated tasks only)
   cloudTaskId?: string
   contractId?: string
+  syncStatus?: string
 }
 
 export type LabelDefinition = {

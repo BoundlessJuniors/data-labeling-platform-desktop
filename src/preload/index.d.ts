@@ -115,6 +115,7 @@ declare global {
               annotation_seconds?: number | null
               cloud_task_id?: string
               contract_id?: string
+              sync_status?: string | null
             }>
           >
           setStatus: (payload: {
@@ -217,6 +218,12 @@ declare global {
           role: string
           [key: string]: unknown
         }>
+        bootstrapSession: () => Promise<{
+          id: string
+          email: string
+          role: string
+          [key: string]: unknown
+        } | null>
         logout: () => Promise<void>
       }
       cloud: {
@@ -231,15 +238,59 @@ declare global {
         downloadContractWork: (
           contractId: string,
           datasetId: string,
-          amount: number
-        ) => Promise<{ leased: number; downloaded: number; skipped: number; failed: number }>
+          amount: number,
+          expectedTaskCount?: number
+        ) => Promise<{
+          leased: number
+          downloaded: number
+          skipped: number
+          failed: number
+          status: string
+        }>
         syncNow: () => Promise<{ ok: boolean }>
-        submitContract: (contractId: string) => Promise<{
+        getContractHealth: (
+          contractId: string,
+          expectedTaskCount?: number
+        ) => Promise<{
+          expectedTaskCount: number
+          localDownloadedCount: number
+          notDownloadedCount: number
+          inProgressCount: number
+          missingLocalExportCount: number
+          pendingInsertCount: number
+          failedPermanentCount: number
+          leaseExpiredCount: number
+          conflictCount: number
+          totalUnsyncedCount: number
+          canSubmit: boolean
+          primaryBlockReason: string | null
+        }>
+        recoverExpiredTasks: (contractId: string) => Promise<{
+          ok: boolean
+          recoveredCount: number
+        }>
+        submitContract: (
+          contractId: string,
+          expectedTaskCount?: number
+        ) => Promise<{
           ok: boolean
           data?: unknown
           unsyncedCount?: number
+          pendingInsertCount?: number
           failedCount?: number
+          leaseExpiredCount?: number
+          inProgressCount?: number
+          notDownloadedCount?: number
+          missingLocalExportCount?: number
           error?: string
+        }>
+        resetContractLocalState: (contractId: string) => Promise<{
+          ok: boolean
+          deletedDatasets: number
+          deletedMediaItems: number
+          deletedAnnotations: number
+          deletedLeases: number
+          deletedFiles: number
         }>
       }
       window: {

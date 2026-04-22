@@ -134,6 +134,126 @@ function parseLeasedUntil(val: string | number | null | undefined): number | nul
 }
 
 // -----------------------------------------------------------------------
+// Helper: Compute Contract Health
+// -----------------------------------------------------------------------
+async function computeContractHealth(
+  contractId: string,
+  expectedTaskCount?: number
+): Promise<{
+  expectedTaskCount: number
+  localDownloadedCount: number
+  notDownloadedCount: number
+  inProgressCount: number
+  missingLocalExportCount: number
+  pendingInsertCount: number
+  failedPermanentCount: number
+  leaseExpiredCount: number
+  conflictCount: number
+  totalUnsyncedCount: number
+  canSubmit: boolean
+  primaryBlockReason: string | null
+}> {
+  const db = getDb()
+
+  // media stats
+  const mediaStats = db
+    .prepare(
+      `SELECT COUNT(*) as total, SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) as in_progress FROM media_items WHERE contract_id = ? AND status != 'archived'`
+    )
+    .get(contractId) as { total: number; in_progress: number }
+
+  const localDownloadedCount = mediaStats.total ?? 0
+  const inProgressCount = mediaStats.in_progress ?? 0
+
+  let notDownloadedCount = 0
+  if (typeof expectedTaskCount === 'number' && expectedTaskCount > 0) {
+    if (expectedTaskCount > localDownloadedCount) {
+      notDownloadedCount = expectedTaskCount - localDownloadedCount
+    }
+  }
+
+  // unsynced annotations
+  const unsyncedRow = db
+    .prepare(
+      `SELECT
+         COUNT(*) as total,
+         SUM(CASE WHEN sync_status = 'pending_insert' THEN 1 ELSE 0 END) as pending_count,
+         SUM(CASE WHEN sync_status = 'failed_permanent' THEN 1 ELSE 0 END) as failed_count,
+         SUM(CASE WHEN sync_status = 'lease_expired' THEN 1 ELSE 0 END) as lease_expired_count,
+         SUM(CASE WHEN sync_status = 'task_already_submitted_conflict' THEN 1 ELSE 0 END) as conflict_count
+       FROM annotations
+       WHERE contract_id = ? AND sync_status NOT IN ('synced', 'archived') AND id LIKE 'export:%'`
+    )
+    .get(contractId) as {
+    total: number
+    pending_count: number
+    failed_count: number
+    lease_expired_count: number
+    conflict_count: number
+  }
+
+  const totalUnsyncedCount = unsyncedRow.total ?? 0
+  const pendingInsertCount = unsyncedRow.pending_count ?? 0
+  const leaseExpiredCount = unsyncedRow.lease_expired_count ?? 0
+  const failedPermanentCount = unsyncedRow.failed_count ?? 0
+  const conflictCount = unsyncedRow.conflict_count ?? 0
+
+  // missingLocalExportCount: completed media items with no corresponding export annotation
+  const missingExportRow = db
+    .prepare(
+      `SELECT COUNT(*) as missing_count
+       FROM media_items m
+       LEFT JOIN annotations a ON a.id = 'export:' || m.id
+       WHERE m.contract_id = ? AND m.status = 'completed' AND a.id IS NULL`
+    )
+    .get(contractId) as { missing_count: number }
+
+  const missingLocalExportCount = missingExportRow.missing_count ?? 0
+
+  const canSubmit =
+    notDownloadedCount === 0 &&
+    inProgressCount === 0 &&
+    totalUnsyncedCount === 0 &&
+    missingLocalExportCount === 0 &&
+    conflictCount === 0
+
+  let primaryBlockReason: string | null = null
+  if (!canSubmit) {
+    if (conflictCount > 0) {
+      primaryBlockReason = `Bazı görevler backend’de zaten submitted durumda ancak lokal veriniz farklı. Çakışma çözülmeden teslim edilemez.`
+    } else if (notDownloadedCount > 0) {
+      primaryBlockReason = `Eksik Görevler: ${notDownloadedCount} adet görev henüz cihazınıza indirilmemiş.`
+    } else if (inProgressCount > 0) {
+      primaryBlockReason = `Eksik Çalışma: ${inProgressCount} adet görevin çalışması henüz tamamlanmadı (Save Draft -> Mark as Complete).`
+    } else if (missingLocalExportCount > 0) {
+      primaryBlockReason = `Veri Bütünlüğü: ${missingLocalExportCount} adet görev tamamlandı olarak işaretlenmiş ancak kayıtlı etiket verisi bulunmuyor.`
+    } else if (totalUnsyncedCount > 0) {
+      primaryBlockReason = `${totalUnsyncedCount} görev buluta henüz tam olarak senkronize edilmedi.`
+      if (leaseExpiredCount > 0) {
+        primaryBlockReason += ` (${leaseExpiredCount} görevin süresi doldu — kurtarılması gerekiyor.)`
+      }
+    } else {
+      primaryBlockReason = 'Kontrat teslim edilemedi.'
+    }
+  }
+
+  return {
+    expectedTaskCount: expectedTaskCount ?? 0,
+    localDownloadedCount,
+    notDownloadedCount,
+    inProgressCount,
+    missingLocalExportCount,
+    pendingInsertCount,
+    failedPermanentCount,
+    leaseExpiredCount,
+    conflictCount,
+    totalUnsyncedCount,
+    canSubmit,
+    primaryBlockReason
+  }
+}
+
+// -----------------------------------------------------------------------
 // Tüm cloud IPC handler'larını kayıt eder.
 // -----------------------------------------------------------------------
 export function registerCloudTasksIpc(): void {
@@ -157,11 +277,47 @@ export function registerCloudTasksIpc(): void {
       _event,
       contractId: string,
       datasetId: string,
-      amount: number
-    ): Promise<{ leased: number; downloaded: number; skipped: number; failed: number }> => {
+      amount: number,
+      expectedTaskCount?: number
+    ): Promise<{
+      leased: number
+      downloaded: number
+      skipped: number
+      failed: number
+      status: string
+    }> => {
       console.log(
-        `[cloud:downloadContractWork] contractId=${contractId} datasetId=${datasetId} amount=${amount}`
+        `[cloud:downloadContractWork] contractId=${contractId} datasetId=${datasetId} amount=${amount} expectedTaskCount=${expectedTaskCount}`
       )
+
+      const db = getDb()
+
+      // Pre-flight health check for stale local state
+      const health = await computeContractHealth(contractId, expectedTaskCount)
+
+      let hasStaleFailed = false
+      if (health.failedPermanentCount > 0) {
+        const staleFails = db
+          .prepare(
+            `SELECT COUNT(*) as c FROM annotations WHERE contract_id = ? AND sync_status = 'failed_permanent' AND last_error IN ('missing_lease_token', 'lease_expired', 'lease_expired_local')`
+          )
+          .get(contractId) as { c: number }
+        if (staleFails.c > 0) hasStaleFailed = true
+      }
+
+      if (health.leaseExpiredCount > 0 || hasStaleFailed) {
+        return { leased: 0, downloaded: 0, skipped: 0, failed: 0, status: 'stale_local_state' }
+      }
+
+      if (expectedTaskCount && health.localDownloadedCount >= expectedTaskCount) {
+        return {
+          leased: 0,
+          downloaded: 0,
+          skipped: 0,
+          failed: 0,
+          status: 'already_fully_downloaded'
+        }
+      }
 
       // 0. Update labeling metadata before any tasks are leased
       try {
@@ -193,8 +349,6 @@ export function registerCloudTasksIpc(): void {
             'The cloud contract does not have a configured label set. Downloading tasks without a label set is prohibited.'
           )
         }
-
-        const db = getDb()
 
         // Update dataset metadata
         db.prepare(
@@ -264,7 +418,35 @@ export function registerCloudTasksIpc(): void {
         throw new Error(`Görevler kiralanamadı: ${error.message}`)
       }
 
-      const db = getDb()
+      if (leasedTasks.length === 0) {
+        // Re-evaluate health to see if we reached the expected count or have stale state
+        const reHealth = await computeContractHealth(contractId, expectedTaskCount)
+        if (expectedTaskCount && reHealth.localDownloadedCount >= expectedTaskCount) {
+          return {
+            leased: 0,
+            downloaded: 0,
+            skipped: 0,
+            failed: 0,
+            status: 'already_fully_downloaded'
+          }
+        }
+
+        let hasStaleFailed2 = false
+        if (reHealth.failedPermanentCount > 0) {
+          const staleFails = db
+            .prepare(
+              `SELECT COUNT(*) as c FROM annotations WHERE contract_id = ? AND sync_status = 'failed_permanent' AND last_error IN ('missing_lease_token', 'lease_expired', 'lease_expired_local')`
+            )
+            .get(contractId) as { c: number }
+          if (staleFails.c > 0) hasStaleFailed2 = true
+        }
+
+        if (reHealth.leaseExpiredCount > 0 || hasStaleFailed2) {
+          return { leased: 0, downloaded: 0, skipped: 0, failed: 0, status: 'stale_local_state' }
+        }
+        return { leased: 0, downloaded: 0, skipped: 0, failed: 0, status: 'zero_leased' }
+      }
+
       let downloaded = 0
       let skipped = 0
       let failed = 0
@@ -284,16 +466,23 @@ export function registerCloudTasksIpc(): void {
           continue
         }
 
-        // 2a. Persist lease (preserves created_at on re-lease)
+        // 2a. Persist lease (before download — lease is rolled back on download failure)
         upsertTaskLease(taskId, contractId, leaseToken, leasedUntil)
 
         // 2b. Check if already downloaded (unique cloud_task_id)
         const existing = db
-          .prepare('SELECT id FROM media_items WHERE cloud_task_id = ?')
-          .get(taskId)
+          .prepare('SELECT id, status FROM media_items WHERE cloud_task_id = ?')
+          .get(taskId) as { id: string; status: string } | undefined
 
         if (existing) {
           console.log(`[cloud:downloadContractWork] skip (already_downloaded) taskId=${taskId}`)
+          if (existing.status === 'archived') {
+            console.log(`[cloud:downloadContractWork] restoring archived task taskId=${taskId}`)
+            db.prepare(`UPDATE media_items SET status = 'completed' WHERE id = ?`).run(existing.id)
+            db.prepare(
+              `UPDATE annotations SET sync_status = 'pending_insert', last_error = NULL WHERE media_id = ? AND id = ?`
+            ).run(existing.id, `export:${existing.id}`)
+          }
           skipped++
           continue
         }
@@ -312,8 +501,10 @@ export function registerCloudTasksIpc(): void {
 
         if (!downloadUrl) {
           console.error(
-            `[cloud:downloadContractWork] No download URL for taskId=${taskId} assetId=${assetId}`
+            `[cloud:downloadContractWork] No download URL for taskId=${taskId} assetId=${assetId}, rolling back lease`
           )
+          // Rollback: lease persist edilmişti, URL yoksa local state temizle
+          deleteLease(taskId)
           failed++
           continue
         }
@@ -359,7 +550,7 @@ export function registerCloudTasksIpc(): void {
 
           renameSync(tmpPath, finalPath)
 
-          // 2e. Insert media_items row
+          // 2e. Insert media_items row (only on successful download)
           const mediaId = randomUUID()
           const now = Date.now()
 
@@ -390,6 +581,7 @@ export function registerCloudTasksIpc(): void {
           )
           downloaded++
         } catch (err: unknown) {
+          // Cleanup tmp file
           if (tmpPath && existsSync(tmpPath)) {
             try {
               unlinkSync(tmpPath)
@@ -397,15 +589,19 @@ export function registerCloudTasksIpc(): void {
               /* ignore */
             }
           }
+          // Rollback lease: download başarısız olduğunda orphan lease bırakma.
+          // Backend'de lease alınmış olsa da local state temiz kalır;
+          // backend lease expire olunca task yeniden lease alınabilir.
+          deleteLease(taskId)
           const error = err as { message: string; response?: { status?: number; data?: unknown } }
           console.error(
-            `[cloud:downloadContractWork] fail taskId=${taskId} assetId=${assetId} message="${error.message}"`
+            `[cloud:downloadContractWork] fail taskId=${taskId} assetId=${assetId} message="${error.message}" — lease rolled back`
           )
           failed++
         }
       }
 
-      return { leased: leasedTasks.length, downloaded, skipped, failed }
+      return { leased: leasedTasks.length, downloaded, skipped, failed, status: 'downloaded' }
     }
   )
 
@@ -419,18 +615,74 @@ export function registerCloudTasksIpc(): void {
   })
 
   // ----------------------------------------------------------------------
+  // cloud:getContractHealth
+  // Centralized health layer for a contract.
+  // ----------------------------------------------------------------------
+  ipcMain.handle(
+    'cloud:getContractHealth',
+    async (_event, contractId: string, expectedTaskCount?: number) => {
+      return await computeContractHealth(contractId, expectedTaskCount)
+    }
+  )
+
+  // ----------------------------------------------------------------------
+  // cloud:recoverExpiredTasks
+  // Archiving local lease_expired state + deleting media/lease to redownload.
+  // ----------------------------------------------------------------------
+  ipcMain.handle('cloud:recoverExpiredTasks', async (_event, contractId: string) => {
+    const db = getDb()
+
+    const expired = db
+      .prepare(
+        `SELECT media_id, cloud_task_id, id as annotation_id 
+         FROM annotations 
+         WHERE contract_id = ? AND sync_status = 'lease_expired' AND id LIKE 'export:%'`
+      )
+      .all(contractId) as { media_id: string; cloud_task_id: string; annotation_id: string }[]
+
+    let recoveredCount = 0
+    const tx = db.transaction(() => {
+      for (const row of expired) {
+        // Safe archival: mark annotation as archived instead of deleting
+        db.prepare(
+          `UPDATE annotations 
+           SET sync_status = 'archived', last_error = 'archived_due_to_lease_expiration'
+           WHERE id = ?`
+        ).run(row.annotation_id)
+
+        if (row.cloud_task_id) {
+          db.prepare(`DELETE FROM task_leases WHERE task_id = ?`).run(row.cloud_task_id)
+        }
+
+        // Safe archival: mark media_item as archived instead of deleting to preserve dataset cascade and user data
+        db.prepare(`UPDATE media_items SET status = 'archived' WHERE id = ?`).run(row.media_id)
+        recoveredCount++
+      }
+    })
+    tx()
+
+    return { ok: true, recoveredCount }
+  })
+
+  // ----------------------------------------------------------------------
   // cloud:submitContract
-  // Runs sync first, validates no unsynced annotations, then submits.
+  // Runs sync first, validates health, then submits.
   // ----------------------------------------------------------------------
   ipcMain.handle(
     'cloud:submitContract',
     async (
       _event,
-      contractId: string
+      contractId: string,
+      expectedTaskCount?: number
     ): Promise<{
       ok: boolean
       unsyncedCount?: number
       failedCount?: number
+      leaseExpiredCount?: number
+      pendingInsertCount?: number
+      inProgressCount?: number
+      notDownloadedCount?: number
+      missingLocalExportCount?: number
       error?: string
       data?: unknown
     }> => {
@@ -441,27 +693,24 @@ export function registerCloudTasksIpc(): void {
         console.error('[cloud:submitContract] Sync cycle failed:', (err as Error).message)
       }
 
-      // 2. Check for unsynced annotations
-      const db = getDb()
-      const unsyncedRow = db
-        .prepare(
-          `SELECT
-             COUNT(*) as total,
-             SUM(CASE WHEN sync_status = 'failed_permanent' THEN 1 ELSE 0 END) as failed_count
-           FROM annotations
-           WHERE contract_id = ? AND sync_status NOT IN ('synced')`
-        )
-        .get(contractId) as { total: number; failed_count: number }
+      // 2. Compute centralized contract health
+      const health = await computeContractHealth(contractId, expectedTaskCount)
 
-      if (unsyncedRow.total > 0) {
+      // Block criteria: missing downloads, in progress local work, missing exports, or unsynced work
+      if (!health.canSubmit) {
         console.log(
-          `[cloud:submitContract] Blocked: ${unsyncedRow.total} unsynced (${unsyncedRow.failed_count} failed_permanent)`
+          `[cloud:submitContract] Blocked: missingDls=${health.notDownloadedCount}, inProgress=${health.inProgressCount}, missingExp=${health.missingLocalExportCount}, pending=${health.pendingInsertCount}, failed=${health.failedPermanentCount}, lease_expired=${health.leaseExpiredCount}`
         )
         return {
           ok: false,
-          unsyncedCount: unsyncedRow.total,
-          failedCount: unsyncedRow.failed_count,
-          error: `${unsyncedRow.total} görev henüz senkronize edilmedi.`
+          unsyncedCount: health.totalUnsyncedCount,
+          pendingInsertCount: health.pendingInsertCount,
+          failedCount: health.failedPermanentCount,
+          leaseExpiredCount: health.leaseExpiredCount,
+          inProgressCount: health.inProgressCount,
+          notDownloadedCount: health.notDownloadedCount,
+          missingLocalExportCount: health.missingLocalExportCount,
+          error: health.primaryBlockReason ?? 'Kontrat teslim edilemedi.'
         }
       }
 
@@ -479,6 +728,77 @@ export function registerCloudTasksIpc(): void {
       }
     }
   )
+  // ----------------------------------------------------------------------
+  // cloud:resetContractLocalState
+  // Fully clears local state only for that contract safely
+  // ----------------------------------------------------------------------
+  ipcMain.handle('cloud:resetContractLocalState', async (_event, contractId: string) => {
+    const db = getDb()
+
+    // Find media items to clean up cached files
+    const mediaItems = db
+      .prepare(`SELECT id, local_path FROM media_items WHERE contract_id = ?`)
+      .all(contractId) as { id: string; local_path: string }[]
+
+    let deletedDatasets = 0
+    let deletedMediaItems = 0
+    let deletedAnnotations = 0
+    let deletedLeases = 0
+
+    const tx = db.transaction(() => {
+      // 1. Delete annotations
+      const annRes = db
+        .prepare(
+          `DELETE FROM annotations WHERE contract_id = ? OR media_id IN (SELECT id FROM media_items WHERE contract_id = ?)`
+        )
+        .run(contractId, contractId)
+      deletedAnnotations = annRes.changes
+
+      // 2. Delete task_leases
+      const leaseRes = db
+        .prepare(
+          `DELETE FROM task_leases WHERE contract_id = ? OR task_id IN (SELECT cloud_task_id FROM media_items WHERE contract_id = ?)`
+        )
+        .run(contractId, contractId)
+      deletedLeases = leaseRes.changes
+
+      // 3. Delete media_items
+      const mediaRes = db.prepare(`DELETE FROM media_items WHERE contract_id = ?`).run(contractId)
+      deletedMediaItems = mediaRes.changes
+
+      // 4. Delete dataset_labels (for datasets of this contract)
+      db.prepare(
+        `DELETE FROM dataset_labels WHERE dataset_id IN (SELECT id FROM datasets WHERE cloud_contract_id = ?)`
+      ).run(contractId)
+
+      // 5. Delete datasets
+      const dsRes = db.prepare(`DELETE FROM datasets WHERE cloud_contract_id = ?`).run(contractId)
+      deletedDatasets = dsRes.changes
+    })
+    tx()
+
+    // 6. Asynchronously delete cached files best-effort
+    let deletedFiles = 0
+    for (const m of mediaItems) {
+      if (m.local_path && existsSync(m.local_path)) {
+        try {
+          unlinkSync(m.local_path)
+          deletedFiles++
+        } catch (e) {
+          console.warn(`[cloud:resetContractLocalState] Failed to delete file ${m.local_path}`, e)
+        }
+      }
+    }
+
+    return {
+      ok: true,
+      deletedDatasets,
+      deletedMediaItems,
+      deletedAnnotations,
+      deletedLeases,
+      deletedFiles
+    }
+  })
 }
 
 // Export helpers for syncManager

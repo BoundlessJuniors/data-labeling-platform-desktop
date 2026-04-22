@@ -80,14 +80,36 @@ export function registerDbIpc(): void {
   ipcMain.handle('db:datasets:delete', (_evt, datasetId: string) => {
     const db = getDb()
     const tx = db.transaction(() => {
+      // Get contract ID for task_leases cleanup
+      const ds = db
+        .prepare('SELECT cloud_contract_id FROM datasets WHERE id = ?')
+        .get(datasetId) as { cloud_contract_id: string | null } | undefined
+      const contractId = ds?.cloud_contract_id
+
+      // Get task_ids before deleting media_items
+      const tasks = db
+        .prepare(
+          `SELECT cloud_task_id FROM media_items WHERE dataset_id = ? AND cloud_task_id IS NOT NULL`
+        )
+        .all(datasetId) as { cloud_task_id: string }[]
+
       // annotations -> media_items -> dataset_labels -> datasets
       db.prepare(
         `DELETE FROM annotations 
          WHERE media_id IN (SELECT id FROM media_items WHERE dataset_id = ?)`
       ).run(datasetId)
+
       db.prepare(`DELETE FROM media_items WHERE dataset_id = ?`).run(datasetId)
       db.prepare(`DELETE FROM dataset_labels WHERE dataset_id = ?`).run(datasetId)
       db.prepare(`DELETE FROM datasets WHERE id = ?`).run(datasetId)
+
+      // cleanup task_leases
+      if (contractId) {
+        db.prepare(`DELETE FROM task_leases WHERE contract_id = ?`).run(contractId)
+      }
+      for (const t of tasks) {
+        db.prepare(`DELETE FROM task_leases WHERE task_id = ?`).run(t.cloud_task_id)
+      }
     })
     tx()
     return { ok: true }
@@ -428,7 +450,11 @@ export function registerDbIpc(): void {
     const db = getDb()
     return db
       .prepare(
-        'SELECT id, dataset_id, local_path, width, height, status, annotation_seconds, cloud_task_id, contract_id FROM media_items WHERE dataset_id=? ORDER BY created_at ASC'
+        `SELECT m.id, m.dataset_id, m.local_path, m.width, m.height, m.status, m.annotation_seconds, m.cloud_task_id, m.contract_id, a.sync_status
+         FROM media_items m
+         LEFT JOIN annotations a ON a.id = 'export:' || m.id
+         WHERE m.dataset_id=? AND m.status != 'archived'
+         ORDER BY m.created_at ASC`
       )
       .all(datasetId)
   })
@@ -483,9 +509,8 @@ export function registerDbIpc(): void {
           payload_json=excluded.payload_json,
           payload_hash=excluded.payload_hash,
           sync_status=CASE
-            WHEN excluded.payload_hash != annotations.last_synced_hash
-                 OR annotations.last_synced_hash IS NULL
-            THEN 'pending_insert'
+            WHEN excluded.payload_hash IS NOT NULL AND annotations.last_synced_hash IS NOT NULL AND excluded.payload_hash = annotations.last_synced_hash THEN annotations.sync_status
+            WHEN excluded.payload_hash != annotations.last_synced_hash OR annotations.last_synced_hash IS NULL THEN 'pending_insert'
             ELSE annotations.sync_status
           END
       `

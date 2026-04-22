@@ -54,7 +54,8 @@ export function useTasks(initial: Task[]): {
       timeSeconds: typeof r.annotation_seconds === 'number' ? r.annotation_seconds : 0,
       // Cloud fields from media_items
       cloudTaskId: r.cloud_task_id ?? undefined,
-      contractId: r.contract_id ?? undefined
+      contractId: r.contract_id ?? undefined,
+      syncStatus: r.sync_status ?? (r.status === 'completed' ? 'missing_annotation' : undefined)
     }))
     currentTaskIndex.value = 0
   }

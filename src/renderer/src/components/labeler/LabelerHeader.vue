@@ -15,7 +15,7 @@ defineProps<{
 const emit = defineEmits<{
   (e: 'theme-toggle'): void
   (e: 'save'): void
-  (e: 'submit'): void
+  (e: 'complete-local'): void
 }>()
 
 const saveBtn = ref<HTMLButtonElement | null>(null)
@@ -77,10 +77,10 @@ function formatTime(total: number): string {
 
       <button
         class="flex items-center gap-2 rounded-xl bg-primary py-2 px-4 text-sm font-semibold text-white hover:bg-primary-light shadow-md shadow-primary/20 hover:shadow-lg hover:shadow-primary/30 transition-all hover:-translate-y-px"
-        @click="emit('submit')"
+        @click="emit('complete-local')"
       >
         <ApproveIcon class="ui-svg h-4 w-4 text-white" />
-        <span>Submit Work</span>
+        <span>Mark as Complete</span>
       </button>
     </div>
   </header>

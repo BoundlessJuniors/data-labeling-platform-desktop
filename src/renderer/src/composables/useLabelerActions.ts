@@ -23,7 +23,8 @@ export interface UseLabelerActionsReturn {
   onRedo: VoidFn
   onDelete: VoidFn
   onSaveDraft: VoidFn
-  onSubmit: VoidFn
+  /** Marks all local tasks as completed. NOT a backend submit — use CloudPanel for that. */
+  onCompleteLocalWork: VoidFn
   onFitScreen: VoidFn
 }
 
@@ -107,19 +108,28 @@ export function useLabelerActions(opts: UseLabelerActionsOptions): UseLabelerAct
       const exported = opts.exportAnnotationsToImageSpace()
       await buildAndSaveExport(t, exported)
 
-      console.log('--- ANNOTATION DATA (IMAGE SPACE JSON) ---\n', JSON.stringify(exported, null, 2))
+      // Update local sync status for immediate UI feedback
+      if (t.cloudTaskId) {
+        t.syncStatus = 'pending_insert'
+      } else {
+        t.syncStatus = 'synced'
+      }
+
       console.log('--- ANNOTATION DATA (IMAGE SPACE JSON) ---\n', JSON.stringify(exported, null, 2))
       toast.success('Draft Saved', 'Annotation data has been written to the database.', 3000)
     })()
   }
 
-  const onSubmit = (): void => {
+  // Marks all local tasks as 'completed' in local DB.
+  // This is NOT a backend submit — it only finalizes local state.
+  // Actual cloud/backend submission is done via CloudPanel → Submit Work.
+  const onCompleteLocalWork = (): void => {
     void (async () => {
       const queued = opts.tasks.value.filter((t) => t.status === 'queued')
       if (queued.length > 0) {
         toast.warning(
-          'Incomplete tasks',
-          'You still have queued images. Please review all images before submitting.'
+          'Unreviewed Images',
+          'You still have unreviewed images. Please go through all images before marking work as complete.'
         )
         return
       }
@@ -128,9 +138,18 @@ export function useLabelerActions(opts: UseLabelerActionsOptions): UseLabelerAct
         const mediaId = t.mediaId ?? t.title ?? String(t.id)
         await window.api.db.media.setStatus({ media_id: mediaId, status: 'completed' })
         t.status = 'completed'
+
+        // If it was just completed but has no valid syncStatus, it's missing its annotation
+        if (!t.syncStatus && t.cloudTaskId) {
+          t.syncStatus = 'missing_annotation'
+        }
       }
 
-      toast.success('Tasks Submitted', 'All tasks submitted successfully ✔️')
+      // Local work is complete — remind user to submit via CloudPanel
+      toast.success(
+        'Local Work Completed',
+        'All images reviewed locally. To submit to the cloud, use the Cloud Panel → Submit Work.'
+      )
     })()
   }
 
@@ -143,7 +162,7 @@ export function useLabelerActions(opts: UseLabelerActionsOptions): UseLabelerAct
     onRedo,
     onDelete,
     onSaveDraft,
-    onSubmit,
+    onCompleteLocalWork,
     onFitScreen
   }
 }

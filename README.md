@@ -81,21 +81,23 @@
 ### ☁️ Bulut Senkronizasyonu ve İş Akışı (Cloud Sync & Workflow)
 
 - **Sözleşme (Contract) Tabanlı Çalışma**: Buluttan size atanan sözleşmeleri görüntüleyip, ilgili görevleri (görselleri) yerel makinenize indirebilirsiniz.
-- **Kiralama (Lease) Mekanizması**: İndirilen görseller kiralama jetonu (lease token) ile korunur, böylece aynı görsel üzerinde başkasının da işlem yapması (race condition) önlenir.
-- **Akıllı Hata ve Senkronizasyon Yönetimi**: Arka planda çalışan Worker ile işlemler buluta senkronize edilir. HTTP hataları (403, 409 vb.) sınıflandırılarak kalıcı (non-retryable) veya geçici hatalara göre yönetilir.
-- **Payload Hash Optimizasyonu**: Anotasyon verilerinin SHA-256 hashleri oluşturularak aynı verinin buluta tekrar gönderilmesi (duplicate submission) engellenir.
+- **Kiralama (Lease) Mekanizması**: İndirilen görseller kiralama jetonu (lease token) ile korunur, böylece aynı görsel üzerinde başkasının da işlem yapması (race condition) önlenir. Süresi dolan görevler için özel "Recover" mekanizması mevcuttur.
+- **Sürekli Oturum ve Cookie Yönetimi**: `tough-cookie` entegrasyonu ile oturum çerezleri lokalde tutulur, böylece uygulamanın her açılışında yeniden giriş yapmadan oturum otomatik sürdürülür (Bootstrap Session).
+- **Akıllı Hata ve Sağlık Yönetimi (Contract Health)**: Arka planda çalışan sistem ile işlemler buluta senkronize edilir. HTTP hataları sınıflandırılır ve `CloudPanel` üzerinden kullanıcıya eksik indirme, süresi dolmuş görev veya çakışma (conflict) gibi detaylı sağlık verisi görselleştirilir.
+- **Payload Hash Optimizasyonu ve Çakışma Yönetimi**: Anotasyon verilerinin SHA-256 hashleri oluşturularak duplicate submission engellenir. Eğer backend'de görev teslim edilmişse ancak lokalde daha yeni veriler varsa `task_already_submitted_conflict` durumu devreye girerek veri kaybı önlenir.
 - **Kapsamlı Snapshot Modeli (Full Snapshot)**: İş akışı parçalı yamalar (incremental patch) yerine, sunucuya her daim bir görev/medyanın tüm güncel verilerini içeren tek, nihai bir "tam kopya (export)" gönderir.
 - **Strict Tip Uyumluluğu ve API Normalizasyonu**: Backend servislerinden dönen karmaşık veri yapıları (HTTP response zarfları vs.) doğrudan masaüstüne yansıtılmaz. IPC Köprüsü (Main Process), bu yanıtları normalize ederek Renderer'ın saf, platform-native `({ ok: true, data: ... })` yapılarıyla güvenli çalışmasını sağlar.
 
 ### 📋 Görev Yönetimi (Task Management)
 
 - **Dataset tabanlı görev sistemi**: Bir klasörden içe aktarılan tüm görseller, otomatik olarak birer Task olarak oluşturulur.
-- **Görev durumları**: Her görev `Queued` → `In Progress` → `Completed` durumlarında izlenir.
+- **Görev durumları**: Her görev yerelde `Queued` → `In Progress` → `Completed` durumlarında izlenir.
+- **Senkronizasyon Göstergeleri (Sync Badges)**: Sol paneldeki görev listesinde her görev için senkronizasyon sağlığı anlık olarak gösterilir (`Pending`, `Missing Export`, `Lease Expired`, `Failed`).
 - **Görevler arası navigasyon**: Sol/Sağ ok tuşları veya Prev/Next butonlarıyla görevler arasında ileri/geri geçiş.
 - **Anotasyon koruma ve Sıfır Sızıntı**: Görevler arasında geçiş yaparken mevcut anotasyon durumu (kullanıcı tüm etiketleri temizlemiş olsa dahi) bellek içi cache'te sıkı bir şekilde güvenceye alınır.
 - **DB'den anotasyon geri yükleme**: Task yüklendiğinde görev önce cache'ten (boş bile olsa) okunur, eğer yoksa veritabanından kaydedilmiş anotasyonlar restore edilir.
 - **Dataset izolasyonu**: Farklı dataset'ler arasında geçiş yapıldığında eski görevlerin anotasyonları tamamen temizlenir.
-- **Submit Work**: Tüm görevler incelendikten sonra tek seferde toplu olarak "completed" durumuna geçirilir.
+- **Submit Work**: Tüm görevler yerelde incelendikten sonra "Mark as Complete" ile tamamlanır. Buluta teslim ise Cloud Panel üzerinden `Submit Work` ile gerçekleştirilir.
 
 ### 🎨 Tema ve Görünüm
 
@@ -149,6 +151,7 @@
 | **Veritabanı**         | SQLite (better-sqlite3 12)                               |
 | **AI / ML Çıkarım**    | ONNX Runtime Node 1.23 (SAM ViT-B)                       |
 | **Görüntü İşleme**     | Jimp 0.22 (resize, normalize, pixel access)              |
+| **Ağ / Oturum**        | Axios + tough-cookie + axios-cookiejar-support           |
 | **SVG İkonlar**        | vite-svg-loader 5 (SVG → Vue bileşeni)                   |
 | **Kod Kalitesi**       | ESLint 9 + Prettier 3                                    |
 | **Paketleme**          | electron-builder 25 (NSIS / DMG / AppImage / deb / snap) |
@@ -244,6 +247,9 @@ label_gun/
 │           │   │   ├── DialogHost.vue # Global modal iletişim ve onay penceresi yöneticisi
 │           │   │   └── ToastHost.vue  # Global anlık bildirim (toast) arayüzü
 │           │   ├── CloudPanel.vue     # Bulut hesap giriş tabı, sözleşme ve görev listesi paneli
+│           │   ├── KonvaCanvas.vue    # Konva.js tabanlı 2D canvas bileşeni (~1300 satır):
+│           │   │                      # şekil çizimi, düzenleme, drag & drop,
+│           │   │                      # zoom/pan, vertex düzenleme
 │           │   └── Versions.vue       # Electron/Chrome/Node sürüm bilgisi
 │           │
 │           ├── composables/           # Vue 3 Composition API modülleri
@@ -435,11 +441,15 @@ Cloud sync işlemleri sırasında görevleri diğer labeler'lara karşı kilitle
 | Kanal                        | Yön    | Açıklama                                                      |
 | ---------------------------- | ------ | ------------------------------------------------------------- |
 | `auth:login`                 | invoke | Bulut hesabına giriş yapar ve doğrulanmış kullanıcıyı döner   |
-| `auth:logout`                | invoke | Bulut hesabından çıkış yapar                                  |
+| `auth:bootstrapSession`      | invoke | Var olan çerezleri (cookie) kullanarak oturumu yeniler/doğrular|
+| `auth:logout`                | invoke | Bulut hesabından çıkış yapar ve yerel çerezleri temizler      |
 | `cloud:fetchContracts`       | invoke | Kullanıcıya atanmış sözleşmeleri listeler                     |
 | `cloud:downloadContractWork` | invoke | Kiralama (lease-batch) ve asset indirme akışını yürütür       |
 | `cloud:syncNow`              | invoke | Arka planda bekleyen anotasyonları anında senkronize eder     |
-| `cloud:submitContract`       | invoke | Görevleri API'ye teslim eder (Normalize `SubmitResult` döner) |
+| `cloud:getContractHealth`    | invoke | Sözleşme için detaylı senkronizasyon ve hata sağlığını hesaplar|
+| `cloud:recoverExpiredTasks`  | invoke | Süresi dolmuş görevleri arşivleyip yeniden indirilmeye hazırlar|
+| `cloud:resetContractLocalState`| invoke| Sözleşmeye ait tüm yerel verileri (DB ve dosya) güvenle siler |
+| `cloud:submitContract`       | invoke | Görevleri API'ye teslim eder (önce sağlık kontrolü yapar)     |
 
 ### Pencere ve Sistem Kanalları
 
@@ -456,18 +466,18 @@ Cloud sync işlemleri sırasında görevleri diğer labeler'lara karşı kilitle
 
 | Composable               | Sorumluluk                                                                                                |
 | ------------------------ | --------------------------------------------------------------------------------------------------------- |
-| `useAuth`                | Kullanıcı oturum yönetimi (login, logout, hata durumları)                                                 |
-| `useCloud`               | Cloud sözleşme verilerini çekme, indirme (lease-batch), submit işlemleri ve sync durumu                   |
+| `useAuth`                | Kullanıcı oturum yönetimi (login, logout, otomatik session bootstrap, cookie entegrasyonu)                |
+| `useCloud`               | Sözleşme çekme, indirme, sağlık takibi (health), süresi dolan görevleri kurtarma (recover) ve submit      |
 | `useFeedback`            | Uygulama genelinde özel diyaloğ (onay/hata) ve toast bildirimlerinin reaktif yönetimi                     |
 | `useDatasetLabeling`     | Dataset etiket havuzu yükleme, aktif etiket seçimi ve cloud(salt-okunur) / local(yönetilebilir) kontrolü  |
 
-| `useLabelerState`        | Merkezi reaktif durum: anotasyonlar, seçim, araç/etiket bilgisi, zoom/pan parametreleri                    |
+| `useLabelerState`        | Merkezi reaktif durum: anotasyonlar, seçim, çizim bayrakları, araç/etiket bilgisi, zoom/pan parametreleri |
 | `useHistory`             | JSON snapshot ile undo/redo geçmişi yönetimi                                                              |
 | `useCanvasTransform`     | Zoom (min 0.6x – max 10x), pan, fit-to-screen hesaplamaları                                               |
 | `useCanvasInteractions`  | Mouse event handler'ları (alt seviye etkileşimler)                                                        |
 | `useAnnotationsRenderer` | Konva.js anotasyon render, dışa aktarım (image-space), anotasyon seçimi ve silme                          |
 | `useKeyboardShortcuts`   | `Ctrl+Z/Y`, `Ctrl+S`, `Del`, `Enter`, `Escape`, `←/→` ok tuşları                                          |
-| `useTasks`               | Task listesi yönetimi, veritabanı senkronizasyonu (`initFromDb`)                                           |
+| `useTasks`               | Task listesi yönetimi, veritabanı senkronizasyonu (`initFromDb`), task arası navigasyon                   |
 | `useLabelerActions`      | Kullanıcı aksiyonları: undo, redo, delete, draft kaydetme (deterministik payload ve hash), toplu submit   |
 | `useTheme`               | Light/dark tema: OS algılama, localStorage kalıcılığı, CSS class toggle                                   |
 

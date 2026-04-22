@@ -19,14 +19,36 @@ export interface DownloadResult {
   downloaded: number
   skipped: number
   failed: number
+  status: 'downloaded' | 'stale_local_state' | 'zero_leased' | 'already_fully_downloaded' | string
+  contractId: string
 }
 
 export interface SubmitResult {
   ok: boolean
   data?: unknown
   unsyncedCount?: number
+  pendingInsertCount?: number
   failedCount?: number
+  leaseExpiredCount?: number
+  inProgressCount?: number
+  notDownloadedCount?: number
+  missingLocalExportCount?: number
   error?: string
+}
+
+export interface ContractHealth {
+  expectedTaskCount: number
+  localDownloadedCount: number
+  notDownloadedCount: number
+  inProgressCount: number
+  missingLocalExportCount: number
+  pendingInsertCount: number
+  failedPermanentCount: number
+  leaseExpiredCount: number
+  conflictCount: number
+  totalUnsyncedCount: number
+  canSubmit: boolean
+  primaryBlockReason: string | null
 }
 
 // -----------------------------------------------------------------------
@@ -49,10 +71,21 @@ export function useCloud(): {
   downloadContractWork: (
     contractId: string,
     datasetName: string,
-    amount?: number
+    amount?: number,
+    expectedTaskCount?: number
   ) => Promise<DownloadResult>
   syncNow: () => Promise<void>
-  submitContract: (contractId: string) => Promise<SubmitResult>
+  getContractHealth: (contractId: string, expectedTaskCount?: number) => Promise<ContractHealth>
+  recoverExpiredTasks: (contractId: string) => Promise<{ ok: boolean; recoveredCount: number }>
+  submitContract: (contractId: string, expectedTaskCount?: number) => Promise<SubmitResult>
+  resetContractLocalState: (contractId: string) => Promise<{
+    ok: boolean
+    deletedDatasets: number
+    deletedMediaItems: number
+    deletedAnnotations: number
+    deletedLeases: number
+    deletedFiles: number
+  }>
 } {
   /**
    * Kullanıcıya atanmış sözleşmeleri Web API'den çeker.
@@ -78,11 +111,14 @@ export function useCloud(): {
   const downloadContractWork = async (
     contractId: string,
     datasetName: string,
-    amount: number = 20
+    amount: number = 20,
+    expectedTaskCount?: number
   ): Promise<DownloadResult> => {
     isFetching.value = true
     syncError.value = null
     downloadResult.value = null
+
+    let createdDatasetId: string | null = null
 
     try {
       // Dedup: check if dataset already exists for this contract
@@ -98,13 +134,43 @@ export function useCloud(): {
           name: datasetName,
           cloud_contract_id: contractId
         })
+        createdDatasetId = datasetId
       }
 
       // Lease + download
-      const result = await window.api.cloud.downloadContractWork(contractId, datasetId, amount)
+      const rawResult = await window.api.cloud.downloadContractWork(
+        contractId,
+        datasetId,
+        amount,
+        expectedTaskCount
+      )
+
+      const result: DownloadResult = {
+        ...rawResult,
+        contractId
+      }
+
+      // Cleanup newly created dataset if download yielded no actual work
+      if (createdDatasetId && result.status !== 'downloaded') {
+        try {
+          await window.api.db.datasets.delete(createdDatasetId)
+        } catch (cleanupErr) {
+          console.error('Failed to cleanup empty dataset', cleanupErr)
+        }
+      }
+
       downloadResult.value = result
       return result
     } catch (err: unknown) {
+      // Best-effort cleanup on exception
+      if (createdDatasetId) {
+        try {
+          await window.api.db.datasets.delete(createdDatasetId)
+        } catch (cleanupErr) {
+          console.error('Failed to cleanup empty dataset after exception', cleanupErr)
+        }
+      }
+
       const msg = err instanceof Error ? err.message : 'Görevler indirilemedi.'
       syncError.value = msg
       throw err
@@ -129,15 +195,53 @@ export function useCloud(): {
   /**
    * Submit contract: sync first, then validate, then submit.
    */
-  const submitContract = async (contractId: string): Promise<SubmitResult> => {
+  const submitContract = async (
+    contractId: string,
+    expectedTaskCount?: number
+  ): Promise<SubmitResult> => {
     try {
-      const result = await window.api.cloud.submitContract(contractId)
+      const result = await window.api.cloud.submitContract(contractId, expectedTaskCount)
       return result as SubmitResult
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Sözleşme teslim edilemedi.'
       syncError.value = msg
       throw err
     }
+  }
+
+  /**
+   * Fetch contract health without submitting
+   */
+  const getContractHealth = async (
+    contractId: string,
+    expectedTaskCount?: number
+  ): Promise<ContractHealth> => {
+    return await window.api.cloud.getContractHealth(contractId, expectedTaskCount)
+  }
+
+  /**
+   * Recover expired tasks
+   */
+  const recoverExpiredTasks = async (
+    contractId: string
+  ): Promise<{ ok: boolean; recoveredCount: number }> => {
+    return await window.api.cloud.recoverExpiredTasks(contractId)
+  }
+
+  /**
+   * Reset local contract state
+   */
+  const resetContractLocalState = async (
+    contractId: string
+  ): Promise<{
+    ok: boolean
+    deletedDatasets: number
+    deletedMediaItems: number
+    deletedAnnotations: number
+    deletedLeases: number
+    deletedFiles: number
+  }> => {
+    return await window.api.cloud.resetContractLocalState(contractId)
   }
 
   return {
@@ -148,6 +252,9 @@ export function useCloud(): {
     fetchContracts,
     downloadContractWork,
     syncNow,
-    submitContract
+    getContractHealth,
+    recoverExpiredTasks,
+    submitContract,
+    resetContractLocalState
   }
 }

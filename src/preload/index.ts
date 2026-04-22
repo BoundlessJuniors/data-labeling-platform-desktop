@@ -121,14 +121,33 @@ const api = {
   auth: {
     login: (credentials: { email: string; password: string }) =>
       ipcRenderer.invoke('auth:login', credentials),
+    bootstrapSession: () => ipcRenderer.invoke('auth:bootstrapSession'),
     logout: () => ipcRenderer.invoke('auth:logout')
   },
   cloud: {
     fetchContracts: () => ipcRenderer.invoke('cloud:fetchContracts'),
-    downloadContractWork: (contractId: string, datasetId: string, amount: number) =>
-      ipcRenderer.invoke('cloud:downloadContractWork', contractId, datasetId, amount),
+    downloadContractWork: (
+      contractId: string,
+      datasetId: string,
+      amount: number,
+      expectedTaskCount?: number
+    ) =>
+      ipcRenderer.invoke(
+        'cloud:downloadContractWork',
+        contractId,
+        datasetId,
+        amount,
+        expectedTaskCount
+      ),
     syncNow: () => ipcRenderer.invoke('cloud:syncNow'),
-    submitContract: (contractId: string) => ipcRenderer.invoke('cloud:submitContract', contractId)
+    getContractHealth: (contractId: string, expectedTaskCount?: number) =>
+      ipcRenderer.invoke('cloud:getContractHealth', contractId, expectedTaskCount),
+    recoverExpiredTasks: (contractId: string) =>
+      ipcRenderer.invoke('cloud:recoverExpiredTasks', contractId),
+    submitContract: (contractId: string, expectedTaskCount?: number) =>
+      ipcRenderer.invoke('cloud:submitContract', contractId, expectedTaskCount),
+    resetContractLocalState: (contractId: string) =>
+      ipcRenderer.invoke('cloud:resetContractLocalState', contractId)
   },
   window: {
     minimize: () => ipcRenderer.invoke('window:minimize'),
