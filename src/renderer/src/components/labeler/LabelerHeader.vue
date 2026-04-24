@@ -33,7 +33,7 @@ function formatTime(total: number): string {
 
 <template>
   <header
-    class="flex items-center justify-between px-6 py-4 border-b border-border/50 dark:border-white/5 bg-surface/80 dark:bg-[#0f1115]/80 backdrop-blur-md z-10"
+    class="flex items-center justify-between px-6 py-4 border-b border-border/50 dark:border-slate-700 bg-surface/80 dark:bg-slate-900/80 backdrop-blur-md z-10"
   >
     <div class="flex items-center gap-4">
       <h2 class="text-lg font-bold text-slate-800 dark:text-white">

@@ -127,11 +127,11 @@ function onPointerLeave(): void {
 
 <template>
   <div
-    class="flex-1 rounded-xl bg-white/60 dark:bg-[#161920]/80 backdrop-blur-sm border border-slate-200/80 dark:border-white/5 shadow-sm p-2 flex flex-col min-h-0"
+    class="flex-1 rounded-xl bg-white/60 dark:bg-slate-800/80 backdrop-blur-sm border border-slate-200/80 dark:border-slate-700 shadow-sm p-2 flex flex-col min-h-0"
   >
     <div
       ref="canvasContainer"
-      class="relative w-full h-full rounded-lg bg-slate-50 dark:bg-[#0f1115] overflow-hidden canvas-container shadow-[inset_0_2px_10px_rgba(0,0,0,0.02)] border border-slate-200/50 dark:border-white/5"
+      class="relative w-full h-full rounded-lg bg-slate-50 dark:bg-slate-900 overflow-hidden canvas-container shadow-[inset_0_2px_10px_rgba(0,0,0,0.02)] border border-slate-200/50 dark:border-slate-700"
     >
       <!-- Konva canvas -->
       <KonvaCanvas

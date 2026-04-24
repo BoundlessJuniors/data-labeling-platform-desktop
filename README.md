@@ -82,11 +82,12 @@
 
 - **Sözleşme (Contract) Tabanlı Çalışma**: Buluttan size atanan sözleşmeleri görüntüleyip, ilgili görevleri (görselleri) yerel makinenize indirebilirsiniz.
 - **Kiralama (Lease) Mekanizması**: İndirilen görseller kiralama jetonu (lease token) ile korunur, böylece aynı görsel üzerinde başkasının da işlem yapması (race condition) önlenir. Süresi dolan görevler için özel "Recover" mekanizması mevcuttur.
-- **Sürekli Oturum ve Cookie Yönetimi**: `tough-cookie` entegrasyonu ile oturum çerezleri lokalde tutulur, böylece uygulamanın her açılışında yeniden giriş yapmadan oturum otomatik sürdürülür (Bootstrap Session).
-- **Akıllı Hata ve Sağlık Yönetimi (Contract Health)**: Arka planda çalışan sistem ile işlemler buluta senkronize edilir. HTTP hataları sınıflandırılır ve `CloudPanel` üzerinden kullanıcıya eksik indirme, süresi dolmuş görev veya çakışma (conflict) gibi detaylı sağlık verisi görselleştirilir.
+- **Sürekli Oturum ve Cookie Yönetimi**: `tough-cookie` entegrasyonu ile oturum çerezleri lokalde tutulur, böylece uygulamanın her açılışında yeniden giriş yapmadan oturum otomatik sürdürülür (Bootstrap Session). `App.vue` mount'ta `bootstrapSession()` çağırır; başarılı olursa `fetchContracts()` tetiklenir.
+- **Akıllı Hata ve Sağlık Yönetimi (Contract Health)**: Arka planda çalışan sistem ile işlemler buluta senkronize edilir. HTTP hataları sınıflandırılır ve `ContractsPanel` üzerinden kullanıcıya eksik indirme, süresi dolmuş görev veya çakışma (conflict) gibi detaylı sağlık verisi görselleştirilir.
 - **Payload Hash Optimizasyonu ve Çakışma Yönetimi**: Anotasyon verilerinin SHA-256 hashleri oluşturularak duplicate submission engellenir. Eğer backend'de görev teslim edilmişse ancak lokalde daha yeni veriler varsa `task_already_submitted_conflict` durumu devreye girerek veri kaybı önlenir.
 - **Kapsamlı Snapshot Modeli (Full Snapshot)**: İş akışı parçalı yamalar (incremental patch) yerine, sunucuya her daim bir görev/medyanın tüm güncel verilerini içeren tek, nihai bir "tam kopya (export)" gönderir.
 - **Strict Tip Uyumluluğu ve API Normalizasyonu**: Backend servislerinden dönen karmaşık veri yapıları (HTTP response zarfları vs.) doğrudan masaüstüne yansıtılmaz. IPC Köprüsü (Main Process), bu yanıtları normalize ederek Renderer'ın saf, platform-native `({ ok: true, data: ... })` yapılarıyla güvenli çalışmasını sağlar.
+- **3-Tab Workspace Mimarisi**: `App.vue` tek bir Workspace modalı içinde **Datasets** (yerel dataset yönetimi), **Contracts** (bulut sözleşme ve görev yönetimi) ve **Profile** (oturum ve hesap bilgisi) sekmelerini yönetir. Sekmeler arasındaki state, `useAuth` ve `useCloud` singleton composable'ları aracılığıyla reaktif olarak paylaşılır.
 
 ### 📋 Görev Yönetimi (Task Management)
 
@@ -97,7 +98,7 @@
 - **Anotasyon koruma ve Sıfır Sızıntı**: Görevler arasında geçiş yaparken mevcut anotasyon durumu (kullanıcı tüm etiketleri temizlemiş olsa dahi) bellek içi cache'te sıkı bir şekilde güvenceye alınır.
 - **DB'den anotasyon geri yükleme**: Task yüklendiğinde görev önce cache'ten (boş bile olsa) okunur, eğer yoksa veritabanından kaydedilmiş anotasyonlar restore edilir.
 - **Dataset izolasyonu**: Farklı dataset'ler arasında geçiş yapıldığında eski görevlerin anotasyonları tamamen temizlenir.
-- **Submit Work**: Tüm görevler yerelde incelendikten sonra "Mark as Complete" ile tamamlanır. Buluta teslim ise Cloud Panel üzerinden `Submit Work` ile gerçekleştirilir.
+- **Submit Work**: Tüm görevler yerelde incelendikten sonra "Mark as Complete" ile tamamlanır. Buluta teslim ise Workspace → Contracts sekmesindeki `ContractsPanel` üzerinden `Submit Work` ile gerçekleştirilir.
 
 ### 🎨 Tema ve Görünüm
 
@@ -119,7 +120,7 @@
 - İşletim sistemi varsayılan başlık çubuğu yerine, tamamen özelleştirilmiş bir title bar.
 - **Pencere kontrolleri**: Minimize, Maximize/Restore ve Close butonları.
 - **Sürüklenebilir alan**: Title bar üzerinde pencere sürükleme (`-webkit-app-region: drag`).
-- **Datasets butonu**: Ana title bar üzerinden dataset seçim ekranına hızlı dönüş.
+- **Workspace butonu**: Ana title bar üzerinden Workspace modalına (Datasets / Contracts / Profile sekmeleri) hızlı dönüş.
 
 ### 🔀 Dataset İçe Aktarma ve Yönetimi
 
@@ -163,25 +164,43 @@
 LabelGun üç ana Electron katmanından oluşur:
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│                     RENDERER PROCESS                      │
-│  Vue 3 + Konva.js + Tailwind CSS                         │
-│  ┌──────────────┐  ┌────────────────┐  ┌──────────────┐  │
-│  │  App.vue      │  │ LabelerView.vue│  │KonvaCanvas   │  │
-│  │ (Dataset Mgmt)│  │ (Ana Labeler)  │  │(2D Canvas)   │  │
-│  └──────────────┘  └────────────────┘  └──────────────┘  │
-│  composables/ ─ useLabelerToolState, useLabelerSamManager, useTasks ...│  │
-├──────────────────────────────────────────────────────────┤
-│                   PRELOAD (Bridge)                         │
-│  contextBridge → window.api { db, sam, dataset, window }  │
-├──────────────────────────────────────────────────────────┤
-│                     MAIN PROCESS                          │
-│  ┌────────────┐  ┌──────────┐  ┌──────────────────────┐  │
-│  │ SQLite DB   │  │ SAM Model │  │ IPC Handlers        │  │
-│  │ (better-    │  │ (ONNX     │  │ (dbIpc + samIpc)    │  │
-│  │  sqlite3)   │  │  Runtime) │  │                      │  │
-│  └────────────┘  └──────────┘  └──────────────────────┘  │
-└──────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                       RENDERER PROCESS                           │
+│  Vue 3 + Konva.js + Tailwind CSS                                │
+│                                                                  │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │  App.vue  (Workspace Hub — 3-Tab Modal)                  │   │
+│  │  ┌─────────────┐  ┌──────────────────┐  ┌────────────┐  │   │
+│  │  │ Datasets Tab │  │ Contracts Tab     │  │Profile Tab │  │   │
+│  │  │ (local mgmt) │  │ ContractsPanel.vue│  │ProfilePanel│  │   │
+│  │  └─────────────┘  └──────────────────┘  └────────────┘  │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                                                                  │
+│  ┌──────────────────────┐  ┌──────────────────────────────┐    │
+│  │  LabelerView.vue      │  │  KonvaCanvas.vue             │    │
+│  │  (Ana Etiketleme)     │  │  (2D Canvas – Konva.js)      │    │
+│  └──────────────────────┘  └──────────────────────────────┘    │
+│                                                                  │
+│  composables/ — useAuth, useCloud (singleton), useLabelerToolState,│
+│                  useLabelerSamManager, useTasks …               │
+├─────────────────────────────────────────────────────────────────┤
+│                   PRELOAD (Bridge)                               │
+│  contextBridge → window.api { db, sam, dataset, cloud, auth,   │
+│                               window }                          │
+├─────────────────────────────────────────────────────────────────┤
+│                     MAIN PROCESS                                 │
+│  ┌────────────┐  ┌──────────┐  ┌──────────────────────────┐   │
+│  │ SQLite DB   │  │ SAM Model │  │ IPC Handlers             │   │
+│  │ (better-   │  │ (ONNX    │  │ dbIpc + samIpc +          │   │
+│  │  sqlite3)  │  │ Runtime) │  │ authIpc + cloudTasksIpc   │   │
+│  └────────────┘  └──────────┘  └──────────────────────────┘   │
+│                                                                  │
+│  ┌──────────────────────────────────┐                          │
+│  │  syncManager.ts                  │                          │
+│  │  (30s interval — pending_insert  │                          │
+│  │   → POST /tasks/:id/submit)      │                          │
+│  └──────────────────────────────────┘                          │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 **Veri akışı:**
@@ -226,7 +245,9 @@ label_gun/
 │       ├── index.html                 # Renderer HTML şablonu
 │       └── src/
 │           ├── main.ts                # Vue uygulaması giriş noktası + VueKonva plugin
-│           ├── App.vue                # Kök bileşen: Dataset seçim ekranı + custom title bar
+│           ├── App.vue                # Kök bileşen: Workspace Hub (3-Tab modal —
+│           │                          # Datasets / Contracts / Profile), custom title bar,
+│           │                          # bootstrapSession + fetchContracts başlatma
 │           ├── env.d.ts               # Vite / SVG / Vue ortam tip tanımları
 │           │
 │           ├── views/
@@ -246,15 +267,29 @@ label_gun/
 │           │   ├── ui/
 │           │   │   ├── DialogHost.vue # Global modal iletişim ve onay penceresi yöneticisi
 │           │   │   └── ToastHost.vue  # Global anlık bildirim (toast) arayüzü
-│           │   ├── CloudPanel.vue     # Bulut hesap giriş tabı, sözleşme ve görev listesi paneli
+│           │   ├── ContractsPanel.vue # [YENİ] Contracts sekmesi içeriği:
+│           │   │                      # Sözleşme listesi, Download/Submit/Recover/Reset
+│           │   │                      # aksiyonları, Contract Health görselleştirme.
+│           │   │                      # Giriş yapılmamışsa "Go to Profile" yönlendirmesi.
+│           │   ├── ProfilePanel.vue   # [YENİ] Profile sekmesi içeriği:
+│           │   │                      # Login formu (giriş yapılmamışsa) veya
+│           │   │                      # hesap bilgisi + Sign Out (giriş yapılmışsa).
+│           │   │                      # Logout → clearSession() ile cloud state temizlenir.
+│           │   ├── CloudPanel.vue     # [LEGACY] Önceki tek-bileşen bulut paneli.
+│           │   │                      # Yeni mimaride kullanılmıyor; silinmedi.
 │           │   ├── KonvaCanvas.vue    # Konva.js tabanlı 2D canvas bileşeni (~1300 satır):
 │           │   │                      # şekil çizimi, düzenleme, drag & drop,
 │           │   │                      # zoom/pan, vertex düzenleme
 │           │   └── Versions.vue       # Electron/Chrome/Node sürüm bilgisi
 │           │
 │           ├── composables/           # Vue 3 Composition API modülleri
-│           │   ├── useAuth.ts                # Kimlik doğrulama state'leri ve login/logout işlemleri
-│           │   ├── useCloud.ts               # Bulut veri iletişimi ve sözleşme durum reaktivitesi
+│           │   ├── useAuth.ts                # Singleton auth state (user, isAuthenticated,
+│           │   │                             # login, logout, bootstrapSession). Tüm
+│           │   │                             # bileşenler aynı module-scope ref'leri paylaşır.
+│           │   ├── useCloud.ts               # Singleton cloud state (contracts, downloadResult,
+│           │   │                             # syncError). fetchContracts, downloadContractWork,
+│           │   │                             # syncNow, getContractHealth, recoverExpiredTasks,
+│           │   │                             # submitContract, resetContractLocalState, clearSession.
 │           │   ├── useFeedback.ts            # Global dialog ve toast bildirim yönetimi
 │           │   ├── useDatasetLabeling.ts     # Dataset etiket yönetimi ve cloud/local izin izolasyonu
 │           │   ├── useLabelerState.ts        # Merkezi reactive state yönetimi
@@ -466,8 +501,8 @@ Cloud sync işlemleri sırasında görevleri diğer labeler'lara karşı kilitle
 
 | Composable               | Sorumluluk                                                                                                |
 | ------------------------ | --------------------------------------------------------------------------------------------------------- |
-| `useAuth`                | Kullanıcı oturum yönetimi (login, logout, otomatik session bootstrap, cookie entegrasyonu)                |
-| `useCloud`               | Sözleşme çekme, indirme, sağlık takibi (health), süresi dolan görevleri kurtarma (recover) ve submit      |
+| `useAuth`                | **Singleton.** Kullanıcı oturum yönetimi (login, logout, bootstrapSession, cookie entegrasyonu). `user`, `isAuthenticated`, `isLoading`, `error` ref'leri module scope'ta tutulur; tüm bileşenler aynı instance'ı paylaşır. |
+| `useCloud`               | **Singleton.** `contracts`, `downloadResult`, `syncError` ref'leri module scope'ta. Sözleşme çekme, indirme, sağlık takibi, recover, submit, resetContractLocalState ve `clearSession()` (logout sonrası state temizleme). |
 | `useFeedback`            | Uygulama genelinde özel diyaloğ (onay/hata) ve toast bildirimlerinin reaktif yönetimi                     |
 | `useDatasetLabeling`     | Dataset etiket havuzu yükleme, aktif etiket seçimi ve cloud(salt-okunur) / local(yönetilebilir) kontrolü  |
 
@@ -566,12 +601,13 @@ Derleme çıktısı `out/` dizinindeki üretim build dosyalarını kullanarak `e
 
 ## 📖 Kullanım Rehberi
 
-### 1. Dataset İçe Aktarma
+### 1. Workspace Hub ve Dataset İçe Aktarma
 
-- Uygulama açıldığında **Dataset Selection** ekranı görünür.
-- **Import Dataset** butonuna tıklayarak görsellerin bulunduğu klasörü seçin.
+- Uygulama açıldığında **Workspace** ekranı üç sekme ile görünür: **Datasets**, **Contracts**, **Profile**.
+- **Datasets** sekmesinde **Import Dataset** butonuna tıklayarak görsellerin bulunduğu klasörü seçin.
 - Desteklenen formatlar: JPG, JPEG, PNG, BMP, WebP.
 - Klasördeki tüm görseller otomatik olarak task listesine eklenir.
+- Bir dataset kartındaki **Open Workspace** butonuna tıklayarak LabelerView'a geçilir.
 
 ### 2. Etiketleme Araçlarını Kullanma
 
@@ -598,11 +634,20 @@ Derleme çıktısı `out/` dizinindeki üretim build dosyalarını kullanarak `e
 4. SAM, otomatik olarak bir polygon maskesi oluşturur.
 5. Oluşan polygon üzerine uzun basarak düzenleyebilirsiniz.
 
-### 5. Kaydetme ve Gönderme
+### 5. Bulut Oturumu ve Sözleşme Yönetimi
+
+1. Workspace → **Profile** sekmesinde e-posta ve şifre ile giriş yapın.
+2. Giriş başarılı olduğunda Workspace → **Contracts** sekmesinde size atanan sözleşmeler listelenir.
+3. İlgili sözleşme kartında **Limit** değerini ayarlayıp **Download** butonuna tıklayarak görevleri yerel makineye indirin.
+4. İndirme tamamlandığında sözleşme altında Contract Health bölümü açılır; eksik annotation, pending sync, lease expired gibi uyarılar burada gösterilir.
+5. Tüm görevler tamamlandıktan ve senkronize edildikten sonra **Submit Work** ile sözleşmeyi buluta teslim edin.
+6. Çıkış yapmak için Profile sekmesindeki **Sign Out** butonunu kullanın; çıkış sonrası Contracts sekmesi otomatik olarak temizlenir.
+
+### 6. Kaydetme ve Yerel Teslim
 
 - **Ctrl+S** veya **Save Draft**: Mevcut çalışmayı veritabanına kaydeder.
-- **Submit Work**: Tüm görevleri "completed" olarak işaretler (tüm görevlerin incelenmiş olması gerekir).
-- Uygulama her 1 dakikada bir otomatik kaydetme yapar.
+- **Mark as Complete**: Görevi tamamlandı olarak işaretler.
+- Uygulama her 1 dakikada bir otomatik kaydetme yapar; arka planda her 30 saniyede bir `syncManager` bekleyen anotasyonları buluta gönderir.
 
 ---
 

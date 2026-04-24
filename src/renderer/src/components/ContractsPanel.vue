@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, watch } from 'vue'
 import { useAuth } from '../composables/useAuth'
 import {
   useCloud,
@@ -10,17 +10,10 @@ import {
 
 const emit = defineEmits<{
   (e: 'dataset-downloaded'): void
+  (e: 'open-profile'): void
 }>()
 
-const {
-  user,
-  isAuthenticated,
-  isLoading: authLoading,
-  error: authError,
-  login,
-  logout,
-  bootstrapSession
-} = useAuth()
+const { isAuthenticated } = useAuth()
 const {
   contracts,
   isFetching: cloudFetching,
@@ -35,15 +28,11 @@ const {
   resetContractLocalState
 } = useCloud()
 
-// Form durumları
-const email = ref('')
-const password = ref('')
+// Panel-local state
 const processingContractId = ref<string | null>(null)
 const downloadAmount = ref(20)
 const isSyncing = ref(false)
 const submitResult = ref<SubmitResult | null>(null)
-
-// Health durumu
 const contractHealthMap = ref<Record<string, ContractHealth>>({})
 
 const loadHealthForAll = async (): Promise<void> => {
@@ -61,23 +50,27 @@ const loadHealthForAll = async (): Promise<void> => {
 }
 
 // --------------------------------------------------------------------------------
-// Giriş İşlemi
+// Lifecycle & State Sync (No Double Fetch)
 // --------------------------------------------------------------------------------
-const handleLogin = async (): Promise<void> => {
-  if (!email.value || !password.value) return
-  try {
-    await login(email.value, password.value)
-    if (isAuthenticated.value) {
-      await fetchContracts()
-      await loadHealthForAll()
+watch(
+  isAuthenticated,
+  (isAuth) => {
+    if (isAuth) {
+      // User is logged in -> fetch contracts and load their health
+      fetchContracts().then(() => loadHealthForAll())
+    } else {
+      // User is logged out -> clear panel-local state to avoid stale views
+      contractHealthMap.value = {}
+      processingContractId.value = null
+      submitResult.value = null
+      isSyncing.value = false
     }
-  } catch (err) {
-    console.error('Login failed', err)
-  }
-}
+  },
+  { immediate: true }
+)
 
 // --------------------------------------------------------------------------------
-// İndirme İşlemi (Lease-batch + Download)
+// İndirme İşlemi
 // --------------------------------------------------------------------------------
 const handleDownload = async (
   contractId: string,
@@ -202,188 +195,69 @@ const handleReset = async (contractId: string): Promise<void> => {
     processingContractId.value = null
   }
 }
-
-// --------------------------------------------------------------------------------
-// Component Mount
-// --------------------------------------------------------------------------------
-onMounted(async (): Promise<void> => {
-  if (!isAuthenticated.value) {
-    await bootstrapSession()
-  }
-  if (isAuthenticated.value) {
-    await fetchContracts()
-    await loadHealthForAll()
-  }
-})
 </script>
 
 <template>
-  <div class="cloud-panel w-full transition-colors">
+  <div class="contracts-panel w-full transition-colors">
     <!-- DURUM 1: GİRİŞ YAPILMAMIŞ -->
     <div
       v-if="!isAuthenticated"
-      class="max-w-4xl mx-auto flex flex-col md:flex-row bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden"
+      class="max-w-2xl mx-auto flex flex-col items-center justify-center p-12 bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 text-center"
     >
-      <!-- Yan Panel (Branding / Bilgi) -->
       <div
-        class="md:w-1/2 p-8 lg:p-12 bg-slate-50 dark:bg-slate-900 border-b md:border-b-0 md:border-r border-slate-200 dark:border-slate-700 flex flex-col justify-center"
+        class="w-14 h-14 bg-slate-100 dark:bg-slate-700 rounded-full flex items-center justify-center text-slate-400 dark:text-slate-500 mb-5"
       >
-        <div
-          class="w-12 h-12 bg-blue-100 dark:bg-blue-900/50 rounded-xl flex items-center justify-center text-blue-600 dark:text-blue-400 mb-6"
+        <svg
+          width="26"
+          height="26"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+          stroke-linecap="round"
+          stroke-linejoin="round"
         >
-          <svg
-            width="24"
-            height="24"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" />
-          </svg>
-        </div>
-        <h2 class="text-2xl font-bold text-slate-900 dark:text-slate-100 mb-4">Connect to Cloud</h2>
-        <p class="text-slate-600 dark:text-slate-400 text-sm leading-relaxed mb-6">
-          Sign in to your LabelGun Cloud account to sync assigned labeling contracts, download
-          datasets efficiently, and submit your completed tasks directly.
-        </p>
-        <ul class="space-y-3 text-sm text-slate-500 dark:text-slate-500">
-          <li class="flex items-center gap-2">
-            <svg
-              class="text-slate-400"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <path d="M20 6L9 17l-5-5" />
-            </svg>
-            Secure, token-based authentication
-          </li>
-          <li class="flex items-center gap-2">
-            <svg
-              class="text-slate-400"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <path d="M20 6L9 17l-5-5" />
-            </svg>
-            Seamless dataset downloading
-          </li>
-          <li class="flex items-center gap-2">
-            <svg
-              class="text-slate-400"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <path d="M20 6L9 17l-5-5" />
-            </svg>
-            Submit your approved work easily
-          </li>
-        </ul>
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+        </svg>
       </div>
-
-      <!-- Giriş Formu -->
-      <div class="md:w-1/2 p-8 lg:p-12 flex flex-col justify-center">
-        <h2 class="text-xl font-bold mb-6 text-slate-900 dark:text-slate-100">Sign In</h2>
-        <form class="space-y-5" @submit.prevent="handleLogin">
-          <div>
-            <label
-              class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5 focus-within:text-blue-600"
-              >Email Address</label
-            >
-            <input
-              v-model="email"
-              class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-md text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow"
-              type="email"
-              required
-              placeholder="name@company.com"
-            />
-          </div>
-
-          <div>
-            <label
-              class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5 focus-within:text-blue-600"
-              >Password</label
-            >
-            <input
-              v-model="password"
-              class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-md text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow"
-              type="password"
-              required
-              placeholder="••••••••"
-            />
-          </div>
-
-          <div
-            v-if="authError"
-            class="flex items-start gap-2 text-red-600 dark:text-red-400 text-sm mt-3 bg-red-50 dark:bg-red-500/10 p-3 rounded-md border border-red-200 dark:border-red-500/20 w-fit"
-          >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              class="mt-0.5 shrink-0"
-            >
-              <circle cx="12" cy="12" r="10" />
-              <line x1="12" y1="8" x2="12" y2="12" />
-              <line x1="12" y1="16" x2="12.01" y2="16" />
-            </svg>
-            {{ authError }}
-          </div>
-
-          <button
-            class="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-md shadow-sm disabled:opacity-50 transition-colors mt-2"
-            type="submit"
-            :disabled="authLoading"
-          >
-            {{ authLoading ? 'Signing in...' : 'Sign In' }}
-          </button>
-        </form>
-      </div>
+      <h2 class="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-2">
+        Sign in to view contracts
+      </h2>
+      <p class="text-sm text-slate-500 dark:text-slate-400 max-w-xs mx-auto mb-7">
+        Connect your LabelGun Cloud account from the Profile tab to access your assigned contracts
+        and tasks.
+      </p>
+      <button
+        class="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg shadow-sm transition-colors"
+        @click="emit('open-profile')"
+      >
+        Go to Profile
+      </button>
     </div>
 
     <!-- DURUM 2: GİRİŞ YAPILMIŞ -->
-    <div v-else class="cloud-workspace">
+    <div v-else class="cloud-workspace max-w-5xl mx-auto">
       <!-- Toolbar -->
       <div
-        class="flex items-center justify-between mb-6 pb-4 border-b border-slate-200 dark:border-slate-700"
+        class="flex items-center justify-between mb-6 pb-5 border-b border-slate-200 dark:border-slate-700"
       >
-        <div class="flex items-center gap-3">
-          <div
-            class="w-10 h-10 bg-slate-200 dark:bg-slate-700 rounded-full flex items-center justify-center font-bold text-slate-600 dark:text-slate-300"
-          >
-            {{ user?.email ? user.email.charAt(0).toUpperCase() : 'U' }}
-          </div>
-          <div>
-            <div class="text-sm text-slate-500 dark:text-slate-400">Signed in as</div>
-            <div class="font-medium text-slate-900 dark:text-slate-100">{{ user?.email }}</div>
-          </div>
+        <div>
+          <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">
+            Assigned Contracts
+          </h2>
+          <p class="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
+            Download tasks and submit completed work to the cloud.
+          </p>
         </div>
         <div class="flex items-center gap-3">
           <button
-            class="px-4 py-2 flex items-center gap-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-md font-medium transition-colors text-sm shadow-sm disabled:opacity-50"
+            class="px-4 py-2 flex items-center gap-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg font-medium transition-colors text-sm shadow-sm disabled:opacity-50"
             :disabled="isSyncing"
             @click="handleSync"
           >
             <svg
-              width="16"
-              height="16"
+              width="15"
+              height="15"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -396,13 +270,7 @@ onMounted(async (): Promise<void> => {
                 d="M21 12a9 9 0 0 1-9 9m9-9a9 9 0 0 0-9-9m9 9H3m9 9a9 9 0 0 1-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 0 1 9-9"
               />
             </svg>
-            {{ isSyncing ? 'Syncing...' : 'Sync Now' }}
-          </button>
-          <button
-            class="px-4 py-2 flex items-center gap-2 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md font-medium transition-colors text-sm"
-            @click="logout"
-          >
-            Sign Out
+            {{ isSyncing ? 'Syncing…' : 'Sync Now' }}
           </button>
         </div>
       </div>
@@ -622,57 +490,57 @@ onMounted(async (): Promise<void> => {
       </div>
 
       <!-- Contract List -->
-      <div v-if="(contracts || []).length > 0" class="space-y-3">
+      <div v-if="(contracts || []).length > 0" class="space-y-4">
         <div
           v-for="contract in contracts || []"
           :key="contract.id"
-          class="flex flex-col md:flex-row md:items-center justify-between p-5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-sm hover:border-blue-300 dark:hover:border-blue-500/50 transition-colors gap-4"
+          class="flex flex-col p-5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-sm hover:border-blue-300 dark:hover:border-blue-500/50 hover:shadow-md transition-all gap-0"
         >
-          <!-- Top row (header + actions) -->
-          <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <!-- ── Header row: title + status + actions ── -->
+          <div class="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+            <!-- Left: title + id -->
             <div class="flex-1 min-w-0">
-              <div class="flex items-center gap-3 mb-1">
-                <h3 class="font-semibold text-lg text-slate-900 dark:text-slate-100 truncate">
+              <div class="flex items-center gap-2.5 mb-1 flex-wrap">
+                <h3 class="font-semibold text-base text-slate-900 dark:text-slate-100 truncate">
                   {{ contract.listing?.title || 'Untitled Contract' }}
                 </h3>
                 <span
-                  class="px-2.5 py-0.5 rounded-full text-xs font-medium border"
+                  class="px-2 py-0.5 rounded-full text-[11px] font-semibold border tracking-wide"
                   :class="
                     contract.status === 'active'
                       ? 'bg-green-50 text-green-700 border-green-200 dark:bg-green-500/10 dark:text-green-400 dark:border-green-500/20'
                       : contract.status === 'revision_requested'
                         ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/20'
-                        : 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'
+                        : 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-700 dark:text-slate-400 dark:border-slate-600'
                   "
                 >
                   {{ contract.status.replace('_', ' ').toUpperCase() }}
                 </span>
               </div>
-              <div class="text-sm text-slate-500 dark:text-slate-400 font-mono truncate">
-                ID: {{ contract.id }}
+              <div class="text-xs text-slate-400 dark:text-slate-500 font-mono truncate">
+                {{ contract.id }}
               </div>
             </div>
 
-            <!-- Action buttons -->
-            <div class="flex items-center gap-3 shrink-0 flex-wrap">
-              <!-- Download action: only meaningful for active / revision_requested contracts -->
+            <!-- Right: actions -->
+            <div class="flex items-center gap-2.5 shrink-0 flex-wrap">
+              <!-- Download: only for active / revision_requested -->
               <div
                 v-if="contract.status === 'active' || contract.status === 'revision_requested'"
-                class="flex items-center gap-2 bg-slate-50 dark:bg-slate-900 p-1.5 rounded-md border border-slate-200 dark:border-slate-700"
+                class="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-900/60 px-2 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700"
               >
-                <span
-                  class="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider ml-1"
-                  >Limit:</span
+                <span class="text-[11px] font-medium text-slate-400 uppercase tracking-wider"
+                  >Limit</span
                 >
                 <input
                   v-model.number="downloadAmount"
                   type="number"
                   min="1"
                   max="100"
-                  class="w-14 px-2 py-1 text-sm bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500 text-center"
+                  class="w-12 px-1.5 py-0.5 text-sm bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500 text-center"
                 />
                 <button
-                  class="px-4 py-1.5 bg-slate-800 dark:bg-slate-200 text-white dark:text-slate-900 hover:bg-slate-700 dark:hover:bg-white rounded font-medium disabled:opacity-50 transition-colors shadow-sm text-sm"
+                  class="px-3 py-1.5 bg-slate-800 dark:bg-slate-200 text-white dark:text-slate-900 hover:bg-slate-700 dark:hover:bg-white rounded-md font-medium disabled:opacity-50 transition-colors text-sm"
                   :disabled="cloudFetching || processingContractId === contract.id"
                   @click="
                     handleDownload(
@@ -682,14 +550,14 @@ onMounted(async (): Promise<void> => {
                     )
                   "
                 >
-                  <span v-if="processingContractId === contract.id && !isSyncing">...</span>
+                  <span v-if="processingContractId === contract.id && !isSyncing">…</span>
                   <span v-else>Download</span>
                 </button>
               </div>
 
               <button
                 v-if="contract.status === 'active' || contract.status === 'revision_requested'"
-                class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium disabled:opacity-50 transition-colors shadow-sm text-sm"
+                class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium disabled:opacity-50 transition-colors shadow-sm text-sm"
                 :disabled="
                   cloudFetching ||
                   processingContractId === contract.id ||
@@ -699,7 +567,7 @@ onMounted(async (): Promise<void> => {
                 "
                 @click="handleSubmitContract(contract)"
               >
-                <span v-if="processingContractId === contract.id">Submitting...</span>
+                <span v-if="processingContractId === contract.id">Submitting…</span>
                 <span v-else>Submit Work</span>
               </button>
             </div>
@@ -708,16 +576,17 @@ onMounted(async (): Promise<void> => {
           <!-- Health Row -->
           <div
             v-if="contractHealthMap[contract.id]"
-            class="mt-2 pt-4 border-t border-slate-100 dark:border-slate-700/50 flex flex-col gap-2.5"
+            class="mt-4 pt-4 border-t border-slate-100 dark:border-slate-700/50 flex flex-col gap-2"
           >
-            <div
-              class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1 flex items-center justify-between"
-            >
-              <span>Contract Health & Recovery</span>
-              <span class="text-xs font-normal text-slate-500"
-                >{{ contractHealthMap[contract.id].localDownloadedCount }} /
-                {{ contractHealthMap[contract.id].expectedTaskCount }} Tasks Downloaded</span
+            <div class="flex items-center justify-between mb-1">
+              <span
+                class="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500"
+                >Health &amp; Recovery</span
               >
+              <span class="text-xs text-slate-400 dark:text-slate-500">
+                {{ contractHealthMap[contract.id].localDownloadedCount }} /
+                {{ contractHealthMap[contract.id].expectedTaskCount }} downloaded
+              </span>
             </div>
 
             <div
@@ -820,9 +689,9 @@ onMounted(async (): Promise<void> => {
                   <line x1="12" y1="17" x2="12.01" y2="17" />
                 </svg>
                 <span
-                  >Çakışma: {{ contractHealthMap[contract.id].conflictCount }} görev backend'de
-                  çoktan teslim edilmiş (submitted) ancak lokal verileriniz farklı. Çözüm için
-                  sıfırlama (Reset) gereklidir.</span
+                  >Conflict: {{ contractHealthMap[contract.id].conflictCount }} task(s) already
+                  submitted on the backend but local annotations differ. Reset local state to
+                  resolve.</span
                 >
               </div>
             </div>
@@ -983,12 +852,14 @@ onMounted(async (): Promise<void> => {
       <!-- Empty State for Contracts -->
       <div
         v-else-if="!cloudFetching"
-        class="flex flex-col items-center justify-center py-16 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm text-center"
+        class="flex flex-col items-center justify-center py-16 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm text-center"
       >
-        <div class="p-4 bg-slate-100 dark:bg-slate-700 rounded-full mb-4 text-slate-400">
+        <div
+          class="w-14 h-14 bg-slate-100 dark:bg-slate-700 rounded-full flex items-center justify-center mb-5 text-slate-400 dark:text-slate-500"
+        >
           <svg
-            width="32"
-            height="32"
+            width="26"
+            height="26"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -1000,14 +871,14 @@ onMounted(async (): Promise<void> => {
             <polyline points="14 2 14 8 20 8"></polyline>
             <line x1="16" y1="13" x2="8" y2="13"></line>
             <line x1="16" y1="17" x2="8" y2="17"></line>
-            <polyline points="10 9 9 9 8 9"></polyline>
           </svg>
         </div>
-        <h3 class="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-1">
+        <h3 class="text-base font-semibold text-slate-900 dark:text-slate-100 mb-1">
           No contracts assigned
         </h3>
-        <p class="text-slate-500 dark:text-slate-400 text-sm mb-2 max-w-sm">
-          You currently don't have any active labeling contracts assigned to this workspace.
+        <p class="text-sm text-slate-500 dark:text-slate-400 max-w-xs">
+          You don't have any active labeling contracts yet. Check back later or contact your project
+          manager.
         </p>
       </div>
     </div>

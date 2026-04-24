@@ -38,11 +38,28 @@ interface LeasedTask {
     signedUrl?: string
     [key: string]: unknown
   }
-  taskLease: {
-    leaseToken: string
+  // Top-level lease fields (new contract, preferred)
+  leaseToken?: string | null
+  leasedUntil?: string | number | null
+  // Nested lease (legacy / backward-compat fallback)
+  taskLease?: {
+    leaseToken?: string | null
     leasedUntil?: string | number | null
-  }
+  } | null
   [key: string]: unknown
+}
+
+// -----------------------------------------------------------------------
+// Normalize lease fields: prefer top-level, fall back to nested taskLease.
+// -----------------------------------------------------------------------
+function resolveLeaseFields(task: LeasedTask): {
+  leaseToken: string | null
+  leasedUntil: string | number | null | undefined
+} {
+  const leaseToken = (task.leaseToken ?? task.taskLease?.leaseToken) || null
+  const leasedUntil =
+    task.leasedUntil !== undefined ? task.leasedUntil : task.taskLease?.leasedUntil
+  return { leaseToken, leasedUntil }
 }
 
 // -----------------------------------------------------------------------
@@ -261,10 +278,33 @@ export function registerCloudTasksIpc(): void {
   // cloud:fetchContracts
   // ----------------------------------------------------------------------
   ipcMain.handle('cloud:fetchContracts', async (): Promise<ContractItem[]> => {
-    const response = await apiClient.get<{ success: boolean; data: ContractItem[] }>(
-      '/api/v1/contracts'
-    )
-    return response.data.data ?? []
+    const PAGE_LIMIT = 100
+    const allContracts: ContractItem[] = []
+    let page = 1
+    let totalPages = 1
+
+    do {
+      const response = await apiClient.get<{
+        success: boolean
+        data: ContractItem[]
+        pagination?: { page: number; totalPages: number }
+      }>('/api/v1/contracts', { params: { page, limit: PAGE_LIMIT } })
+
+      const pageData = response.data.data ?? []
+      allContracts.push(...pageData)
+
+      const pagination = response.data.pagination
+      if (pagination) {
+        totalPages = pagination.totalPages ?? 1
+      } else {
+        // No pagination envelope returned — single-page response, stop.
+        break
+      }
+
+      page++
+    } while (page <= totalPages)
+
+    return allContracts
   })
 
   // ----------------------------------------------------------------------
@@ -455,8 +495,8 @@ export function registerCloudTasksIpc(): void {
       for (const task of leasedTasks) {
         const taskId = task.id
         const assetId = task.asset?.id
-        const leaseToken = task.taskLease?.leaseToken
-        const leasedUntil = parseLeasedUntil(task.taskLease?.leasedUntil)
+        const { leaseToken, leasedUntil: rawLeasedUntil } = resolveLeaseFields(task)
+        const leasedUntil = parseLeasedUntil(rawLeasedUntil)
 
         if (!leaseToken) {
           console.error(

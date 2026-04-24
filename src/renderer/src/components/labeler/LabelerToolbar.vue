@@ -125,7 +125,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div
-    class="flex items-center justify-between p-1.5 bg-white/60 dark:bg-[#161920]/80 backdrop-blur-md rounded-xl border border-slate-200/80 dark:border-white/5 shadow-sm relative z-30"
+    class="flex items-center justify-between p-1.5 bg-white/60 dark:bg-slate-800/80 backdrop-blur-md rounded-xl border border-slate-200/80 dark:border-slate-700 shadow-sm relative z-30"
   >
     <div id="tool-group" ref="toolGroup" class="flex items-center gap-0.5">
       <!-- Select tool -->

@@ -33,7 +33,7 @@ function onNewLabelInput(e: Event): void {
 
 <template>
   <div
-    class="bg-white/60 dark:bg-[#161920]/80 backdrop-blur-sm p-4 rounded-xl border border-slate-200/80 dark:border-white/5 shadow-sm flex flex-col shrink-0"
+    class="bg-white/60 dark:bg-slate-800/80 backdrop-blur-sm p-4 rounded-xl border border-slate-200/80 dark:border-slate-700 shadow-sm flex flex-col shrink-0"
   >
     <div class="flex items-center justify-between mb-3">
       <h3 class="text-sm font-bold text-slate-800 dark:text-gray-200 tracking-wide uppercase">

@@ -53,7 +53,7 @@ function formatTime(total: number): string {
 
 <template>
   <aside
-    class="flex flex-col w-72 bg-surface/90 dark:bg-[#161920]/90 backdrop-blur-md border-r border-border/50 dark:border-white/5 z-10 shadow-[2px_0_12px_rgba(0,0,0,0.02)]"
+    class="flex flex-col w-72 bg-surface/90 dark:bg-slate-900/80 backdrop-blur-md border-r border-border/50 dark:border-slate-700 z-10 shadow-[2px_0_12px_rgba(0,0,0,0.02)]"
   >
     <div class="px-6 py-5">
       <h1
@@ -96,7 +96,7 @@ function formatTime(total: number): string {
               'block rounded-xl overflow-hidden border transition-all duration-200',
               idx === currentTaskIndex
                 ? 'border-primary/40 dark:border-primary/30 bg-primary/5 dark:bg-primary/10 shadow-[0_2px_12px_rgba(37,99,235,0.08)] ring-1 ring-primary/20'
-                : 'border-border/60 dark:border-white/5 bg-surface dark:bg-[#1c1f26] hover:border-border dark:hover:border-white/10 hover:shadow-sm'
+                : 'border-border/60 dark:border-slate-700 bg-surface dark:bg-slate-900/60 hover:border-border dark:hover:border-slate-600 hover:shadow-sm'
             ]"
             @click.prevent="emit('navigate', idx)"
           >
@@ -226,7 +226,7 @@ function formatTime(total: number): string {
     </nav>
 
     <div
-      class="p-4 border-t border-border/50 dark:border-white/5 relative bg-surface/90 dark:bg-[#161920]/90 backdrop-blur-sm"
+      class="p-4 border-t border-border/50 dark:border-slate-700 relative bg-surface/90 dark:bg-slate-900/80 backdrop-blur-sm"
     >
       <button
         ref="filterBtn"

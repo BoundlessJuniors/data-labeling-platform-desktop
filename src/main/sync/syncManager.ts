@@ -27,6 +27,11 @@ function classifyHttpError(status: number, body: string): { retryable: boolean; 
   if (status === 400 && body.includes('Cannot submit task with status: submitted')) {
     return { retryable: false, errorKey: 'already_submitted' }
   }
+  // 401/403: auth/session problem — NOT a permanent data failure.
+  // Callers should check for 'auth_invalid' and skip without modifying DB state.
+  if (status === 401) {
+    return { retryable: false, errorKey: 'auth_invalid' }
+  }
   if (status === 403) {
     const lower = body.toLowerCase()
     if (lower.includes('expired') || lower.includes('lease')) {
@@ -34,7 +39,9 @@ function classifyHttpError(status: number, body: string): { retryable: boolean; 
       // so UI/recovery logic can identify and handle it differently in the future.
       return { retryable: false, errorKey: 'lease_expired' }
     }
-    return { retryable: false, errorKey: 'forbidden' }
+    // Generic 403 that is NOT a lease error: treat as auth_invalid so it is
+    // not written to the DB as failed_permanent.
+    return { retryable: false, errorKey: 'auth_invalid' }
   }
   if (status === 400) {
     return { retryable: false, errorKey: body.substring(0, 200) || 'validation_error' }
@@ -47,6 +54,32 @@ function classifyHttpError(status: number, body: string): { retryable: boolean; 
     return { retryable: false, errorKey: `client_error_${status}` }
   }
   return { retryable: true, errorKey: 'unknown_error' }
+}
+
+// -----------------------------------------------------------------------
+// Session probe — returns false when the server says the session is invalid.
+// Network failures (no status / 5xx) are treated as "unknown" and return true
+// so we don't skip sync on transient connectivity issues.
+// -----------------------------------------------------------------------
+async function isSessionValid(): Promise<boolean> {
+  try {
+    await apiClient.get('/api/v1/auth/profile')
+    return true
+  } catch (err: unknown) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const status = (err as any)?.response?.status ?? 0
+    if (status === 401 || status === 403) {
+      console.warn('[syncManager] Session probe: 401/403 — session invalid, skipping sync cycle')
+      return false
+    }
+    // Network error or 5xx: we cannot confirm the session is invalid.
+    // Be conservative and let the cycle proceed; each submit call will
+    // handle its own errors.
+    console.warn(
+      `[syncManager] Session probe: status=${status || 'network_error'} — assuming session OK, proceeding`
+    )
+    return true
+  }
 }
 
 // -----------------------------------------------------------------------
@@ -63,7 +96,6 @@ export async function runSyncCycle(): Promise<void> {
   }
 
   // Lazy import to avoid circular dependency at module load time
-
   const { getLease } = await import('../api/cloudTasksIpc')
 
   // Query pending annotations with cloud_task_id — NO media_items join
@@ -82,6 +114,18 @@ export async function runSyncCycle(): Promise<void> {
     .all() as PendingAnnotation[]
 
   if (pending.length === 0) return
+
+  // --- Session probe ---
+  // Only run the expensive probe when there is actual work to do.
+  // If session is invalid we skip the whole cycle without touching any
+  // annotation state. This prevents spurious failed_permanent writes.
+  const sessionOk = await isSessionValid()
+  if (!sessionOk) {
+    console.warn(
+      `[syncManager] Session invalid — skipping sync cycle. ${pending.length} pending annotation(s) preserved as-is.`
+    )
+    return
+  }
 
   console.log(`[syncManager] ${pending.length} adet bekleyen anotasyon bulundu.`)
 
@@ -211,6 +255,13 @@ export async function runSyncCycle(): Promise<void> {
         ).run(classification.errorKey, row.annotation_id)
         console.log(
           `[syncManager] ${row.annotation_id}: retryable error (${classification.errorKey}), will retry`
+        )
+      } else if (classification.errorKey === 'auth_invalid') {
+        // Step g-auth: 401/403 during per-item submit — session became invalid mid-cycle.
+        // Do NOT write failed_permanent. Leave pending_insert intact so the next
+        // cycle (after re-login) can retry.
+        console.warn(
+          `[syncManager] ${row.annotation_id}: auth_invalid during submit — leaving pending_insert intact, will retry after session restored`
         )
       } else if (classification.errorKey === 'lease_expired') {
         // Step h-lease: lease_expired — kept as a distinct, recoverable-in-future status.

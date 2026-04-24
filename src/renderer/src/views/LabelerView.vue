@@ -537,7 +537,7 @@ function handleToolbarSetShape(shape: string): void {
 
 <template>
   <div
-    class="flex h-full bg-background-light dark:bg-[#0f1115] font-display text-text-primary dark:text-white"
+    class="flex h-full bg-background-light dark:bg-slate-900 font-display text-text-primary dark:text-white"
   >
     <!-- Sidebar -->
     <TaskSidebar

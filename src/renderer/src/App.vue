@@ -1,16 +1,38 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, computed } from 'vue'
 import LabelerView from './views/LabelerView.vue'
-import CloudPanel from './components/CloudPanel.vue'
+import ContractsPanel from './components/ContractsPanel.vue'
+import ProfilePanel from './components/ProfilePanel.vue'
 import ToastHost from './components/ui/ToastHost.vue'
 import DialogHost from './components/ui/DialogHost.vue'
 
+import { useAuth } from './composables/useAuth'
+import { useCloud } from './composables/useCloud'
 import { useFeedback } from './composables/useFeedback'
 
 type DatasetRow = { id: string; name: string; created_at: number; folder_path?: string | null }
 
-const activeTab = ref<'local' | 'cloud'>('local')
+const activeTab = ref<'datasets' | 'contracts' | 'profile'>('datasets')
 const datasets = ref<DatasetRow[]>([])
+
+const { bootstrapSession, isAuthenticated } = useAuth()
+const { fetchContracts } = useCloud()
+
+const modalTitle = computed(() => {
+  if (activeTab.value === 'contracts') return 'Contracts'
+  if (activeTab.value === 'profile') return 'Profile'
+  return 'Datasets'
+})
+
+const modalDescription = computed(() => {
+  if (activeTab.value === 'contracts') {
+    return 'Download assigned cloud work, monitor contract health, and submit completed tasks.'
+  }
+  if (activeTab.value === 'profile') {
+    return 'Manage your LabelGun Cloud session and account access.'
+  }
+  return 'Import image folders and open an annotation workspace.'
+})
 
 // Date formatter
 const formatDate = (ts: number | undefined): string => {
@@ -89,6 +111,13 @@ function clearSelection(): void {
 onMounted(async () => {
   // Uygulama her açılışta dataset seçim ekranından başlasın
   localStorage.removeItem('selectedDatasetId')
+  // Global auth restore
+  await bootstrapSession()
+
+  if (isAuthenticated.value) {
+    await fetchContracts()
+  }
+
   await refreshDatasets()
 })
 
@@ -117,7 +146,7 @@ const onClose = (): void => {
       :class="'titlebar-drag'"
     >
       <div class="flex items-center h-full">
-        <!-- Logo and App Name (Sürüklenebilir alanın bir parçası) -->
+        <!-- Logo and App Name -->
         <div class="flex items-center gap-2 pr-6">
           <div
             class="h-5 w-5 rounded bg-blue-500/20 flex items-center justify-center text-blue-400 font-bold text-[11px]"
@@ -127,7 +156,7 @@ const onClose = (): void => {
           <span class="font-semibold tracking-wide text-[13px] text-slate-200">LabelGun</span>
         </div>
 
-        <!-- Datasets Tab (Sekme Görünümü) -->
+        <!-- Workspace Button -->
         <div class="h-full flex items-center no-drag">
           <button
             class="h-full px-5 flex items-center gap-2 transition-colors text-[13px] relative"
@@ -138,7 +167,22 @@ const onClose = (): void => {
             ]"
             @click="isDatasetModalOpen = true"
           >
-            Datasets
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <rect x="3" y="3" width="7" height="7" />
+              <rect x="14" y="3" width="7" height="7" />
+              <rect x="14" y="14" width="7" height="7" />
+              <rect x="3" y="14" width="7" height="7" />
+            </svg>
+            Workspace
             <!-- Aktif Sekme Alt Çizgisi -->
             <div
               v-show="isDatasetModalOpen"
@@ -167,157 +211,24 @@ const onClose = (): void => {
       </div>
     </header>
 
-    <!-- Main content: Always LabelerView -->
+    <!-- Main content: Always LabelerView underneath -->
     <main class="flex-1 min-h-0 relative">
-      <!-- Dataset seçimi modülü -->
+      <!-- Workspace modal -->
       <transition name="fade">
         <div
           v-if="isDatasetModalOpen"
-          class="absolute inset-0 z-50 flex flex-col p-6 sm:p-10 bg-slate-50 dark:bg-slate-900 transition-colors overflow-auto"
+          class="absolute inset-0 z-50 flex flex-col bg-slate-50 dark:bg-slate-900 transition-colors overflow-auto"
         >
-          <!-- Üst Alan: Başlık ve Kapat Butonu -->
-          <div class="max-w-5xl w-full mx-auto flex items-start justify-between mb-8">
-            <div>
-              <h1 class="text-3xl font-bold text-slate-900 dark:text-slate-100 tracking-tight">
-                Datasets
-              </h1>
-              <p class="text-slate-500 dark:text-slate-400 mt-1">
-                Manage your local datasets or sync with LabelGun Cloud.
-              </p>
-            </div>
-            <button
-              v-if="selectedDatasetId"
-              class="p-2 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-200/50 dark:hover:text-slate-200 dark:hover:bg-slate-800 transition-colors"
-              title="Close Workspace"
-              @click="isDatasetModalOpen = false"
-            >
-              <svg
-                width="24"
-                height="24"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              >
-                <path d="M18 6L6 18M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-
-          <!-- Sekme Navigasyonu -->
-          <div class="max-w-5xl w-full mx-auto mb-6">
-            <div class="flex border-b border-slate-200 dark:border-slate-800">
-              <button
-                class="px-6 py-3 font-medium text-sm transition-colors border-b-2 relative -bottom-[1px]"
-                :class="
-                  activeTab === 'local'
-                    ? 'border-blue-600 text-blue-600 dark:text-blue-400'
-                    : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300'
-                "
-                @click="activeTab = 'local'"
-              >
-                Local Workspace
-              </button>
-              <button
-                class="px-6 py-3 font-medium text-sm transition-colors border-b-2 relative -bottom-[1px]"
-                :class="
-                  activeTab === 'cloud'
-                    ? 'border-blue-600 text-blue-600 dark:text-blue-400'
-                    : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300'
-                "
-                @click="activeTab = 'cloud'"
-              >
-                Cloud Workspace
-              </button>
-            </div>
-          </div>
-
-          <!-- YEREL İÇERİK -->
-          <div v-if="activeTab === 'local'" class="max-w-5xl w-full mx-auto">
-            <!-- Toolbar -->
-            <div class="flex justify-between items-center mb-4">
-              <h2 class="text-lg font-semibold text-slate-800 dark:text-slate-200">
-                Local Datasets
-              </h2>
-              <button
-                class="px-4 py-2 flex items-center gap-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white font-medium shadow-sm transition-colors text-sm"
-                @click="importDataset"
-              >
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                >
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
-                </svg>
-                Import Dataset
-              </button>
-            </div>
-
-            <!-- Boş Durum -->
-            <div
-              v-if="datasets.length === 0"
-              class="flex flex-col items-center justify-center p-12 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm text-center"
-            >
-              <div class="p-4 bg-slate-100 dark:bg-slate-700 rounded-full mb-4 text-slate-400">
-                <svg
-                  width="32"
-                  height="32"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                >
-                  <path
-                    d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
-                  ></path>
-                </svg>
-              </div>
-              <h3 class="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-1">
-                No local datasets found
-              </h3>
-              <p class="text-slate-500 dark:text-slate-400 text-sm mb-6 max-w-sm">
-                Get started by importing a folder containing your images. We'll automatically set up
-                a workspace for you.
-              </p>
-              <button
-                class="px-4 py-2 rounded-md bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-medium transition-colors text-sm shadow-sm"
-                @click="importDataset"
-              >
-                Browse Folders...
-              </button>
-            </div>
-
-            <!-- Dataset Listesi -->
-            <div v-else class="space-y-3">
-              <div
-                v-for="d in datasets"
-                :key="d.id"
-                class="flex items-center justify-between border border-slate-200 dark:border-slate-700 rounded-lg p-4 bg-white dark:bg-slate-800 shadow-sm hover:border-blue-300 dark:hover:border-blue-500/50 transition-colors"
-              >
-                <div class="flex-1 min-w-0 pr-4">
-                  <div class="flex items-center gap-3 mb-1">
-                    <h3 class="font-semibold text-slate-900 dark:text-slate-100 truncate">
-                      {{ d.name }}
-                    </h3>
-                    <span
-                      v-if="d.created_at"
-                      class="text-xs text-slate-400 dark:text-slate-500 border border-slate-200 dark:border-slate-700 px-2 py-0.5 rounded-full"
-                    >
-                      {{ formatDate(d.created_at) }}
-                    </span>
-                  </div>
+          <!-- ── MODAL HEADER ─────────────────────────────────────────── -->
+          <div
+            class="border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/80 sticky top-0 z-10 shadow-sm"
+          >
+            <div class="max-w-5xl w-full mx-auto px-6 py-5 flex items-center justify-between">
+              <div class="flex flex-col gap-0.5">
+                <div class="flex items-center gap-2">
+                  <!-- Workspace Hub icon -->
                   <div
-                    class="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400 truncate"
+                    class="w-7 h-7 rounded-lg bg-blue-600/10 dark:bg-blue-500/15 flex items-center justify-center shrink-0"
                   >
                     <svg
                       width="14"
@@ -328,57 +239,307 @@ const onClose = (): void => {
                       stroke-width="2"
                       stroke-linecap="round"
                       stroke-linejoin="round"
-                      class="shrink-0"
+                      class="text-blue-600 dark:text-blue-400"
                     >
-                      <path
-                        d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
-                      ></path>
+                      <rect x="3" y="3" width="7" height="7" />
+                      <rect x="14" y="3" width="7" height="7" />
+                      <rect x="14" y="14" width="7" height="7" />
+                      <rect x="3" y="14" width="7" height="7" />
                     </svg>
-                    <span class="truncate" :title="d.folder_path || 'No path'">{{
-                      d.folder_path || 'No path selected'
-                    }}</span>
                   </div>
-                </div>
-
-                <div class="flex items-center gap-2 shrink-0">
-                  <button
-                    class="px-4 py-2 rounded-md bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-600 hover:text-slate-900 dark:hover:text-white transition-colors text-sm font-medium shadow-sm"
-                    @click="selectDataset(d.id)"
+                  <h1
+                    class="text-xl font-bold text-slate-900 dark:text-slate-100 tracking-tight leading-none"
                   >
-                    Open Workspace
-                  </button>
-
-                  <button
-                    class="p-2 rounded-md text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
-                    title="Delete Dataset"
-                    @click="deleteDataset(d.id)"
-                  >
-                    <svg
-                      width="18"
-                      height="18"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    >
-                      <polyline points="3 6 5 6 21 6"></polyline>
-                      <path
-                        d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
-                      ></path>
-                      <line x1="10" y1="11" x2="10" y2="17"></line>
-                      <line x1="14" y1="11" x2="14" y2="17"></line>
-                    </svg>
-                  </button>
+                    {{ modalTitle }}
+                  </h1>
                 </div>
+                <p class="text-sm text-slate-500 dark:text-slate-400 pl-9">
+                  {{ modalDescription }}
+                </p>
+              </div>
+
+              <!-- Close button — only when a dataset is selected -->
+              <button
+                v-if="selectedDatasetId"
+                class="p-2 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:text-slate-200 dark:hover:bg-slate-800 transition-colors"
+                title="Return to labeler"
+                @click="isDatasetModalOpen = false"
+              >
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <!-- ── TAB NAVIGATION ─────────────────────────────────────── -->
+            <div class="max-w-5xl w-full mx-auto px-6">
+              <div class="flex gap-1">
+                <!-- Datasets Tab -->
+                <button
+                  class="tab-btn"
+                  :class="activeTab === 'datasets' ? 'tab-btn--active' : 'tab-btn--idle'"
+                  @click="activeTab = 'datasets'"
+                >
+                  <svg
+                    width="15"
+                    height="15"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <path
+                      d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
+                    />
+                  </svg>
+                  Datasets
+                </button>
+
+                <!-- Contracts Tab -->
+                <button
+                  class="tab-btn"
+                  :class="activeTab === 'contracts' ? 'tab-btn--active' : 'tab-btn--idle'"
+                  @click="activeTab = 'contracts'"
+                >
+                  <svg
+                    width="15"
+                    height="15"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                    <line x1="16" y1="13" x2="8" y2="13" />
+                    <line x1="16" y1="17" x2="8" y2="17" />
+                  </svg>
+                  Contracts
+                </button>
+
+                <!-- Profile Tab -->
+                <button
+                  class="tab-btn"
+                  :class="activeTab === 'profile' ? 'tab-btn--active' : 'tab-btn--idle'"
+                  @click="activeTab = 'profile'"
+                >
+                  <svg
+                    width="15"
+                    height="15"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                    <circle cx="12" cy="7" r="4" />
+                  </svg>
+                  Profile
+                </button>
               </div>
             </div>
           </div>
 
-          <!-- BULUT İÇERİK -->
-          <div v-else-if="activeTab === 'cloud'" class="max-w-5xl w-full mx-auto">
-            <CloudPanel @dataset-downloaded="refreshDatasets" />
+          <!-- ── TAB CONTENT ────────────────────────────────────────────── -->
+          <div class="flex-1 px-6 py-8">
+            <!-- DATASETS TAB -->
+            <div v-if="activeTab === 'datasets'" class="max-w-5xl w-full mx-auto">
+              <!-- Toolbar -->
+              <div class="flex justify-between items-start mb-6">
+                <div>
+                  <h2 class="text-base font-semibold text-slate-800 dark:text-slate-200">
+                    Local Datasets
+                  </h2>
+                  <p class="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
+                    Image folders imported on this machine
+                  </p>
+                </div>
+                <button
+                  class="px-4 py-2 flex items-center gap-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium shadow-sm transition-colors text-sm"
+                  @click="importDataset"
+                >
+                  <svg
+                    width="15"
+                    height="15"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
+                  </svg>
+                  Import Dataset
+                </button>
+              </div>
+
+              <!-- Empty State -->
+              <div
+                v-if="datasets.length === 0"
+                class="flex flex-col items-center justify-center p-16 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm text-center"
+              >
+                <div
+                  class="w-14 h-14 bg-slate-100 dark:bg-slate-700 rounded-full flex items-center justify-center mb-5 text-slate-400 dark:text-slate-500"
+                >
+                  <svg
+                    width="28"
+                    height="28"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <path
+                      d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
+                    />
+                  </svg>
+                </div>
+                <h3 class="text-base font-semibold text-slate-900 dark:text-slate-100 mb-1">
+                  No datasets yet
+                </h3>
+                <p class="text-sm text-slate-500 dark:text-slate-400 mb-6 max-w-xs">
+                  Import a folder of images to create your first local dataset and start labeling.
+                </p>
+                <button
+                  class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors text-sm shadow-sm"
+                  @click="importDataset"
+                >
+                  Browse Folders…
+                </button>
+              </div>
+
+              <!-- Dataset List -->
+              <div v-else class="space-y-3">
+                <div
+                  v-for="d in datasets"
+                  :key="d.id"
+                  class="group flex items-center justify-between border border-slate-200 dark:border-slate-700 rounded-xl p-4 bg-white dark:bg-slate-800 shadow-sm hover:border-blue-300 dark:hover:border-blue-500/50 hover:shadow-md transition-all"
+                >
+                  <!-- Dataset info -->
+                  <div class="flex items-center gap-4 flex-1 min-w-0 pr-4">
+                    <div
+                      class="w-9 h-9 rounded-lg bg-blue-50 dark:bg-blue-500/10 flex items-center justify-center shrink-0 text-blue-500 dark:text-blue-400"
+                    >
+                      <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      >
+                        <path
+                          d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
+                        />
+                      </svg>
+                    </div>
+                    <div class="min-w-0">
+                      <div class="flex items-center gap-2 mb-0.5 flex-wrap">
+                        <h3
+                          class="font-semibold text-slate-900 dark:text-slate-100 truncate text-sm"
+                        >
+                          {{ d.name }}
+                        </h3>
+                        <span
+                          v-if="d.created_at"
+                          class="text-[11px] text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded-full shrink-0"
+                        >
+                          {{ formatDate(d.created_at) }}
+                        </span>
+                      </div>
+                      <div
+                        class="flex items-center gap-1.5 text-xs text-slate-400 dark:text-slate-500"
+                      >
+                        <svg
+                          width="12"
+                          height="12"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          class="shrink-0"
+                        >
+                          <polyline points="9 11 12 14 22 4" />
+                          <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+                        </svg>
+                        <span class="font-mono truncate" :title="d.folder_path || 'No path'">{{
+                          d.folder_path || 'No path selected'
+                        }}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Actions -->
+                  <div class="flex items-center gap-2 shrink-0">
+                    <button
+                      class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium shadow-sm transition-colors"
+                      @click="selectDataset(d.id)"
+                    >
+                      Open Workspace
+                    </button>
+
+                    <button
+                      class="p-2 rounded-lg text-slate-300 dark:text-slate-600 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors opacity-0 group-hover:opacity-100"
+                      title="Delete Dataset"
+                      @click="deleteDataset(d.id)"
+                    >
+                      <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      >
+                        <polyline points="3 6 5 6 21 6" />
+                        <path
+                          d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
+                        />
+                        <line x1="10" y1="11" x2="10" y2="17" />
+                        <line x1="14" y1="11" x2="14" y2="17" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- CONTRACTS TAB -->
+            <div v-else-if="activeTab === 'contracts'" class="max-w-5xl w-full mx-auto">
+              <ContractsPanel
+                @dataset-downloaded="refreshDatasets"
+                @open-profile="activeTab = 'profile'"
+              />
+            </div>
+
+            <!-- PROFILE TAB -->
+            <div v-else-if="activeTab === 'profile'" class="max-w-5xl w-full mx-auto">
+              <ProfilePanel />
+            </div>
           </div>
         </div>
       </transition>
@@ -426,11 +587,68 @@ const onClose = (): void => {
 }
 
 .win-btn-close:hover {
-  background-color: #e81123; /* Windows native red */
+  background-color: #e81123;
   color: white;
 }
 
 .win-btn-close:active {
   background-color: #f1707a;
+}
+
+/* Tab buttons */
+.tab-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    border-color 0.15s;
+  border-bottom: 2px solid transparent;
+  position: relative;
+  bottom: -1px;
+}
+
+.tab-btn--active {
+  color: #2563eb;
+  border-bottom-color: #2563eb;
+}
+
+.tab-btn--idle {
+  color: #94a3b8;
+}
+
+.tab-btn--idle:hover {
+  color: #475569;
+  background-color: rgba(148, 163, 184, 0.08);
+  border-radius: 6px 6px 0 0;
+}
+
+:global(.dark) .tab-btn--active {
+  color: #60a5fa;
+  border-bottom-color: #60a5fa;
+}
+
+:global(.dark) .tab-btn--idle {
+  color: #64748b;
+}
+
+:global(.dark) .tab-btn--idle:hover {
+  color: #94a3b8;
+}
+
+/* Fade transition */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.18s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 </style>

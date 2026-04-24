@@ -67,6 +67,7 @@ export function useCloud(): {
   isFetching: ReturnType<typeof ref<boolean>>
   downloadResult: ReturnType<typeof ref<DownloadResult | null>>
   syncError: ReturnType<typeof ref<string | null>>
+  clearSession: () => void
   fetchContracts: () => Promise<void>
   downloadContractWork: (
     contractId: string,
@@ -87,6 +88,17 @@ export function useCloud(): {
     deletedFiles: number
   }>
 } {
+  /**
+   * Clears all cloud UI state on logout so no stale data is shown.
+   * Resets module-scope singleton refs; isFetching is left as-is
+   * (it should already be false at logout time).
+   */
+  const clearSession = (): void => {
+    contracts.value = []
+    downloadResult.value = null
+    syncError.value = null
+  }
+
   /**
    * Kullanıcıya atanmış sözleşmeleri Web API'den çeker.
    */
@@ -249,6 +261,7 @@ export function useCloud(): {
     isFetching,
     downloadResult,
     syncError,
+    clearSession,
     fetchContracts,
     downloadContractWork,
     syncNow,
