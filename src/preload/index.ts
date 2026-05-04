@@ -153,6 +153,10 @@ const api = {
     minimize: () => ipcRenderer.invoke('window:minimize'),
     toggleMaximize: () => ipcRenderer.invoke('window:toggleMaximize'),
     close: () => ipcRenderer.invoke('window:close')
+  },
+  export: {
+    localDataset: (payload: { datasetId: string; format: 'COCO' | 'YOLO' | 'VOC' }) =>
+      ipcRenderer.invoke('export:localDataset', payload)
   }
 }
 

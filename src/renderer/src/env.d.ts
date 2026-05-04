@@ -274,5 +274,11 @@ interface Window {
       toggleMaximize: () => Promise<boolean>
       close: () => Promise<void>
     }
+    export: {
+      localDataset: (payload: {
+        datasetId: string
+        format: 'COCO' | 'YOLO' | 'VOC'
+      }) => Promise<{ ok: true; filePath: string } | { ok: false; cancelled: true }>
+    }
   }
 }

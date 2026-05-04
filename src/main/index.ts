@@ -11,6 +11,7 @@ import { registerSamIpc } from './ipc/samIpc'
 import { registerAuthIpc } from './api/authIpc'
 import { registerCloudTasksIpc } from './api/cloudTasksIpc'
 import { startSync } from './sync/syncManager'
+import { registerExportIpc } from './ipc/exportIpc'
 
 const IMAGE_EXTS = ['.jpg', '.jpeg', '.png', '.bmp', '.webp']
 // local:// protokolünü renderer'da "güvenli/standard" gibi kullanabilmek için
@@ -125,6 +126,7 @@ app.whenReady().then(() => {
   registerSamIpc()
   registerAuthIpc()
   registerCloudTasksIpc()
+  registerExportIpc()
   startSync()
 
   // === Dataset folder picker ===

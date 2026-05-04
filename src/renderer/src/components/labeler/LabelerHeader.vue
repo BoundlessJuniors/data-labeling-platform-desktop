@@ -10,12 +10,17 @@ defineProps<{
   taskTitleText: string
   globalSeconds: number
   autoSaveProgress: number
+  /** When true, export buttons are shown and enabled. */
+  isLocalDataset: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'theme-toggle'): void
   (e: 'save'): void
   (e: 'complete-local'): void
+  (e: 'export-coco'): void
+  (e: 'export-yolo'): void
+  (e: 'export-voc'): void
 }>()
 
 const saveBtn = ref<HTMLButtonElement | null>(null)
@@ -28,6 +33,16 @@ function formatTime(total: number): string {
   const s = sec % 60
   const pad = (n: number): string => (n < 10 ? `0${n}` : String(n))
   return `${pad(h)}:${pad(m)}:${pad(s)}`
+}
+
+const showExportMenu = ref(false)
+
+function toggleExportMenu(): void {
+  showExportMenu.value = !showExportMenu.value
+}
+
+function closeExportMenu(): void {
+  showExportMenu.value = false
 }
 </script>
 
@@ -65,6 +80,108 @@ function formatTime(total: number): string {
         </div>
       </div>
 
+      <!-- ── Export dropdown (local datasets only) ── -->
+      <div v-if="isLocalDataset" class="relative" @mouseleave="closeExportMenu">
+        <button
+          class="flex items-center gap-2 rounded-xl bg-white dark:bg-[#1c1f26] border border-slate-200/80 dark:border-white/10 text-slate-700 dark:text-gray-200 hover:bg-slate-50 dark:hover:bg-white/5 py-2 px-4 text-sm font-semibold shadow-sm transition-all select-none"
+          title="Export dataset"
+          @click="toggleExportMenu"
+        >
+          <!-- Download icon (inline SVG for zero-dep) -->
+          <svg
+            class="h-4 w-4 text-slate-400 dark:text-gray-400 shrink-0"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3"
+            />
+          </svg>
+          <span>Export</span>
+          <svg
+            class="h-3 w-3 text-slate-400 dark:text-gray-500 transition-transform"
+            :class="showExportMenu ? 'rotate-180' : ''"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.5"
+            viewBox="0 0 24 24"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+
+        <!-- Dropdown menu -->
+        <Transition name="export-menu">
+          <div
+            v-if="showExportMenu"
+            class="absolute right-0 top-full mt-1.5 w-44 bg-white dark:bg-[#1c1f26] border border-slate-200/80 dark:border-white/10 rounded-xl shadow-xl overflow-hidden z-50"
+          >
+            <button
+              class="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-medium text-slate-700 dark:text-gray-200 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors text-left"
+              @click="
+                () => {
+                  emit('export-coco')
+                  closeExportMenu()
+                }
+              "
+            >
+              <span class="text-base leading-none">📦</span>
+              <span>Export COCO</span>
+            </button>
+            <button
+              class="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-medium text-slate-700 dark:text-gray-200 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors text-left"
+              @click="
+                () => {
+                  emit('export-yolo')
+                  closeExportMenu()
+                }
+              "
+            >
+              <span class="text-base leading-none">🎯</span>
+              <span>Export YOLO</span>
+            </button>
+            <button
+              class="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-medium text-slate-700 dark:text-gray-200 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors text-left"
+              @click="
+                () => {
+                  emit('export-voc')
+                  closeExportMenu()
+                }
+              "
+            >
+              <span class="text-base leading-none">🏷️</span>
+              <span>Export VOC</span>
+            </button>
+          </div>
+        </Transition>
+      </div>
+
+      <!-- Cloud dataset notice (shown instead of export buttons) -->
+      <div
+        v-else
+        class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs text-slate-400 dark:text-slate-500 bg-slate-100/60 dark:bg-white/5 border border-slate-200/40 dark:border-white/5 select-none"
+        title="Cloud contract datasets cannot be exported from desktop. Submit the work; the client exports approved results from the web app."
+      >
+        <svg
+          class="h-3.5 w-3.5 shrink-0"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          viewBox="0 0 24 24"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"
+          />
+        </svg>
+        <span>Cloud — export via web</span>
+      </div>
+
       <button
         ref="saveBtn"
         class="flex items-center gap-2 rounded-xl bg-white dark:bg-[#1c1f26] border border-slate-200/80 dark:border-white/10 text-slate-700 dark:text-gray-200 hover:bg-slate-50 dark:hover:bg-white/5 py-2 px-4 text-sm font-semibold save-auto-btn shadow-sm transition-all"
@@ -85,3 +202,17 @@ function formatTime(total: number): string {
     </div>
   </header>
 </template>
+
+<style scoped>
+.export-menu-enter-active,
+.export-menu-leave-active {
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease;
+}
+.export-menu-enter-from,
+.export-menu-leave-to {
+  opacity: 0;
+  transform: translateY(-4px) scale(0.97);
+}
+</style>

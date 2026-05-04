@@ -93,6 +93,13 @@ const props = defineProps<{ datasetId: string | null }>()
    ============================= */
 const { tasks, currentTaskIndex, initFromDb } = useTasks([])
 const { state } = useLabelerState()
+
+/**
+ * True when the current dataset is local (not cloud-sourced).
+ * Relies on state.labelSource which is loaded from the DB by loadDatasetLabeling().
+ * The hard enforcement is always in the IPC handler; this computed only drives UI visibility.
+ */
+const isLocalDataset = computed(() => state.labelSource === 'local')
 const {
   loadDatasetLabeling,
   addLocalLabel,
@@ -230,6 +237,40 @@ function saveDraftAndReset(): void {
   autoSave.autoSaveProgress.value = 0
   void autoSave.flushTimeToDb()
   autoSave.playAutoSaveOverlayAnimation()
+}
+
+/* =============================
+   Export (local datasets only)
+   ============================= */
+async function handleExport(format: 'COCO' | 'YOLO' | 'VOC'): Promise<void> {
+  if (!props.datasetId) return
+
+  // Save current task snapshot before export so unsaved drawings are included
+  const currentTask = tasks.value[currentTaskIndex.value]
+  if (currentTask) {
+    try {
+      await buildAndSaveExport(currentTask, exportAnnotationsToImageSpace())
+    } catch (e) {
+      toast.error(
+        'Export Failed',
+        'Failed to save snapshot before export: ' + (e instanceof Error ? e.message : String(e))
+      )
+      return
+    }
+  }
+
+  try {
+    const result = await window.api.export.localDataset({
+      datasetId: props.datasetId,
+      format
+    })
+    if ('cancelled' in result && result.cancelled) return
+    if (result.ok) {
+      toast.success('Export Completed', `Saved to: ${result.filePath}`, 5000)
+    }
+  } catch (err: unknown) {
+    toast.error('Export Failed', (err as Error).message)
+  }
 }
 
 /* =============================
@@ -562,9 +603,13 @@ function handleToolbarSetShape(shape: string): void {
         "
         :global-seconds="globalSeconds"
         :auto-save-progress="autoSaveProgress"
+        :is-local-dataset="isLocalDataset"
         @theme-toggle="onThemeToggleClick"
         @save="saveDraftAndReset"
         @complete-local="onCompleteLocalWork"
+        @export-coco="() => handleExport('COCO')"
+        @export-yolo="() => handleExport('YOLO')"
+        @export-voc="() => handleExport('VOC')"
       />
 
       <div class="flex-1 flex p-4 gap-4 min-h-0 relative isolate">
