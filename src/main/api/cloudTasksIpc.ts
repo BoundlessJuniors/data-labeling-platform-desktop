@@ -332,6 +332,20 @@ export function registerCloudTasksIpc(): void {
 
       const db = getDb()
 
+      // Pre-flight: detect revision_requested so we can requeue existing exports
+      let contractStatus: string | null = null
+      try {
+        const contractResp = await apiClient.get<{ success: boolean; data: { status: string } }>(
+          `/api/v1/contracts/${contractId}`
+        )
+        contractStatus = contractResp.data?.data?.status ?? null
+      } catch (err: unknown) {
+        console.warn(
+          `[cloud:downloadContractWork] Could not fetch contract status: ${(err as Error).message}`
+        )
+      }
+      const isRevision = contractStatus === 'revision_requested'
+
       // Pre-flight health check for stale local state
       const health = await computeContractHealth(contractId, expectedTaskCount)
 
@@ -345,11 +359,14 @@ export function registerCloudTasksIpc(): void {
         if (staleFails.c > 0) hasStaleFailed = true
       }
 
-      if (health.leaseExpiredCount > 0 || hasStaleFailed) {
+      // For revision_requested contracts, allow lease-batch to run even when local state
+      // has stale lease errors — the backend will issue fresh tokens for rejected tasks.
+      if (!isRevision && (health.leaseExpiredCount > 0 || hasStaleFailed)) {
         return { leased: 0, downloaded: 0, skipped: 0, failed: 0, status: 'stale_local_state' }
       }
 
-      if (expectedTaskCount && health.localDownloadedCount >= expectedTaskCount) {
+      // P0-4: For revision_requested, never skip — we need to re-lease and requeue
+      if (!isRevision && expectedTaskCount && health.localDownloadedCount >= expectedTaskCount) {
         return {
           leased: 0,
           downloaded: 0,
@@ -461,7 +478,12 @@ export function registerCloudTasksIpc(): void {
       if (leasedTasks.length === 0) {
         // Re-evaluate health to see if we reached the expected count or have stale state
         const reHealth = await computeContractHealth(contractId, expectedTaskCount)
-        if (expectedTaskCount && reHealth.localDownloadedCount >= expectedTaskCount) {
+        // In revision_requested mode all tasks may already be local but still need re-leasing.
+        if (
+          !isRevision &&
+          expectedTaskCount &&
+          reHealth.localDownloadedCount >= expectedTaskCount
+        ) {
           return {
             leased: 0,
             downloaded: 0,
@@ -481,7 +503,8 @@ export function registerCloudTasksIpc(): void {
           if (staleFails.c > 0) hasStaleFailed2 = true
         }
 
-        if (reHealth.leaseExpiredCount > 0 || hasStaleFailed2) {
+        // Same revision bypass: don't block on stale lease state after zero-leased result.
+        if (!isRevision && (reHealth.leaseExpiredCount > 0 || hasStaleFailed2)) {
           return { leased: 0, downloaded: 0, skipped: 0, failed: 0, status: 'stale_local_state' }
         }
         return { leased: 0, downloaded: 0, skipped: 0, failed: 0, status: 'zero_leased' }
@@ -520,8 +543,19 @@ export function registerCloudTasksIpc(): void {
             console.log(`[cloud:downloadContractWork] restoring archived task taskId=${taskId}`)
             db.prepare(`UPDATE media_items SET status = 'completed' WHERE id = ?`).run(existing.id)
             db.prepare(
-              `UPDATE annotations SET sync_status = 'pending_insert', last_error = NULL WHERE media_id = ? AND id = ?`
+              `UPDATE annotations SET sync_status = 'pending_insert', last_error = NULL, attempt_count = 0 WHERE media_id = ? AND id = ?`
             ).run(existing.id, `export:${existing.id}`)
+          } else if (isRevision) {
+            // P0-4: Revision flow — requeue existing export so syncManager re-submits with new lease token.
+            // Do NOT overwrite payload_json / payload_hash / data_json / last_synced_hash.
+            console.log(
+              `[cloud:downloadContractWork] revision requeue taskId=${taskId} mediaId=${existing.id}`
+            )
+            db.prepare(
+              `UPDATE annotations
+               SET sync_status = 'pending_insert', last_error = NULL, attempt_count = 0
+               WHERE id = ? AND cloud_task_id IS NOT NULL`
+            ).run(`export:${existing.id}`)
           }
           skipped++
           continue

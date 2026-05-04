@@ -496,6 +496,7 @@ export function registerDbIpc(): void {
       const db = getDb()
       const now = Date.now()
       const id = `export:${payload.media_id}`
+      // P0-3: Explicit cloud vs local branching with NULL-safe SQLite CASE
       db.prepare(
         `
         INSERT INTO annotations (id, media_id, type, category, data_json, updated_at,
@@ -508,10 +509,38 @@ export function registerDbIpc(): void {
           contract_id=excluded.contract_id,
           payload_json=excluded.payload_json,
           payload_hash=excluded.payload_hash,
+          last_error=CASE
+            WHEN excluded.cloud_task_id IS NULL THEN NULL
+            WHEN excluded.payload_hash IS NOT NULL
+              AND (
+                annotations.last_synced_hash IS NULL
+                OR excluded.payload_hash != annotations.last_synced_hash
+              ) THEN NULL
+            ELSE annotations.last_error
+          END,
+          attempt_count=CASE
+            WHEN excluded.cloud_task_id IS NULL THEN 0
+            WHEN excluded.payload_hash IS NOT NULL
+              AND (
+                annotations.last_synced_hash IS NULL
+                OR excluded.payload_hash != annotations.last_synced_hash
+              ) THEN 0
+            ELSE annotations.attempt_count
+          END,
           sync_status=CASE
-            WHEN excluded.payload_hash IS NOT NULL AND annotations.last_synced_hash IS NOT NULL AND excluded.payload_hash = annotations.last_synced_hash THEN annotations.sync_status
-            WHEN excluded.payload_hash != annotations.last_synced_hash OR annotations.last_synced_hash IS NULL THEN 'pending_insert'
-            ELSE annotations.sync_status
+            -- Local-only save: always synced, never queue to backend
+            WHEN excluded.cloud_task_id IS NULL THEN 'synced'
+            -- Cloud task: new hash or no hash yet → queue for upload, clear stale errors
+            WHEN excluded.payload_hash IS NOT NULL
+              AND (
+                annotations.last_synced_hash IS NULL
+                OR excluded.payload_hash != annotations.last_synced_hash
+              ) THEN 'pending_insert'
+            -- Cloud task: same hash already synced → preserve current status
+            WHEN excluded.payload_hash IS NOT NULL
+              AND excluded.payload_hash = annotations.last_synced_hash THEN annotations.sync_status
+            -- Fallback for cloud tasks with no hash provided
+            ELSE 'pending_insert'
           END
       `
       ).run(

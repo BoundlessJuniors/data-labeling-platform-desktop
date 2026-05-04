@@ -7,6 +7,7 @@ import {
   type CloudContract,
   type ContractHealth
 } from '../composables/useCloud'
+import { useFeedback } from '../composables/useFeedback'
 
 const emit = defineEmits<{
   (e: 'dataset-downloaded'): void
@@ -28,6 +29,8 @@ const {
   resetContractLocalState
 } = useCloud()
 
+const { toast, dialog } = useFeedback()
+
 // Panel-local state
 const processingContractId = ref<string | null>(null)
 const downloadAmount = ref(20)
@@ -35,10 +38,37 @@ const isSyncing = ref(false)
 const submitResult = ref<SubmitResult | null>(null)
 const contractHealthMap = ref<Record<string, ContractHealth>>({})
 
+// ---------------------------------------------------------------------------
+// Workable status helper — single source of truth for which statuses allow
+// labeler work (Download, Submit Work, health display).
+// Backend workable statuses: active | overdue | revision_requested
+// ---------------------------------------------------------------------------
+function isWorkableContractStatus(status: string): boolean {
+  return status === 'active' || status === 'overdue' || status === 'revision_requested'
+}
+
+// ---------------------------------------------------------------------------
+// P2-4: Status display label helper — centralises badge text.
+// ---------------------------------------------------------------------------
+function formatContractStatus(status: string): string {
+  const labels: Record<string, string> = {
+    active: 'ACTIVE',
+    overdue: 'OVERDUE',
+    revision_requested: 'REVISION REQUESTED',
+    pending_payment: 'PENDING PAYMENT',
+    submitted: 'SUBMITTED',
+    approved: 'APPROVED',
+    refunded: 'REFUNDED',
+    disputed: 'DISPUTED',
+    cancelled: 'CANCELLED'
+  }
+  return labels[status] ?? status.replace(/_/g, ' ').toUpperCase()
+}
+
 const loadHealthForAll = async (): Promise<void> => {
   const nextMap: Record<string, ContractHealth> = {}
   for (const c of contracts.value || []) {
-    if (c.status === 'active' || c.status === 'revision_requested') {
+    if (isWorkableContractStatus(c.status)) {
       try {
         nextMap[c.id] = await getContractHealth(c.id, c._count?.tasks)
       } catch (err) {
@@ -114,21 +144,29 @@ const handleSync = async (): Promise<void> => {
 // --------------------------------------------------------------------------------
 const handleSubmitContract = async (contract: CloudContract): Promise<void> => {
   if (isSyncing.value) {
-    alert('A sync operation is currently in progress. Please wait for it to finish.')
+    // P2-1: replaced alert() with toast
+    toast.warning(
+      'Pending Sync',
+      'A sync operation is currently in progress. Please wait for it to finish.'
+    )
     return
   }
 
   const health = contractHealthMap.value[contract.id]
   if (health && health.pendingInsertCount > 0) {
-    alert(
-      'You have pending local changes that have not been synced to the cloud. Please click "Sync Now" first.'
+    // P2-1: replaced alert() with toast
+    toast.warning(
+      'Pending Sync',
+      'You have local changes waiting to be synced. Please run Sync Now before submitting the contract.'
     )
     return
   }
 
   if (health && health.conflictCount > 0) {
-    alert(
-      'Some tasks are already submitted on the backend but your local annotations differ. Resolve the conflict or reset local state before submitting.'
+    // P2-1: replaced alert() with toast
+    toast.error(
+      'Submission Conflict',
+      'Some tasks were already submitted on the backend, but your local annotations are different. Reset local state or resolve the conflict before submitting.'
     )
     return
   }
@@ -140,6 +178,7 @@ const handleSubmitContract = async (contract: CloudContract): Promise<void> => {
     const result = await submitContract(contract.id, expectedTaskCount)
     submitResult.value = result
     if (result.ok) {
+      // P2-5: fetch + rebuild health so stale entries for non-workable contracts are cleared
       await fetchContracts()
     }
     await loadHealthForAll()
@@ -171,13 +210,15 @@ const handleRecover = async (contractId: string): Promise<void> => {
 // Reset Local Contract State
 // --------------------------------------------------------------------------------
 const handleReset = async (contractId: string): Promise<void> => {
-  if (
-    !window.confirm(
-      'This will remove all local files, annotations, leases, and cached state for this contract. Cloud data will not be deleted. Continue?'
-    )
-  ) {
-    return
-  }
+  // P2-1: replaced window.confirm() with dialog.dangerConfirm()
+  const confirmed = await dialog.dangerConfirm({
+    title: 'Reset Local Contract State?',
+    message:
+      'This will remove local cached files, annotations, leases, and desktop state for this contract. Cloud data will not be deleted.',
+    primaryAction: 'Reset Local State',
+    secondaryAction: 'Cancel'
+  })
+  if (!confirmed) return
 
   processingContractId.value = contractId
   submitResult.value = null
@@ -344,6 +385,7 @@ const handleReset = async (contractId: string): Promise<void> => {
         </div>
       </div>
 
+      <!-- P2-3: zero_leased — revision-aware message -->
       <div
         v-if="downloadResult && downloadResult.status === 'zero_leased'"
         class="border-l-4 border-amber-500 bg-amber-50 dark:bg-amber-500/10 text-amber-800 dark:text-amber-400 p-4 rounded-r-md mb-6 shadow-sm"
@@ -360,11 +402,26 @@ const handleReset = async (contractId: string): Promise<void> => {
           </div>
           <div class="ml-3">
             <p class="text-sm font-medium">
-              No tasks were leased for
-              {{
-                contracts?.find((c) => c.id === downloadResult?.contractId)?.listing?.title ||
-                'Contract'
-              }}. They might be already leased by others or currently unavailable.
+              <template
+                v-if="
+                  contracts?.find((c) => c.id === downloadResult?.contractId)?.status ===
+                  'revision_requested'
+                "
+              >
+                No revision tasks were leased for
+                {{
+                  contracts?.find((c) => c.id === downloadResult?.contractId)?.listing?.title ||
+                  'this contract'
+                }}. The backend may not have any rejected/reworkable tasks available yet, or the
+                tasks may already be leased.
+              </template>
+              <template v-else>
+                No tasks were leased for
+                {{
+                  contracts?.find((c) => c.id === downloadResult?.contractId)?.listing?.title ||
+                  'Contract'
+                }}. They might be already leased by others or currently unavailable.
+              </template>
             </p>
           </div>
         </div>
@@ -509,12 +566,15 @@ const handleReset = async (contractId: string): Promise<void> => {
                   :class="
                     contract.status === 'active'
                       ? 'bg-green-50 text-green-700 border-green-200 dark:bg-green-500/10 dark:text-green-400 dark:border-green-500/20'
-                      : contract.status === 'revision_requested'
-                        ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/20'
-                        : 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-700 dark:text-slate-400 dark:border-slate-600'
+                      : contract.status === 'overdue'
+                        ? 'bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-500/10 dark:text-orange-400 dark:border-orange-500/20'
+                        : contract.status === 'revision_requested'
+                          ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/20'
+                          : 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-700 dark:text-slate-400 dark:border-slate-600'
                   "
                 >
-                  {{ contract.status.replace('_', ' ').toUpperCase() }}
+                  <!-- P2-4: formatted status label -->
+                  {{ formatContractStatus(contract.status) }}
                 </span>
               </div>
               <div class="text-xs text-slate-400 dark:text-slate-500 font-mono truncate">
@@ -526,7 +586,7 @@ const handleReset = async (contractId: string): Promise<void> => {
             <div class="flex items-center gap-2.5 shrink-0 flex-wrap">
               <!-- Download: only for active / revision_requested -->
               <div
-                v-if="contract.status === 'active' || contract.status === 'revision_requested'"
+                v-if="isWorkableContractStatus(contract.status)"
                 class="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-900/60 px-2 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700"
               >
                 <span class="text-[11px] font-medium text-slate-400 uppercase tracking-wider"
@@ -555,15 +615,16 @@ const handleReset = async (contractId: string): Promise<void> => {
                 </button>
               </div>
 
+              <!-- P2-2: disabled whenever health.canSubmit is false -->
               <button
-                v-if="contract.status === 'active' || contract.status === 'revision_requested'"
+                v-if="isWorkableContractStatus(contract.status)"
                 class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium disabled:opacity-50 transition-colors shadow-sm text-sm"
                 :disabled="
                   cloudFetching ||
                   processingContractId === contract.id ||
                   isSyncing ||
-                  (contractHealthMap[contract.id]?.pendingInsertCount ?? 0) > 0 ||
-                  (contractHealthMap[contract.id]?.conflictCount ?? 0) > 0
+                  !contractHealthMap[contract.id] ||
+                  !contractHealthMap[contract.id].canSubmit
                 "
                 @click="handleSubmitContract(contract)"
               >
@@ -816,6 +877,36 @@ const handleReset = async (contractId: string): Promise<void> => {
                 <polyline points="22 4 12 14.01 9 11.01" />
               </svg>
               <span>All downloaded tasks are ready to submit!</span>
+            </div>
+
+            <!-- P2-2: Fallback block reason when canSubmit is false but no specific row covers it -->
+            <div
+              v-else-if="
+                contractHealthMap[contract.id].primaryBlockReason &&
+                !contractHealthMap[contract.id].missingLocalExportCount &&
+                !contractHealthMap[contract.id].inProgressCount &&
+                !contractHealthMap[contract.id].pendingInsertCount &&
+                !contractHealthMap[contract.id].conflictCount &&
+                !contractHealthMap[contract.id].leaseExpiredCount &&
+                !contractHealthMap[contract.id].failedPermanentCount &&
+                contractHealthMap[contract.id].notDownloadedCount === 0
+              "
+              class="text-sm text-slate-600 dark:text-slate-400 flex items-center gap-2 bg-slate-50 dark:bg-slate-800/50 p-2.5 rounded-md border border-slate-200 dark:border-slate-700"
+            >
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                class="shrink-0"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+              <span>{{ contractHealthMap[contract.id].primaryBlockReason }}</span>
             </div>
 
             <div

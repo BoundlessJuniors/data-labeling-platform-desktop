@@ -134,12 +134,20 @@ export function useAnnotationsRenderer(
         'p-3 rounded-lg bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 cursor-pointer annotation-item'
       if (ann.id === state.selectedAnnotationId) item.classList.add('selected')
       item.dataset.id = String(ann.id)
-      item.innerHTML = `
-        <div class="flex justify-between items-center pointer-events-none">
-          <p class="text-sm font-medium">${ann.label ?? 'Unlabeled'} ${String(ann.id).slice(-4)}</p>
-        </div>
-        <p class="text-xs text-gray-600 dark:text-gray-400 mt-1 pointer-events-none">${ann.type}</p>
-      `
+      // P0-1: DOM-safe construction -- no innerHTML for user/cloud-controlled strings
+      const headerRow = document.createElement('div')
+      headerRow.className = 'flex justify-between items-center pointer-events-none'
+      const labelP = document.createElement('p')
+      labelP.className = 'text-sm font-medium'
+      labelP.textContent = `${ann.label ?? 'Unlabeled'} ${String(ann.id).slice(-4)}`
+      headerRow.appendChild(labelP)
+
+      const typeP = document.createElement('p')
+      typeP.className = 'text-xs text-gray-600 dark:text-gray-400 mt-1 pointer-events-none'
+      typeP.textContent = ann.type
+
+      item.appendChild(headerRow)
+      item.appendChild(typeP)
       listEl.appendChild(item)
     })
 

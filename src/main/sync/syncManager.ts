@@ -87,7 +87,11 @@ async function isSessionValid(): Promise<boolean> {
 // CRITICAL: Bu döngü backend'e sadece FULL FINAL SNAPSHOT payloads (export) gönderir,
 // asıl beklenen de budur. Parçalı gönderim desteklenmez ve yapılmamalıdır.
 // -----------------------------------------------------------------------
-export async function runSyncCycle(): Promise<void> {
+// -----------------------------------------------------------------------
+// Internal sync implementation — do not call directly.
+// Use runSyncCycle() which is concurrency-safe.
+// -----------------------------------------------------------------------
+async function runSyncCycleInternal(): Promise<void> {
   let db
   try {
     db = getDb()
@@ -284,6 +288,24 @@ export async function runSyncCycle(): Promise<void> {
       }
     }
   }
+}
+
+// -----------------------------------------------------------------------
+// In-flight guard — prevents overlapping sync cycles.
+// All callers (startSync interval, cloud:syncNow, cloud:submitContract)
+// share a single in-flight Promise instead of spawning a second loop.
+// -----------------------------------------------------------------------
+let syncInFlight: Promise<void> | null = null
+
+export function runSyncCycle(): Promise<void> {
+  if (syncInFlight) {
+    console.log('[syncManager] Sync already in progress — reusing in-flight promise.')
+    return syncInFlight
+  }
+  syncInFlight = runSyncCycleInternal().finally(() => {
+    syncInFlight = null
+  })
+  return syncInFlight
 }
 
 // -----------------------------------------------------------------------

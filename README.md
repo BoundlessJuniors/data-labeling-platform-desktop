@@ -88,6 +88,10 @@
 - **Kapsamlı Snapshot Modeli (Full Snapshot)**: İş akışı parçalı yamalar (incremental patch) yerine, sunucuya her daim bir görev/medyanın tüm güncel verilerini içeren tek, nihai bir "tam kopya (export)" gönderir.
 - **Strict Tip Uyumluluğu ve API Normalizasyonu**: Backend servislerinden dönen karmaşık veri yapıları (HTTP response zarfları vs.) doğrudan masaüstüne yansıtılmaz. IPC Köprüsü (Main Process), bu yanıtları normalize ederek Renderer'ın saf, platform-native `({ ok: true, data: ... })` yapılarıyla güvenli çalışmasını sağlar.
 - **3-Tab Workspace Mimarisi**: `App.vue` tek bir Workspace modalı içinde **Datasets** (yerel dataset yönetimi), **Contracts** (bulut sözleşme ve görev yönetimi) ve **Profile** (oturum ve hesap bilgisi) sekmelerini yönetir. Sekmeler arasındaki state, `useAuth` ve `useCloud` singleton composable'ları aracılığıyla reaktif olarak paylaşılır.
+- **Overdue Sözleşme Desteği**: `overdue` durumundaki sözleşmeler artık `active` ve `revision_requested` ile eşdeğer çalışılabilir kabul edilir; Download, Submit Work ve Contract Health görünürlüğü bu üç durumu kapsayacak şekilde güncellenmiştir. `overdue` rozeti turuncu renk ile görsel olarak belirginleştirilmiştir.
+- **Revizyon (revision_requested) Yeniden Senkronizasyon Akışı**: Reddedilen sözleşmelerde backend yeni kiralama tokenları oluşturabildiğinden, eskimiş yerel kiralama durumları artık `lease-batch` çalıştırılmasını engellemez. Mevcut yerel medya yeniden indirilmez; yalnızca ilgili export kaydının `sync_status` değeri `pending_insert` olarak sıfırlanarak yeniden senkronize edilmesi sağlanır.
+- **Eş Zamanlı Sync Koruması**: `syncManager.runSyncCycle()` artık eş zamanlılık güvenlidir. Zamanlayıcı aralığı, Sync Now ve Submit Work tarafından aynı anda tetiklense dahi ikinci bir bağımsız döngü başlatılmaz; tüm çağrılar mevcut in-flight Promise'i paylaşır.
+- **Sağlık Yüklenene Kadar Submit Work Kilidi**: Submit Work butonu, contract health henüz hesaplanmamışken (`contractHealthMap` boşken) da devre dışı kalır. Buton yalnızca `canSubmit === true` olduğunda etkinleşir.
 
 ### 📋 Görev Yönetimi (Task Management)
 
@@ -136,6 +140,42 @@
 - **Dinamik Yerel Etiketleme**: Kullanıcının kendi ortamından (Local Dataset) içe aktardığı görsellerde sistem etiket havuzunu izole tutar; kullanıcı serbestçe etiket ekleyebilir ve silebilir.
 - **Zil Sesi (Safe Deletion) Koruması**: Veritabanı ve canvas üzerinde fiilen uygulanmış, halihazırda kullanılmakta olan anotasyon etiketlerinin silinmesi engellenir.
 - **Hardcode Bağımsız**: Arayüzde kodlanmış sabit (ör. "Göz", "Kulak") sınıf listeleri tamamen kaldırılmış olup, SQLite ve Bulut meta veri kaynakları ile senkronize çalışır.
+
+---
+
+## 🛡️ Hata Düzeltmeleri ve Güvenlik Sertleştirme Yamaları
+
+Bu bölüm, ilk sürüm yayınlandıktan sonra uygulanan kritik ve önemli düzeltmeleri belgeler. Tüm değişiklikler `npm run typecheck` (**çıkış kodu 0**) ile doğrulanmıştır.
+
+### P0 — Kritik Düzeltmeler
+
+| Kod | Dosya | Sorun | Çözüm |
+|-----|-------|-------|-------|
+| **P0-1** | `useAnnotationsRenderer.ts` | Anotasyon listesi render edilirken `innerHTML` kullanımı XSS riskine yol açıyordu. | `innerHTML` kaldırıldı; tüm etiket/kategori metinleri `document.createElement` + `textContent` ile DOM'a güvenle eklendi. |
+| **P0-2** | `useLabelerActions.ts` | `onCompleteLocalWork()` çağrılırken aktif görevin son anotasyon anlık görüntüsü SQLite'a kaydedilmiyordu. | Tamamlama döngüsünden önce `buildAndSaveExport()` çağrısı eklendi. |
+| **P0-3** | `dbIpc.ts` | `saveExport` upsert mantığı `cloud_task_id IS NULL` durumunu doğru ele almıyor; yerel görevler hatalı şekilde senkron kuyruğuna alınabiliyordu. | `CASE … IS NULL / IS NOT NULL` dallanması eklenerek bulut ve yerel görevler için ayrı `sync_status` mantığı uygulandı. |
+| **P0-4** | `cloudTasksIpc.ts` | `revision_requested` sözleşmelerinde görevler yeni kiralama tokenı alınmadan atlanıyordu. | `downloadContractWork` içinde `isRevision` bayrağı türetildi; mevcut yerel medya için export kaydı `pending_insert` olarak sıfırlandı. |
+| **P0-5** | `ContractsPanel.vue` | `overdue` sözleşmeler çalışılabilir sayılmıyor; Download ve Submit Work görünmüyordu. | Durum kontrolleri `active \|\| overdue \|\| revision_requested` içerecek şekilde güncellendi. |
+| **P0-Rev** | `cloudTasksIpc.ts` | `revision_requested` sözleşmelerde eskimiş yerel kiralama hataları `lease-batch` çalıştırılmasını engelliyordu. | `stale_local_state` × 2 ve `already_fully_downloaded` × 1 erken dönüş korumaları `!isRevision &&` ile koşullandırıldı. |
+
+### P1 — Kararlılık ve Sürdürülebilirlik İyileştirmeleri
+
+| Kod | Dosya | Değişiklik |
+|-----|-------|------------|
+| **P1-1** | `syncManager.ts` | `runSyncCycle()` eş zamanlılık güvenli hale getirildi. Mevcut gövde `runSyncCycleInternal()` olarak ayrıldı; modül düzeyinde `let syncInFlight: Promise<void> \| null` koruma değişkeni eklendi. Birden fazla eş zamanlı çağrı aynı in-flight Promise'i paylaşır. |
+| **P1-2** | `ContractsPanel.vue` | `isWorkableContractStatus(status: string): boolean` yardımcı fonksiyonu eklendi. `active \|\| overdue \|\| revision_requested` koşulunun tüm tekrar eden kullanımları bu fonksiyona yönlendirildi. |
+| **P1-3** | `ContractsPanel.vue` | `overdue` durumuna turuncu (`bg-orange-*`) rozet rengi atandı; `active` (yeşil) ve `revision_requested` (kehribar) ile görsel ayrım sağlandı. |
+
+### P2 — UX, Dayanıklılık ve Sürdürülebilirlik İyileştirmeleri
+
+| Kod | Dosya | Değişiklik |
+|-----|-------|------------|
+| **P2-1** | `ContractsPanel.vue` | `useFeedback` import edildi. `handleSubmitContract` içindeki tüm `alert()` → `toast.warning()` / `toast.error()`. `handleReset` içindeki `window.confirm()` → `dialog.dangerConfirm()` (promise tabanlı, Esc/Enter klavye desteği). |
+| **P2-2** | `ContractsPanel.vue` | Submit Work devre dışı koşulu `!contractHealthMap[contract.id] \|\| !contractHealthMap[contract.id].canSubmit` olarak sadeleştirildi. Health yüklenmemişken buton pasif kalır. Spesifik satırın gösterilmediği bloker durumlar için `primaryBlockReason` yedek satırı eklendi. |
+| **P2-3** | `ContractsPanel.vue` | `zero_leased` sonucu `revision_requested` sözleşmesine aitse revizyon'a özgü açıklayıcı mesaj gösterilir. |
+| **P2-4** | `ContractsPanel.vue` | `formatContractStatus(status: string): string` yardımcı fonksiyonu eklendi. Tüm bilinen durumlar için merkezi, okunabilir etiket metinleri tanımlandı; satır içi `replace('_',' ').toUpperCase()` bu fonksiyonla değiştirildi. |
+| **P2-5** | `ContractsPanel.vue` | Başarılı submit sonrasında `fetchContracts()` + `loadHealthForAll()` sırasının zaten doğru çalıştığı doğrulandı — `loadHealthForAll()` her çağrıda `nextMap`'i sıfırdan oluşturduğundan eski health kayıtları otomatik temizlenir. Ek değişiklik gerekmedi. |
+| **P2-Safety** | `ContractsPanel.vue` | Submit Work butonu, health henüz yüklenmemişken (`contractHealthMap` boşken) de pasif kalacak şekilde güçlendirildi: `(... !== undefined && !canSubmit)` → `!contractHealthMap[contract.id] \|\| !contractHealthMap[contract.id].canSubmit`. |
 
 ---
 

@@ -134,6 +134,18 @@ export function useLabelerActions(opts: UseLabelerActionsOptions): UseLabelerAct
         return
       }
 
+      // P0-2: Save current visible task snapshot before marking anything as complete
+      const current = opts.tasks.value[opts.currentTaskIndex.value]
+      if (current) {
+        const exported = opts.exportAnnotationsToImageSpace()
+        await buildAndSaveExport(current, exported)
+        if (current.cloudTaskId) {
+          current.syncStatus = 'pending_insert'
+        } else {
+          current.syncStatus = 'synced'
+        }
+      }
+
       for (const t of opts.tasks.value) {
         const mediaId = t.mediaId ?? t.title ?? String(t.id)
         await window.api.db.media.setStatus({ media_id: mediaId, status: 'completed' })
