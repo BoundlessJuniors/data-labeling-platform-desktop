@@ -40,10 +40,14 @@ LabelGun, görüntü verileri üzerinde farklı anotasyon tipleriyle çalışmay
 - Tek tıkla otomatik segmentasyon desteği.
 - SAM ViT-B ONNX modeli encoder + decoder dosyalarının otomatik indirilmesi.
 - Encoder ve decoder dosyaları için gerçek zamanlı indirme ilerlemesi gösterimi.
-- Aynı görsel üzerinde tekrar tekrar encoder çalıştırılmasını önleyen embedding cache yapısı.
-- `onnxruntime-node` ile yerel CPU üzerinde inferans.
-- SAM maskesinin convex hull algoritması ile polygon noktalarına dönüştürülmesi.
+- `onnxruntime-node` ile yerel ortamda inferans.
+- Aynı görsel üzerinde tekrar tekrar encoder çalıştırılmasını önleyen bellek içi (in-memory) embedding cache yapısı.
 - Var olan polygon anotasyonlarının içine tıklandığında gereksiz SAM isteğinin engellenmesi.
+- **Akıllı Prefetch Stratejisi:** Gelişmiş bir arka plan kuyruk sistemi ile kullanıcının aktif görseline ek olarak, 1 önceki ve 2 sonraki görsel için otomatik embedding hesaplaması yapılır.
+- **In-flight Deduplication:** Aynı görsel için hem arka plan prefetch işlemi hem de kullanıcının tıklaması denk gelirse, gereksiz çift hesaplamayı önlemek için aktif işlem (promise) yeniden kullanılır. Bu durum tekrarlanan encoder iş yükünü azaltır ve uygulamanın tepkiselliğini artırır.
+- **Polygon Optimizasyonu (RDP):** SAM maskesi kapalı bir çokgen (polygon) olarak Ramer-Douglas-Peucker algoritması ile basitleştirilir. Yakın noktalar temizlenir ve maksimum 120 nokta sınırı uygulanır. Bu iyileştirme canvas performansını artırır ve export boyutunu düşürür.
+- **Hata Toleranslı Kuyruk Yönetimi:** Okunamayan veya eksik görsellerin prefetch kuyruğunu tıkamasını önlemek için görevler en fazla 2 kez denenir (MAX_PREFETCH_JOB_ATTEMPTS), ardından başarısız görevler düşürülür.
+- **IPC Serileştirme Koruması:** SAM noktaları ve etiketleri, Electron IPC üzerinden gönderilmeden önce Vue/Konva reaktif yapılarından arındırılıp yalın (plain) objelere dönüştürülerek serileştirme hataları önlenir.
 
 ### 💾 Yerel Veritabanı SQLite ve Kalıcı Depolama
 
@@ -169,6 +173,11 @@ Bu kapsamda:
 - Native `alert` / `confirm` kullanımları yerine tema uyumlu toast ve dialog sistemi kullanılmaya başlanmıştır.
 - Sözleşme durumları için merkezi formatlama ve rozet renklendirme yapısı eklenmiştir.
 
+**SAM Performans ve Stabilite Güncellemeleri:**
+- Model değişikliği sırasında "in-flight" (henüz tamamlanmamış) encoder görevleri ve cache temizlenerek eski modele ait embedding kirliliğinin önüne geçilmiştir.
+- Eksik veya okunamayan dosyaların arka plan prefetch kuyruğunu sürekli meşgul etmesini önleyen retry limit (maksimum 2 deneme) mekanizması eklenmiştir.
+- SAM inferans işlemi sırasında oluşan "object could not be cloned" IPC serileştirme hataları düzeltilmiştir.
+
 Tüm bu iyileştirmeler `npm run typecheck` komutu ile doğrulanmıştır.
 
 ## 🏗️ Teknoloji Yığını
@@ -239,7 +248,7 @@ LabelGun üç ana Electron katmanından oluşur:
 
 1. Renderer, `window.api.*` üzerinden IPC çağrıları yapar.
 2. Preload, `ipcRenderer.invoke()` ile main process'e mesaj iletir.
-3. Main process, `ipcMain.handle()` ile DB sorguları veya SAM çıkarımı yapar ve sonuçları döner.
+3. Main process, `ipcMain.handle()` ile DB sorguları veya SAM çıkarımı yapar ve sonuçları döner. Ana süreç (main process) ayrıca SAM decoder oturumunu, bellek içi embedding cache yönetimini, in-flight deduplication mantığını ve arka plan prefetch kuyruğunu koordine ederken, ağır encoder işlemleri worker iş parçacığına (thread) devredilir.
 
 ---
 
@@ -263,8 +272,8 @@ label_gun/
 │   │   │   ├── localExport.types.ts   # Tip ve veri yapıları tanımlamaları
 │   │   │   ├── vocLocal.export.ts     # Pascal VOC (XML ZIP) format export algoritması
 │   │   │   └── yoloLocal.export.ts    # YOLO (TXT ZIP) format export algoritması
-│   │   ├── samModel.ts                # SAM AI modeli: indirme, embedding, inferans,
-│   │   │                              # mask→polygon dönüşümü, convex hull
+│   │   ├── samModel.ts                # SAM Decoder, bellek içi embedding cache, in-flight
+│   │   │                              # deduplication, prefetch kuyruğu ve RDP polygon optimizasyonu
 │   │   ├── db/
 │   │   │   └── sqlite.ts              # SQLite bağlantısı, şema, migrasyon
 │   │   ├── ipc/
@@ -274,7 +283,7 @@ label_gun/
 │   │   ├── utils/
 │   │   │   └── hashUtil.ts            # Veri bütünlüğü için hashing yardımcıları
 │   │   └── workers/
-│   │       └── samWorker.ts           # SAM modelini main thread'i engellemeden çalıştıran Worker
+│   │       └── samWorker.ts           # SAM Encoder modelini main thread'i engellemeden çalıştıran Worker
 │   │
 │   ├── preload/                       # Electron Preload Renderer ↔ Main köprüsü
 │   │   ├── index.ts                   # contextBridge – API'yi renderer'a açar

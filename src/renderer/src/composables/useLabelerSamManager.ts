@@ -208,10 +208,17 @@ export function useLabelerSamManager(deps: SamManagerDeps) {
 
     if (isInsideExistingPolygon) return
 
+    const samPoints = [{ x: Number(payload.imgX), y: Number(payload.imgY) }]
+
+    if (!Number.isFinite(samPoints[0].x) || !Number.isFinite(samPoints[0].y)) {
+      console.warn('[SAM] invalid click point:', payload)
+      return
+    }
+
     try {
       const res = await window.api.sam.run({
-        imagePath: current.image,
-        points: [{ x: payload.imgX, y: payload.imgY }]
+        imagePath: String(current.image),
+        points: samPoints
       })
 
       if (!res.ok || !res.mask || !Array.isArray(res.mask.points) || res.mask.points.length < 3) {
@@ -251,11 +258,29 @@ export function useLabelerSamManager(deps: SamManagerDeps) {
     const current = deps.tasks.value[deps.currentTaskIndex.value]
     if (!current) return
 
+    const samPoints = payload.points.map((p) => ({
+      x: Number(p.x),
+      y: Number(p.y)
+    }))
+
+    const samLabels = payload.labels.map((label) => Number(label))
+
+    const isValid =
+      samPoints.length > 0 &&
+      samPoints.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y)) &&
+      samLabels.length === samPoints.length &&
+      samLabels.every((label) => Number.isFinite(label))
+
+    if (!isValid) {
+      console.warn('[SAM] invalid draw payload:', payload)
+      return
+    }
+
     try {
       const res = await window.api.sam.run({
-        imagePath: current.image,
-        points: payload.points,
-        labels: payload.labels
+        imagePath: String(current.image),
+        points: samPoints,
+        labels: samLabels
       })
 
       if (!res.ok || !res.mask || !Array.isArray(res.mask.points) || res.mask.points.length < 3) {

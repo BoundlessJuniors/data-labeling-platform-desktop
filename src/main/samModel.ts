@@ -349,8 +349,10 @@ export async function switchSamModel(modelId: SamModelId): Promise<void> {
     samDecoderSession = null
   }
 
-  // Clear cache as embeddings are model-specific
+  // Clear cache as embeddings are model-specific.
+  // In-flight encoder jobs are also model-specific and must not be reused after switching.
   embeddingCache.clear()
+  embeddingInFlight.clear()
 
   samState.currentModelId = modelId
   samState.status = 'idle'
@@ -661,6 +663,7 @@ interface ImageEmbeddingCacheEntry {
 }
 
 const embeddingCache = new Map<string, ImageEmbeddingCacheEntry>()
+const embeddingInFlight = new Map<string, Promise<ImageEmbeddingCacheEntry>>()
 const MAX_CACHE_SIZE = 10 // Keep last 10 embeddings to prevent memory leak
 
 /**
@@ -689,7 +692,11 @@ interface CacheJob {
   taskIndex: number
   priority: 'high' | 'medium' | 'low'
   timestamp: number
+  attempts?: number
+  lastError?: string
 }
+
+const MAX_PREFETCH_JOB_ATTEMPTS = 2
 
 interface CachePlan {
   backward: number[]
@@ -744,6 +751,7 @@ class SmartCacheQueue {
       return
     }
 
+    job.attempts = job.attempts ?? 0
     this.queue.push(job)
     this.sortQueue()
     const imageName = job.imagePath.split(/[\\/]/).pop() || job.imagePath
@@ -829,10 +837,25 @@ class SmartCacheQueue {
       )
     } catch (e) {
       const elapsed = performance.now() - startTime
-      console.error(
-        `[${timestamp}] [Prefetch] ❌ FAILED task ${job.taskIndex} after ${elapsed.toFixed(0)}ms:`,
-        (e as Error).message
-      )
+      const message = e instanceof Error ? e.message : String(e)
+
+      job.attempts = (job.attempts ?? 0) + 1
+      job.lastError = message
+
+      if (job.attempts >= MAX_PREFETCH_JOB_ATTEMPTS) {
+        this.queue = this.queue.filter((j) => j !== job)
+        console.error(
+          `[${timestamp}] [Prefetch] ❌ DROPPED task ${job.taskIndex} after ${job.attempts} failed attempts (${elapsed.toFixed(0)}ms):`,
+          message
+        )
+      } else {
+        job.timestamp = Date.now()
+        this.sortQueue()
+        console.warn(
+          `[${timestamp}] [Prefetch] ⚠️  FAILED task ${job.taskIndex}, will retry (${job.attempts}/${MAX_PREFETCH_JOB_ATTEMPTS}) after ${elapsed.toFixed(0)}ms:`,
+          message
+        )
+      }
     } finally {
       this.processing = false
       this.processingTaskIndex = null
@@ -1146,7 +1169,21 @@ async function computeImageEmbedding(imagePath: string): Promise<ImageEmbeddingC
   // Ensure ORT is loaded for Tensor creation
   await ensureOrtLoaded()
 
-  return new Promise((resolve, reject) => {
+  const cached = embeddingCache.get(imagePath)
+  if (cached && cached.modelId === samState.currentModelId) {
+    cached.lastUsed = Date.now()
+    embeddingCache.set(imagePath, cached)
+    console.log('[SAM-GPU] Using cached image embedding')
+    return cached
+  }
+
+  const inFlight = embeddingInFlight.get(imagePath)
+  if (inFlight) {
+    console.log(`[SAM-GPU] Reusing in-flight embedding for: ${imagePath}`)
+    return inFlight
+  }
+
+  const promise = new Promise<ImageEmbeddingCacheEntry>((resolve, reject) => {
     const id = Date.now().toString() + Math.random().toString()
     pendingRequests.set(id, { resolve, reject, imagePath })
 
@@ -1155,7 +1192,14 @@ async function computeImageEmbedding(imagePath: string): Promise<ImageEmbeddingC
       id,
       imagePath
     })
+  }).finally(() => {
+    embeddingInFlight.delete(imagePath)
   })
+
+  embeddingInFlight.set(imagePath, promise)
+  console.log(`[SAM-GPU] Starting new embedding job for: ${imagePath}`)
+
+  return promise
 }
 
 function transformPointsToOnnxCoords(
@@ -1282,6 +1326,153 @@ function traceBoundary(
   return points
 }
 
+const SAM_POLYGON_SIMPLIFY_CONFIG = {
+  minPointDistancePx: 2,
+  initialEpsilonPx: 2,
+  maxEpsilonPx: 12,
+  epsilonGrowth: 1.35,
+  maxPolygonPoints: 120
+}
+
+function squaredDistance(a: XY, b: XY): number {
+  const dx = a.x - b.x
+  const dy = a.y - b.y
+  return dx * dx + dy * dy
+}
+
+function perpendicularDistance(point: XY, lineStart: XY, lineEnd: XY): number {
+  const dx = lineEnd.x - lineStart.x
+  const dy = lineEnd.y - lineStart.y
+
+  const mag = Math.sqrt(dx * dx + dy * dy)
+  if (mag > 0.0) {
+    const area = Math.abs(
+      (lineEnd.y - lineStart.y) * point.x -
+        (lineEnd.x - lineStart.x) * point.y +
+        lineEnd.x * lineStart.y -
+        lineEnd.y * lineStart.x
+    )
+    return area / mag
+  }
+
+  return Math.sqrt(squaredDistance(point, lineStart))
+}
+
+function simplifyRdp(points: XY[], epsilon: number): XY[] {
+  let dmax = 0
+  let index = 0
+  const end = points.length - 1
+
+  if (end <= 0) return points
+
+  for (let i = 1; i < end; i++) {
+    const d = perpendicularDistance(points[i], points[0], points[end])
+    if (d > dmax) {
+      index = i
+      dmax = d
+    }
+  }
+
+  if (dmax > epsilon) {
+    const recResults1 = simplifyRdp(points.slice(0, index + 1), epsilon)
+    const recResults2 = simplifyRdp(points.slice(index), epsilon)
+    return recResults1.slice(0, recResults1.length - 1).concat(recResults2)
+  } else {
+    return [points[0], points[end]]
+  }
+}
+
+function removeNearDuplicatePoints(points: XY[], minDistancePx: number): XY[] {
+  if (points.length < 3) return points
+
+  const result: XY[] = [points[0]]
+  const minSq = minDistancePx * minDistancePx
+
+  for (let i = 1; i < points.length; i++) {
+    if (squaredDistance(points[i], result[result.length - 1]) > minSq) {
+      result.push(points[i])
+    }
+  }
+
+  return result
+}
+
+function simplifyClosedPolygon(points: XY[], epsilon: number): XY[] {
+  if (points.length < 3) return points
+
+  // Treat as closed by duplicating first point if not already identical
+  const isClosed =
+    points[0].x === points[points.length - 1].x && points[0].y === points[points.length - 1].y
+
+  let p = points
+  if (!isClosed) {
+    p = [...points, points[0]]
+  }
+
+  const simplified = simplifyRdp(p, epsilon)
+
+  // Remove the artificial closing point
+  if (
+    !isClosed &&
+    simplified.length > 1 &&
+    simplified[0].x === simplified[simplified.length - 1].x &&
+    simplified[0].y === simplified[simplified.length - 1].y
+  ) {
+    simplified.pop()
+  }
+
+  return simplified
+}
+
+function evenlyLimitPolygonPoints(points: XY[], maxPoints: number): XY[] {
+  if (points.length <= maxPoints) return points
+
+  const result: XY[] = []
+  const step = points.length / maxPoints
+
+  for (let i = 0; i < maxPoints; i++) {
+    result.push(points[Math.floor(i * step)])
+  }
+
+  return result
+}
+
+function simplifySamPolygon(points: XY[]): XY[] {
+  const origLength = points.length
+  if (origLength < 3) return points
+
+  const config = SAM_POLYGON_SIMPLIFY_CONFIG
+
+  let currentPoints = removeNearDuplicatePoints(points, config.minPointDistancePx)
+
+  let epsilon = config.initialEpsilonPx
+  let iteration = 0
+
+  while (
+    currentPoints.length > config.maxPolygonPoints &&
+    epsilon <= config.maxEpsilonPx &&
+    iteration < 10
+  ) {
+    currentPoints = simplifyClosedPolygon(currentPoints, epsilon)
+    epsilon *= config.epsilonGrowth
+    iteration++
+  }
+
+  if (currentPoints.length > config.maxPolygonPoints) {
+    currentPoints = evenlyLimitPolygonPoints(currentPoints, config.maxPolygonPoints)
+  }
+
+  if (currentPoints.length < 3) {
+    return points
+  }
+
+  if (origLength !== currentPoints.length) {
+    console.log(`[SAM] Polygon simplified: ${origLength} → ${currentPoints.length} points`)
+  }
+
+  return currentPoints
+}
+
 function maskToPolygon(
   maskData: Float32Array,
   maskWidth: number,
@@ -1292,8 +1483,13 @@ function maskToPolygon(
   const scaleX = origWidth / maskWidth
   const scaleY = origHeight / maskHeight
 
-  // Use tracing instead of scanning + convex hull
-  return traceBoundary(maskData, maskWidth, maskHeight, scaleX, scaleY)
+  const rawPolygon = traceBoundary(maskData, maskWidth, maskHeight, scaleX, scaleY)
+
+  if (rawPolygon.length < 3) {
+    return rawPolygon
+  }
+
+  return simplifySamPolygon(rawPolygon)
 }
 
 /**
@@ -1355,18 +1551,11 @@ export async function runSamInference(
 
   const ort = ortModule as typeof Ort
 
-  let entry = embeddingCache.get(imagePath)
-  // Check if cache entry exists AND belongs to the current model
-  if (!entry || entry.modelId !== samState.currentModelId) {
-    const embeddingStart = performance.now()
-    entry = await computeImageEmbedding(imagePath)
-    const embeddingTime = performance.now() - embeddingStart
+  const embeddingStart = performance.now()
+  const entry = await computeImageEmbedding(imagePath)
+  const embeddingTime = performance.now() - embeddingStart
+  if (embeddingTime > 5) {
     console.log(`[SAM-GPU] Image embedding computed in ${embeddingTime.toFixed(2)}ms`)
-  } else {
-    // Update LRU timestamp on cache hit
-    entry.lastUsed = Date.now()
-    embeddingCache.set(imagePath, entry)
-    console.log('[SAM-GPU] Using cached image embedding')
   }
 
   const { embedding, origWidth, origHeight } = entry
