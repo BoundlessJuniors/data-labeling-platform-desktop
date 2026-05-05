@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import SunIcon from '@renderer/assets/icons/custom/light_mode.svg?component'
 import MoonIcon from '@renderer/assets/icons/custom/dark_mode.svg?component'
 import TimerIcon from '@renderer/assets/icons/custom/timer.svg?component'
@@ -36,6 +36,7 @@ function formatTime(total: number): string {
 }
 
 const showExportMenu = ref(false)
+const exportMenuRef = ref<HTMLDivElement | null>(null)
 
 function toggleExportMenu(): void {
   showExportMenu.value = !showExportMenu.value
@@ -44,6 +45,23 @@ function toggleExportMenu(): void {
 function closeExportMenu(): void {
   showExportMenu.value = false
 }
+
+function handleDocumentClick(event: MouseEvent): void {
+  const target = event.target as Node | null
+  if (!target) return
+
+  if (exportMenuRef.value && !exportMenuRef.value.contains(target)) {
+    closeExportMenu()
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('click', handleDocumentClick)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('click', handleDocumentClick)
+})
 </script>
 
 <template>
@@ -81,7 +99,7 @@ function closeExportMenu(): void {
       </div>
 
       <!-- ── Export dropdown (local datasets only) ── -->
-      <div v-if="isLocalDataset" class="relative" @mouseleave="closeExportMenu">
+      <div v-if="isLocalDataset" ref="exportMenuRef" class="relative">
         <button
           class="flex items-center gap-2 rounded-xl bg-white dark:bg-[#1c1f26] border border-slate-200/80 dark:border-white/10 text-slate-700 dark:text-gray-200 hover:bg-slate-50 dark:hover:bg-white/5 py-2 px-4 text-sm font-semibold shadow-sm transition-all select-none"
           title="Export dataset"

@@ -1,4 +1,4 @@
-import { ipcMain, dialog, BrowserWindow } from 'electron'
+import { ipcMain, dialog, BrowserWindow, nativeImage } from 'electron'
 import { unlinkSync, existsSync } from 'fs'
 import { getDb } from '../db/sqlite'
 import {
@@ -68,6 +68,23 @@ async function showSaveDialog(
   return result.filePath
 }
 
+function resolveImageDimensionsFromDisk(
+  localPath: string
+): { width: number; height: number } | null {
+  const img = nativeImage.createFromPath(localPath)
+  if (img.isEmpty()) return null
+
+  const size = img.getSize()
+  if (!size.width || !size.height || size.width <= 0 || size.height <= 0) {
+    return null
+  }
+
+  return {
+    width: size.width,
+    height: size.height
+  }
+}
+
 // ─── IPC registration ─────────────────────────────────────────────────────────
 
 export function registerExportIpc(): void {
@@ -127,14 +144,6 @@ export function registerExportIpc(): void {
       const imageExportData: ImageExportData[] = []
 
       for (const media of mediaRows) {
-        // Image dimension guard
-        if (!media.width || !media.height || media.width <= 0 || media.height <= 0) {
-          throw new Error(
-            `Image "${media.local_path}" (media id=${media.id}) is missing valid width/height. ` +
-              `Please re-import the image.`
-          )
-        }
-
         // Cloud task guard on media level (belt-and-suspenders)
         if (media.cloud_task_id) {
           throw new Error(
@@ -146,6 +155,37 @@ export function registerExportIpc(): void {
         // Image file existence guard (no silent skip)
         assertImageExists(media.local_path, media.id)
 
+        // Image dimension guard & recovery
+        let resolvedWidth = media.width
+        let resolvedHeight = media.height
+
+        if (!resolvedWidth || !resolvedHeight || resolvedWidth <= 0 || resolvedHeight <= 0) {
+          const resolved = resolveImageDimensionsFromDisk(media.local_path)
+
+          if (!resolved) {
+            throw new Error(
+              `Image "${media.local_path}" (media id=${media.id}) is missing valid width/height, ` +
+                `and dimensions could not be read from disk. Please re-import the image.`
+            )
+          }
+
+          resolvedWidth = resolved.width
+          resolvedHeight = resolved.height
+
+          db.prepare(
+            `UPDATE media_items SET width = ?, height = ?, updated_at = ? WHERE id = ?`
+          ).run(resolvedWidth, resolvedHeight, Date.now(), media.id)
+        }
+
+        const finalWidth = resolvedWidth
+        const finalHeight = resolvedHeight
+
+        if (!finalWidth || !finalHeight || finalWidth <= 0 || finalHeight <= 0) {
+          throw new Error(
+            `Image "${media.local_path}" (media id=${media.id}) still has invalid dimensions after recovery.`
+          )
+        }
+
         // Load annotation export snapshot
         const annRow = db
           .prepare(`SELECT data_json FROM annotations WHERE id = ? LIMIT 1`)
@@ -154,7 +194,11 @@ export function registerExportIpc(): void {
         const annotations = parseAnnotationDataJson(annRow?.data_json ?? null, media.id)
 
         imageExportData.push({
-          media,
+          media: {
+            ...media,
+            width: finalWidth,
+            height: finalHeight
+          },
           annotations,
           basename: uniqueBasename(media.local_path, media.id)
         })
