@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, computed } from 'vue'
 import { useAuth } from '../composables/useAuth'
 import {
   useCloud,
@@ -32,6 +32,9 @@ const {
 const { toast, dialog } = useFeedback()
 
 // Panel-local state
+type ContractFilter = 'all' | 'open' | 'completed'
+const activeFilter = ref<ContractFilter>('all')
+
 const processingContractId = ref<string | null>(null)
 const downloadAmount = ref(20)
 const isSyncing = ref(false)
@@ -46,6 +49,60 @@ const contractHealthMap = ref<Record<string, ContractHealth>>({})
 function isWorkableContractStatus(status: string): boolean {
   return status === 'active' || status === 'overdue' || status === 'revision_requested'
 }
+
+function isOpenContractStatus(status: string): boolean {
+  return [
+    'active',
+    'overdue',
+    'revision_requested',
+    'pending_payment',
+    'submitted',
+    'disputed'
+  ].includes(status)
+}
+
+function isCompletedContractStatus(status: string): boolean {
+  return status === 'approved'
+}
+
+const filteredContracts = computed(() => {
+  if (!contracts.value) return []
+  if (activeFilter.value === 'open') {
+    return contracts.value.filter((c) => isOpenContractStatus(c.status))
+  }
+  if (activeFilter.value === 'completed') {
+    return contracts.value.filter((c) => isCompletedContractStatus(c.status))
+  }
+  return contracts.value
+})
+
+const allContractsCount = computed(() => contracts.value?.length || 0)
+const openContractsCount = computed(
+  () => (contracts.value || []).filter((c) => isOpenContractStatus(c.status)).length
+)
+const completedContractsCount = computed(
+  () => (contracts.value || []).filter((c) => isCompletedContractStatus(c.status)).length
+)
+
+const emptyStateTitle = computed(() => {
+  if (!contracts.value || contracts.value.length === 0) return 'No contracts assigned'
+  if (activeFilter.value === 'open') return 'No open contracts'
+  if (activeFilter.value === 'completed') return 'No completed contracts'
+  return 'No contracts found'
+})
+
+const emptyStateMessage = computed(() => {
+  if (!contracts.value || contracts.value.length === 0) {
+    return "You don't have any active labeling contracts yet. Check back later or contact your project manager."
+  }
+  if (activeFilter.value === 'open') {
+    return "You don't have any open contracts right now."
+  }
+  if (activeFilter.value === 'completed') {
+    return 'Completed contracts will appear here after client approval.'
+  }
+  return 'Try changing your filter settings.'
+})
 
 // ---------------------------------------------------------------------------
 // P2-4: Status display label helper — centralises badge text.
@@ -94,6 +151,7 @@ watch(
       processingContractId.value = null
       submitResult.value = null
       isSyncing.value = false
+      activeFilter.value = 'all'
     }
   },
   { immediate: true }
@@ -290,7 +348,46 @@ const handleReset = async (contractId: string): Promise<void> => {
             Download tasks and submit completed work to the cloud.
           </p>
         </div>
-        <div class="flex items-center gap-3">
+        <div class="flex flex-col sm:flex-row items-end sm:items-center gap-3">
+          <!-- Filter Group -->
+          <div
+            class="flex bg-slate-100 dark:bg-slate-800/80 p-1 rounded-lg border border-slate-200 dark:border-slate-700/80"
+          >
+            <button
+              class="px-3 py-1.5 text-xs font-medium rounded-md transition-all duration-200"
+              :class="
+                activeFilter === 'all'
+                  ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+              "
+              @click="activeFilter = 'all'"
+            >
+              All ({{ allContractsCount }})
+            </button>
+            <button
+              class="px-3 py-1.5 text-xs font-medium rounded-md transition-all duration-200"
+              :class="
+                activeFilter === 'open'
+                  ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+              "
+              @click="activeFilter = 'open'"
+            >
+              Open ({{ openContractsCount }})
+            </button>
+            <button
+              class="px-3 py-1.5 text-xs font-medium rounded-md transition-all duration-200"
+              :class="
+                activeFilter === 'completed'
+                  ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+              "
+              @click="activeFilter = 'completed'"
+            >
+              Completed ({{ completedContractsCount }})
+            </button>
+          </div>
+
           <button
             class="px-4 py-2 flex items-center gap-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg font-medium transition-colors text-sm shadow-sm disabled:opacity-50"
             :disabled="isSyncing"
@@ -547,9 +644,9 @@ const handleReset = async (contractId: string): Promise<void> => {
       </div>
 
       <!-- Contract List -->
-      <div v-if="(contracts || []).length > 0" class="space-y-4">
+      <div v-if="filteredContracts.length > 0" class="space-y-4">
         <div
-          v-for="contract in contracts || []"
+          v-for="contract in filteredContracts"
           :key="contract.id"
           class="flex flex-col p-5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-sm hover:border-blue-300 dark:hover:border-blue-500/50 hover:shadow-md transition-all gap-0"
         >
@@ -965,11 +1062,10 @@ const handleReset = async (contractId: string): Promise<void> => {
           </svg>
         </div>
         <h3 class="text-base font-semibold text-slate-900 dark:text-slate-100 mb-1">
-          No contracts assigned
+          {{ emptyStateTitle }}
         </h3>
         <p class="text-sm text-slate-500 dark:text-slate-400 max-w-xs">
-          You don't have any active labeling contracts yet. Check back later or contact your project
-          manager.
+          {{ emptyStateMessage }}
         </p>
       </div>
     </div>

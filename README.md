@@ -93,6 +93,7 @@ LabelGun, görüntü verileri üzerinde farklı anotasyon tipleriyle çalışmay
 - IPC seviyesinde API response normalizasyonu.
 - Datasets / Contracts / Profile sekmelerinden oluşan Workspace mimarisi.
 - `active`, `overdue` ve `revision_requested` durumundaki sözleşmeler için çalışma desteği.
+- Sözleşmeleri tümü (All), açık (Open) ve tamamlanmış (Completed) durumlarına göre filtreleme yeteneği.
 - Revizyon istenen sözleşmelerde yeniden senkronizasyon akışı.
 - Eş zamanlı sync koruması.
 - Health yüklenmeden Submit Work aksiyonunun kilitlenmesi.
