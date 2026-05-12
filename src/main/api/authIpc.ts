@@ -1,6 +1,20 @@
 import { ipcMain } from 'electron'
 import { apiClient, clearCookies, saveCookies } from './apiClient'
 
+/**
+ * Backend response body'sinden okunabilir hata mesajı çıkarır.
+ * `any` kullanmadan tip-güvenli şekilde çalışır.
+ */
+function getApiErrorMessage(err: unknown, fallback: string): string {
+  const maybe = err as { response?: { data?: unknown }; message?: string }
+  const data = maybe.response?.data
+  if (typeof data === 'object' && data !== null) {
+    const obj = data as { error?: { message?: string }; message?: string }
+    return obj.error?.message ?? obj.message ?? maybe.message ?? fallback
+  }
+  return maybe.message ?? fallback
+}
+
 export interface LoginCredentials {
   email: string
   password: string
@@ -34,7 +48,7 @@ export function registerAuthIpc(): void {
         saveCookies()
         return response.data.data.user
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : 'Login failed'
+        const message = getApiErrorMessage(err, 'Login failed')
         const status = (err as { response?: { status?: number } }).response?.status ?? 0
         throw Object.assign(new Error(message), { status })
       }

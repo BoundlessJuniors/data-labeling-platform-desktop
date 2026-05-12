@@ -85,8 +85,11 @@ LabelGun, görüntü verileri üzerinde farklı anotasyon tipleriyle çalışmay
 ### ☁️ Bulut Senkronizasyonu ve İş Akışı
 
 - Sözleşme Contract tabanlı çalışma.
-- Kiralama Lease mekanizması.
+- Kiralama Lease mekanizması: Görev lease token ve bitiş süresi yerel SQLite `task_leases` tablosunda saklanır.
+- **Otomatik re-lease desteği:** Sync sırasında lease kaydı eksikse veya süresi dolmuşsa desktop, backend'den yeni lease almaya çalışır. Başarılıysa mevcut lokal anotasyon verisi korunarak aynı payload yeni token ile gönderilir. Auth ve geçici ağ hatalarında veri `pending_insert` durumunda bırakılır.
+- **Backend `lease_expired` yanıtında tek seferlik forced re-lease + retry submit** akışı uygulanır; sonsuz retry olmaz.
 - Cookie tabanlı sürekli oturum yönetimi.
+- **CSRF uyumlu API istemcisi:** Desktop, login ve diğer POST/PATCH/PUT/DELETE isteklerinden önce gerektiğinde otomatik CSRF token alır ve `X-CSRF-Token` header'ını ekler. CSRF doğrulama hatasında istek bir kez güvenli şekilde yenilenir.
 - Contract Health üzerinden sağlık ve hata durumu takibi.
 - Payload hash ile duplicate submission engelleme.
 - Full snapshot modeli ile eksiksiz görev teslimi.
@@ -173,6 +176,12 @@ Bu kapsamda:
 - Submit Work işlemi, Contract Health verisi yüklenmeden veya sözleşme gönderime hazır olmadan çalışmayacak şekilde güçlendirilmiştir.
 - Native `alert` / `confirm` kullanımları yerine tema uyumlu toast ve dialog sistemi kullanılmaya başlanmıştır.
 - Sözleşme durumları için merkezi formatlama ve rozet renklendirme yapısı eklenmiştir.
+- **Expired lease recovery / otomatik re-lease:** `syncManager`, `pending_insert` anotasyonlar için eksik veya süresi dolmuş lease kaydı tespit ettiğinde backend'den yeni lease almaya çalışır. Lokal anotasyon verisi silinmeden korunur ve tekrar gönderim için bekletilir. `Recover Tasks` akışı fallback olarak korunmaktadır.
+- **CSRF uyumlu desktop login ve unsafe request yönetimi:** `apiClient` içine otomatik CSRF token yönetimi eklendi. POST/PUT/PATCH/DELETE isteklerinden önce gerektiğinde `GET /api/v1/auth/csrf` çağrılır, `X-CSRF-Token` header'ı otomatik eklenir ve `clearCookies()` çağrısında CSRF durumu da sıfırlanır. CSRF doğrulama hatasında istek bir kez güvenli şekilde yenilenir; sonsuz retry olmaz.
+- **Daha okunabilir auth hata mesajları:** `authIpc` login hatasında backend response body'deki gerçek mesajı (`error.message`) kullanır; artık yalnızca "Request failed with status code 403" gibi teknik mesajlar dönmez.
+- **Geçici lease/ağ hatalarında lokal veri koruması:** Network hatası veya 5xx gibi geçici sorunlarda annotation `lease_expired` durumuna çekilmez; `pending_insert` olarak korunur ve `attempt_count` artırılır.
+
+> **Not:** Production desktop dağıtımında backend Origin/Referer politikası ayrıca değerlendirilmelidir.
 
 **SAM Performans ve Stabilite Güncellemeleri:**
 - Model değişikliği sırasında "in-flight" (henüz tamamlanmamış) encoder görevleri ve cache temizlenerek eski modele ait embedding kirliliğinin önüne geçilmiştir.
@@ -194,7 +203,7 @@ Tüm bu iyileştirmeler `npm run typecheck` komutu ile doğrulanmıştır.
 | **Veritabanı**         | SQLite better-sqlite3 12                                 |
 | **AI / ML Çıkarım**    | ONNX Runtime Node 1.23 SAM ViT-B                         |
 | **Görüntü İşleme**     | Jimp 0.22 resize, normalize, pixel access                |
-| **Ağ / Oturum**        | Axios + tough-cookie + axios-cookiejar-support           |
+| **Ağ / Oturum**        | Axios + tough-cookie + axios-cookiejar-support, CSRF header yönetimi |
 | **SVG İkonlar**        | vite-svg-loader 5 SVG → Vue bileşeni                     |
 | **Kod Kalitesi**       | ESLint 9 + Prettier 3                                    |
 | **Paketleme**          | electron-builder 25 NSIS / DMG / AppImage / deb / snap   |
@@ -240,6 +249,7 @@ LabelGun üç ana Electron katmanından oluşur:
 │  ┌──────────────────────────────────┐                          │
 │  │  syncManager.ts                  │                          │
 │  │  30s interval — pending_insert   │                          │
+│  │  → otomatik re-lease denemesi    │                          │
 │  │  → POST /tasks/:id/submit        │                          │
 │  └──────────────────────────────────┘                          │
 └─────────────────────────────────────────────────────────────────┘
@@ -262,11 +272,11 @@ label_gun/
 │   │   ├── index.ts                   # Uygulama giriş noktası, pencere oluşturma,
 │   │   │                              # local:// protocol, dataset folder picker
 │   │   ├── api/                       # API istemcisi ve Bulut entegrasyonu REST + IPC
-│   │   │   ├── apiClient.ts           # Axios tabanlı API istemcisi ve cookie yönetimi
-│   │   │   ├── authIpc.ts             # Kimlik doğrulama işlemleri IPC köprüsü
+│   │   │   ├── apiClient.ts           # Axios istemcisi, cookie jar ve CSRF token/header yönetimi
+│   │   │   ├── authIpc.ts             # login/logout/bootstrapSession ve okunabilir auth hata mesajları
 │   │   │   └── cloudTasksIpc.ts       # Bulut görevleri, sözleşme verisi çekme işlemleri
 │   │   ├── sync/
-│   │   │   └── syncManager.ts         # Arka planda DB ile Cloud arasında anotasyon senkronizasyonu
+│   │   │   └── syncManager.ts         # pending_insert → submit akışı, otomatik re-lease, retryable hata yönetimi
 │   │   ├── export/                    # Local Dataset dışa aktarma (export) işlemleri
 │   │   │   ├── cocoLocal.export.ts    # COCO JSON format export algoritması
 │   │   │   ├── localExport.helpers.ts # Ortak validation, geometri (derived bbox) vb. yardımcılar
@@ -511,18 +521,18 @@ Cloud sync işlemleri sırasında görevleri diğer labeler'lara karşı kilitle
 
 ### Auth ve Cloud Kanalları `authIpc.ts` / `cloudTasksIpc.ts`
 
-| Kanal                         | Yön    | Açıklama                                                       |
-| ----------------------------- | ------ | -------------------------------------------------------------- |
-| `auth:login`                  | invoke | Bulut hesabına giriş yapar ve doğrulanmış kullanıcıyı döner    |
-| `auth:bootstrapSession`       | invoke | Var olan cookie'leri kullanarak oturumu yeniler/doğrular       |
-| `auth:logout`                 | invoke | Bulut hesabından çıkış yapar ve yerel cookie'leri temizler     |
-| `cloud:fetchContracts`        | invoke | Kullanıcıya atanmış sözleşmeleri listeler                      |
-| `cloud:downloadContractWork`  | invoke | Kiralama lease-batch ve asset indirme akışını yürütür          |
-| `cloud:syncNow`               | invoke | Bekleyen anotasyonları anında senkronize eder                  |
-| `cloud:getContractHealth`     | invoke | Sözleşme için senkronizasyon ve hata sağlığını hesaplar        |
-| `cloud:recoverExpiredTasks`   | invoke | Süresi dolmuş görevleri yeniden indirilmeye hazırlar           |
-| `cloud:resetContractLocalState` | invoke | Sözleşmeye ait yerel verileri DB ve dosyadan siler             |
-| `cloud:submitContract`        | invoke | Görevleri API'ye teslim eder                                   |
+| Kanal                         | Yön    | Açıklama                                                                        |
+| ----------------------------- | ------ | ------------------------------------------------------------------------------- |
+| `auth:login`                  | invoke | Bulut hesabına CSRF uyumlu login yapar ve doğrulanmış kullanıcıyı döner         |
+| `auth:bootstrapSession`       | invoke | Var olan cookie'leri kullanarak oturumu yeniler/doğrular                        |
+| `auth:logout`                 | invoke | Bulut hesabından çıkış yapar, cookie ve CSRF durumunu temizler                  |
+| `cloud:fetchContracts`        | invoke | Kullanıcıya atanmış sözleşmeleri listeler                                       |
+| `cloud:downloadContractWork`  | invoke | Kiralama lease-batch ve asset indirme akışını yürütür                           |
+| `cloud:syncNow`               | invoke | Bekleyen anotasyonları anında senkronize eder; otomatik re-lease desteklidir    |
+| `cloud:getContractHealth`     | invoke | Sözleşme için senkronizasyon ve hata sağlığını hesaplar                         |
+| `cloud:recoverExpiredTasks`   | invoke | Süresi dolmuş görevleri yeniden indirilmeye hazırlar                            |
+| `cloud:resetContractLocalState` | invoke | Sözleşmeye ait yerel verileri DB ve dosyadan siler                            |
+| `cloud:submitContract`        | invoke | Görevleri API'ye teslim eder                                                    |
 
 ### Pencere ve Sistem Kanalları
 
