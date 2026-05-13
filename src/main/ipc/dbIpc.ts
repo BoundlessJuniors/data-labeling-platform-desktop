@@ -503,13 +503,34 @@ export function registerDbIpc(): void {
           cloud_task_id, contract_id, payload_json, payload_hash, sync_status)
         VALUES (?, ?, 'export', NULL, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
-          data_json=excluded.data_json,
+          data_json=CASE
+            -- Once a cloud task snapshot has been synced, the backend task is
+            -- submitted and cannot accept a different payload unless revision
+            -- flow explicitly requeues it. Ignore later autosaves for that row.
+            WHEN annotations.cloud_task_id IS NOT NULL
+              AND annotations.sync_status = 'synced'
+              AND annotations.last_synced_hash IS NOT NULL THEN annotations.data_json
+            ELSE excluded.data_json
+          END,
           updated_at=excluded.updated_at,
           cloud_task_id=excluded.cloud_task_id,
           contract_id=excluded.contract_id,
-          payload_json=excluded.payload_json,
-          payload_hash=excluded.payload_hash,
+          payload_json=CASE
+            WHEN annotations.cloud_task_id IS NOT NULL
+              AND annotations.sync_status = 'synced'
+              AND annotations.last_synced_hash IS NOT NULL THEN annotations.payload_json
+            ELSE excluded.payload_json
+          END,
+          payload_hash=CASE
+            WHEN annotations.cloud_task_id IS NOT NULL
+              AND annotations.sync_status = 'synced'
+              AND annotations.last_synced_hash IS NOT NULL THEN annotations.payload_hash
+            ELSE excluded.payload_hash
+          END,
           last_error=CASE
+            WHEN annotations.cloud_task_id IS NOT NULL
+              AND annotations.sync_status = 'synced'
+              AND annotations.last_synced_hash IS NOT NULL THEN annotations.last_error
             WHEN excluded.cloud_task_id IS NULL THEN NULL
             WHEN excluded.payload_hash IS NOT NULL
               AND (
@@ -519,6 +540,9 @@ export function registerDbIpc(): void {
             ELSE annotations.last_error
           END,
           attempt_count=CASE
+            WHEN annotations.cloud_task_id IS NOT NULL
+              AND annotations.sync_status = 'synced'
+              AND annotations.last_synced_hash IS NOT NULL THEN annotations.attempt_count
             WHEN excluded.cloud_task_id IS NULL THEN 0
             WHEN excluded.payload_hash IS NOT NULL
               AND (
@@ -528,6 +552,10 @@ export function registerDbIpc(): void {
             ELSE annotations.attempt_count
           END,
           sync_status=CASE
+            -- Synced cloud snapshots are immutable until revision flow requeues them.
+            WHEN annotations.cloud_task_id IS NOT NULL
+              AND annotations.sync_status = 'synced'
+              AND annotations.last_synced_hash IS NOT NULL THEN annotations.sync_status
             -- Local-only save: always synced, never queue to backend
             WHEN excluded.cloud_task_id IS NULL THEN 'synced'
             -- Cloud task: new hash or no hash yet → queue for upload, clear stale errors

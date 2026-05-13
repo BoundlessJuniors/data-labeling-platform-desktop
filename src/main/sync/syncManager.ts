@@ -126,7 +126,7 @@ function classifyHttpError(status: number, body: string): { retryable: boolean; 
 // -----------------------------------------------------------------------
 async function isSessionValid(): Promise<boolean> {
   try {
-    await apiClient.get('/api/v1/auth/profile')
+    await apiClient.get('/api/v1/desktop/auth/profile')
     return true
   } catch (err: unknown) {
     const status = getHttpStatus(err)
@@ -453,13 +453,19 @@ async function runSyncCycleInternal(): Promise<void> {
       // Step f: idempotent success or conflict check
       if (classification.errorKey === 'already_submitted') {
         if (row.last_synced_hash && row.payload_hash !== row.last_synced_hash) {
-          // Task already submitted on backend, but local user has made newer changes (hashes don't match).
-          // We mark it as conflict rather than failed_permanent so data is not blindly lost.
+          // The backend already accepted an earlier snapshot for this task.
+          // Since submitted backend tasks cannot accept a different payload,
+          // keep the backend snapshot authoritative and do not block contract submit
+          // on a later local autosave/hash drift.
           db.prepare(
-            `UPDATE annotations SET sync_status = 'task_already_submitted_conflict', last_error = 'task_already_submitted_conflict' WHERE id = ?`
+            `UPDATE annotations
+             SET sync_status = 'synced',
+                 payload_hash = last_synced_hash,
+                 last_error = NULL
+             WHERE id = ?`
           ).run(row.annotation_id)
           console.warn(
-            `[syncManager] ${row.annotation_id}: payload changed locally but backend already submitted (conflict)`
+            `[syncManager] ${row.annotation_id}: backend already submitted; ignoring later local hash drift`
           )
         } else {
           // Either same hash (idempotent) or first sync but backend says submitted.

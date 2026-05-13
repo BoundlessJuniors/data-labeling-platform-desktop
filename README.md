@@ -88,8 +88,8 @@ LabelGun, görüntü verileri üzerinde farklı anotasyon tipleriyle çalışmay
 - Kiralama Lease mekanizması: Görev lease token ve bitiş süresi yerel SQLite `task_leases` tablosunda saklanır.
 - **Otomatik re-lease desteği:** Sync sırasında lease kaydı eksikse veya süresi dolmuşsa desktop, backend'den yeni lease almaya çalışır. Başarılıysa mevcut lokal anotasyon verisi korunarak aynı payload yeni token ile gönderilir. Auth ve geçici ağ hatalarında veri `pending_insert` durumunda bırakılır.
 - **Backend `lease_expired` yanıtında tek seferlik forced re-lease + retry submit** akışı uygulanır; sonsuz retry olmaz.
-- Cookie tabanlı sürekli oturum yönetimi.
-- **CSRF uyumlu API istemcisi:** Desktop, login ve diğer POST/PATCH/PUT/DELETE isteklerinden önce gerektiğinde otomatik CSRF token alır ve `X-CSRF-Token` header'ını ekler. CSRF doğrulama hatasında istek bir kez güvenli şekilde yenilenir.
+- Bearer token tabanlı desktop oturum yönetimi. Token Electron main process tarafında tutulur ve renderer'a açılmaz.
+- **Native-client API istemcisi:** Desktop, `/api/v1/desktop/auth/*` endpointleri üzerinden login olur ve cloud API çağrılarına `Authorization: Bearer <token>` header'ı ekler. Cookie/CSRF modeli yalnızca web frontend için kullanılır.
 - Contract Health üzerinden sağlık ve hata durumu takibi.
 - Payload hash ile duplicate submission engelleme.
 - Full snapshot modeli ile eksiksiz görev teslimi.
@@ -177,7 +177,8 @@ Bu kapsamda:
 - Native `alert` / `confirm` kullanımları yerine tema uyumlu toast ve dialog sistemi kullanılmaya başlanmıştır.
 - Sözleşme durumları için merkezi formatlama ve rozet renklendirme yapısı eklenmiştir.
 - **Expired lease recovery / otomatik re-lease:** `syncManager`, `pending_insert` anotasyonlar için eksik veya süresi dolmuş lease kaydı tespit ettiğinde backend'den yeni lease almaya çalışır. Lokal anotasyon verisi silinmeden korunur ve tekrar gönderim için bekletilir. `Recover Tasks` akışı fallback olarak korunmaktadır.
-- **CSRF uyumlu desktop login ve unsafe request yönetimi:** `apiClient` içine otomatik CSRF token yönetimi eklendi. POST/PUT/PATCH/DELETE isteklerinden önce gerektiğinde `GET /api/v1/auth/csrf` çağrılır, `X-CSRF-Token` header'ı otomatik eklenir ve `clearCookies()` çağrısında CSRF durumu da sıfırlanır. CSRF doğrulama hatasında istek bir kez güvenli şekilde yenilenir; sonsuz retry olmaz.
+- **Desktop/Web auth ayrımı:** Desktop artık web cookie/CSRF modelini kullanmaz. Electron main process, backend'den desktop bearer token alır ve cloud API isteklerine `Authorization` header'ı ekler. Token `safeStorage` ile saklanır; production'da güvenli storage yoksa disk persistence yapılmaz.
+- **Production auth hardening TODO:** Canlı ortam öncesi desktop için `DesktopSession`, hash'li refresh token saklama, refresh token rotation ve server-side session revocation akışı eklenecektir.
 - **Daha okunabilir auth hata mesajları:** `authIpc` login hatasında backend response body'deki gerçek mesajı (`error.message`) kullanır; artık yalnızca "Request failed with status code 403" gibi teknik mesajlar dönmez.
 - **Geçici lease/ağ hatalarında lokal veri koruması:** Network hatası veya 5xx gibi geçici sorunlarda annotation `lease_expired` durumuna çekilmez; `pending_insert` olarak korunur ve `attempt_count` artırılır.
 
@@ -203,7 +204,7 @@ Tüm bu iyileştirmeler `npm run typecheck` komutu ile doğrulanmıştır.
 | **Veritabanı**         | SQLite better-sqlite3 12                                 |
 | **AI / ML Çıkarım**    | ONNX Runtime Node 1.23 SAM ViT-B                         |
 | **Görüntü İşleme**     | Jimp 0.22 resize, normalize, pixel access                |
-| **Ağ / Oturum**        | Axios + tough-cookie + axios-cookiejar-support, CSRF header yönetimi |
+| **Ağ / Oturum**        | Axios + Electron safeStorage destekli bearer token yönetimi |
 | **SVG İkonlar**        | vite-svg-loader 5 SVG → Vue bileşeni                     |
 | **Kod Kalitesi**       | ESLint 9 + Prettier 3                                    |
 | **Paketleme**          | electron-builder 25 NSIS / DMG / AppImage / deb / snap   |
@@ -272,8 +273,9 @@ label_gun/
 │   │   ├── index.ts                   # Uygulama giriş noktası, pencere oluşturma,
 │   │   │                              # local:// protocol, dataset folder picker
 │   │   ├── api/                       # API istemcisi ve Bulut entegrasyonu REST + IPC
-│   │   │   ├── apiClient.ts           # Axios istemcisi, cookie jar ve CSRF token/header yönetimi
-│   │   │   ├── authIpc.ts             # login/logout/bootstrapSession ve okunabilir auth hata mesajları
+│   │   │   ├── apiClient.ts           # Axios istemcisi, bearer Authorization header yönetimi
+│   │   │   ├── authIpc.ts             # desktop login/logout/bootstrapSession ve okunabilir auth hata mesajları
+│   │   │   ├── tokenStore.ts          # safeStorage destekli desktop token saklama
 │   │   │   └── cloudTasksIpc.ts       # Bulut görevleri, sözleşme verisi çekme işlemleri
 │   │   ├── sync/
 │   │   │   └── syncManager.ts         # pending_insert → submit akışı, otomatik re-lease, retryable hata yönetimi
@@ -523,9 +525,9 @@ Cloud sync işlemleri sırasında görevleri diğer labeler'lara karşı kilitle
 
 | Kanal                         | Yön    | Açıklama                                                                        |
 | ----------------------------- | ------ | ------------------------------------------------------------------------------- |
-| `auth:login`                  | invoke | Bulut hesabına CSRF uyumlu login yapar ve doğrulanmış kullanıcıyı döner         |
-| `auth:bootstrapSession`       | invoke | Var olan cookie'leri kullanarak oturumu yeniler/doğrular                        |
-| `auth:logout`                 | invoke | Bulut hesabından çıkış yapar, cookie ve CSRF durumunu temizler                  |
+| `auth:login`                  | invoke | Desktop auth endpointinden bearer token alır, token'ı main process tarafında saklar ve kullanıcıyı döner |
+| `auth:bootstrapSession`       | invoke | Saklanan bearer token ile desktop profil endpointini doğrular                   |
+| `auth:logout`                 | invoke | Desktop logout endpointini çağırır ve lokal bearer token'ı temizler             |
 | `cloud:fetchContracts`        | invoke | Kullanıcıya atanmış sözleşmeleri listeler                                       |
 | `cloud:downloadContractWork`  | invoke | Kiralama lease-batch ve asset indirme akışını yürütür                           |
 | `cloud:syncNow`               | invoke | Bekleyen anotasyonları anında senkronize eder; otomatik re-lease desteklidir    |

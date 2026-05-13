@@ -97,6 +97,8 @@ export function useLabelerAutoSave(deps: AutoSaveDeps) {
   /* ---- Timer başlatma ---- */
 
   function initTimers(): void {
+    if (autoSaveTimer != null || timerInterval != null) return
+
     // DB'den gelen sürelerle başlangıç değerlerini ayarla
     const byId: Record<string, number> = {}
     let totalSeconds = 0

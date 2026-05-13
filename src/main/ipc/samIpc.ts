@@ -12,6 +12,7 @@ import {
   recordPrefetchActivity,
   updatePrefetchPlan,
   startPrefetchProcessing,
+  stopPrefetchProcessing,
   SAM_MODELS,
   type SamPoint,
   type SamModelId
@@ -88,6 +89,10 @@ export function registerSamIpc(): void {
 
   ipcMain.handle('sam:startPrefetch', () => {
     startPrefetchProcessing()
+  })
+
+  ipcMain.handle('sam:stopPrefetch', () => {
+    stopPrefetchProcessing()
   })
 
   ipcMain.handle('sam:ensureReady', async () => {

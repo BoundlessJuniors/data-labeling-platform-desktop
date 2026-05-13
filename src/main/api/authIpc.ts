@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron'
-import { apiClient, clearCookies, saveCookies } from './apiClient'
+import { apiClient } from './apiClient'
+import { saveToken, clearToken, getToken } from './tokenStore'
 
 /**
  * Backend response body'sinden okunabilir hata mesajı çıkarır.
@@ -41,12 +42,12 @@ export function registerAuthIpc(): void {
       try {
         const response = await apiClient.post<{
           success: boolean
-          data: { user: UserProfile }
-        }>('/api/v1/auth/login', credentials)
-        // Web API'nin döndürdüğü kullanıcı profilini Renderer'a ilet.
-        // httpOnly cookie apiClient tarafından otomatik saklanmış durumda.
-        saveCookies()
-        return response.data.data.user
+          data: { user: UserProfile; token: string }
+        }>('/api/v1/desktop/auth/login', credentials)
+
+        const { user, token } = response.data.data
+        saveToken(token)
+        return user
       } catch (err: unknown) {
         const message = getApiErrorMessage(err, 'Login failed')
         const status = (err as { response?: { status?: number } }).response?.status ?? 0
@@ -60,21 +61,23 @@ export function registerAuthIpc(): void {
   // -----------------------------------------------------------------------
   ipcMain.handle('auth:bootstrapSession', async (): Promise<UserProfile | null> => {
     try {
+      const token = getToken()
+      if (!token) return null
+
       const response = await apiClient.get<{
         success: boolean
         data: UserProfile
-      }>('/api/v1/auth/profile')
-      saveCookies() // Eğer geçerliyse diske sakla (refresh durumlarına karşı)
+      }>('/api/v1/desktop/auth/profile')
+
       return response.data.data
     } catch (err: unknown) {
       const status = (err as { response?: { status?: number } }).response?.status
-      // Yalnızca kesin auth geçersizliği durumlarında çerezi sil (örn. 401, 403)
+      // Yalnızca kesin auth geçersizliği durumlarında token'ı sil (örn. 401, 403)
       if (status === 401 || status === 403) {
-        clearCookies()
+        clearToken()
         return null
       }
       // Timeout veya network exception gibi 401/403 dışı hatalarda state'i silmeyiz.
-      // throw ediyoruz ki renderer bunun network sorunu olduğunu algılayabilsin.
       const message = err instanceof Error ? err.message : 'Session could not be verified'
       throw Object.assign(new Error(message), { status: status ?? 0 })
     }
@@ -85,11 +88,11 @@ export function registerAuthIpc(): void {
   // -----------------------------------------------------------------------
   ipcMain.handle('auth:logout', async (): Promise<void> => {
     try {
-      await apiClient.post('/api/v1/auth/logout')
+      await apiClient.post('/api/v1/desktop/auth/logout')
     } catch {
-      // Sunucu erişilemez olsa dahi local cookie'leri temizle
+      // Sunucu erişilemez olsa dahi local token'ı temizle
     } finally {
-      clearCookies()
+      clearToken()
     }
   })
 }

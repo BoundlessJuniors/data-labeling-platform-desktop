@@ -86,7 +86,7 @@ watch(
 /* =============================
    Props & emits
    ============================= */
-const props = defineProps<{ datasetId: string | null }>()
+const props = defineProps<{ datasetId: string | null; isActive?: boolean }>()
 
 /* =============================
    Temel composable'lar
@@ -293,6 +293,48 @@ const { attachKeyboardShortcuts, detachKeyboardShortcuts } = useKeyboardShortcut
   redoLocalEdit: editSession.redoLocalEdit
 })
 
+let isMounted = false
+let runtimeActive = false
+
+function startLabelerRuntime(): void {
+  if (!isMounted || runtimeActive || !props.datasetId) return
+  runtimeActive = true
+  attachKeyboardShortcuts()
+  autoSave.initTimers()
+
+  if (tasks.value.length > 0) {
+    void window.electron.ipcRenderer.invoke('sam:startPrefetch')
+    void window.electron.ipcRenderer.invoke(
+      'sam:updatePrefetchPlan',
+      currentTaskIndex.value,
+      tasks.value.length,
+      tasks.value.map((task) => ({ image: task.image }))
+    )
+  }
+}
+
+function stopLabelerRuntime(): void {
+  if (!runtimeActive) return
+  runtimeActive = false
+  const current = tasks.value[currentTaskIndex.value]
+  if (current) {
+    void buildAndSaveExport(current, exportAnnotationsToImageSpace()).catch((err) => {
+      console.error('[Runtime] Failed to save current snapshot before pause:', err)
+    })
+  }
+  detachKeyboardShortcuts()
+  autoSave.teardown()
+  void window.electron.ipcRenderer.invoke('sam:stopPrefetch')
+}
+
+watch(
+  () => props.isActive,
+  (active) => {
+    if (active) startLabelerRuntime()
+    else stopLabelerRuntime()
+  }
+)
+
 /* =============================
    Label paneli
    ============================= */
@@ -479,12 +521,14 @@ watch(
 
       try {
         await window.electron.ipcRenderer.invoke('sam:ensureReady')
-        await window.electron.ipcRenderer.invoke('sam:startPrefetch')
+        if (props.isActive) {
+          await window.electron.ipcRenderer.invoke('sam:startPrefetch')
+        }
       } catch (samErr) {
         console.warn('[UI] ⚠️ SAM session load failed:', samErr)
       }
 
-      if (tasks.value.length > 0 && currentTaskIndex.value >= 0) {
+      if (props.isActive && tasks.value.length > 0 && currentTaskIndex.value >= 0) {
         const simplifiedTasks = tasks.value.map((task) => ({ image: task.image }))
         await window.electron.ipcRenderer.invoke(
           'sam:updatePrefetchPlan',
@@ -506,25 +550,20 @@ onMounted(async (): Promise<void> => {
   const prefersDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false
   document.documentElement.classList.toggle('dark', saved ? saved === 'dark' : prefersDark)
 
-  // Klavye kısayolları
-  attachKeyboardShortcuts()
-
   if (tasks.value.length > 0) await taskSession.loadTaskByIndex(0)
   updateDeleteButton()
 
-  // Zamanlayıcılar ve otomatik kayıt
-  autoSave.initTimers()
-
   // SAM modelleri ve durum
   await samManager.initSam()
+  isMounted = true
+  if (props.isActive) startLabelerRuntime()
 })
 
 onBeforeUnmount((): void => {
-  detachKeyboardShortcuts()
+  stopLabelerRuntime()
   toolState.teardown()
   editSession.teardown()
   samManager.teardown()
-  autoSave.teardown() // flushTimeToDb dahil
 })
 
 /* =============================

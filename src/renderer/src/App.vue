@@ -548,6 +548,7 @@ const onClose = (): void => {
         <LabelerView
           :key="selectedDatasetId || 'empty'"
           :dataset-id="selectedDatasetId"
+          :is-active="!!selectedDatasetId && !isDatasetModalOpen"
           @back-to-datasets="isDatasetModalOpen = true"
         />
       </div>
