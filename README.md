@@ -207,7 +207,7 @@ Tüm bu iyileştirmeler `npm run typecheck` komutu ile doğrulanmıştır.
 | **Ağ / Oturum**        | Axios + Electron safeStorage destekli bearer token yönetimi |
 | **SVG İkonlar**        | vite-svg-loader 5 SVG → Vue bileşeni                     |
 | **Kod Kalitesi**       | ESLint 9 + Prettier 3                                    |
-| **Paketleme**          | electron-builder 25 NSIS / DMG / AppImage / deb / snap   |
+| **Paketleme**          | electron-builder 25 NSIS / DMG / AppImage / deb          |
 
 ---
 
@@ -624,11 +624,27 @@ npm run build:win
 # macOS .dmg
 npm run build:mac
 
-# Linux .AppImage, .snap, .deb
+# Linux .AppImage, .deb
 npm run build:linux
 ```
 
-Derleme çıktısı `out/` dizinindeki üretim build dosyalarını kullanarak `electron-builder` ile paketleme yapar.
+Windows, macOS ve Linux build çıktıları deterministik dosya adlarıyla
+`../data-labeling-platform-web/frontend/public/downloads/` dizinine yazılır. Web
+uygulamasındaki `/download` sayfası bu dosya adlarını doğrudan linkler.
+
+Tek mimari build gerektiğinde şu scriptler kullanılabilir:
+
+```bash
+npm run build:win:x64
+npm run build:win:arm64
+npm run build:mac:x64
+npm run build:mac:arm64
+npm run build:linux:x64
+npm run build:linux:arm64
+```
+
+Not: macOS DMG üretimi ve imzalama/notarization adımları pratikte macOS runner
+üzerinde çalıştırılmalıdır.
 
 ---
 
