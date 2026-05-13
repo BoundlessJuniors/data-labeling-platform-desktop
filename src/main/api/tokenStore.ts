@@ -5,8 +5,16 @@ import { writeFileSync, readFileSync, existsSync, unlinkSync, mkdirSync } from '
 const tokenDir = join(app.getPath('userData'), 'auth')
 const tokenFile = join(tokenDir, 'token.enc')
 
+export interface DesktopSessionData {
+  accessToken: string
+  refreshToken: string
+  accessTokenExpiresAt: string | Date
+  refreshTokenExpiresAt: string | Date
+  sessionId: string
+}
+
 // We also keep it in memory during runtime
-let memoryToken: string | null = null
+let memorySession: DesktopSessionData | null = null
 
 function ensureDir(): void {
   if (!existsSync(tokenDir)) {
@@ -14,68 +22,90 @@ function ensureDir(): void {
   }
 }
 
-export function saveToken(token: string): void {
-  memoryToken = token
+export function saveSession(session: DesktopSessionData): void {
+  memorySession = session
   ensureDir()
+
+  const dataString = JSON.stringify(session)
 
   if (safeStorage.isEncryptionAvailable()) {
     try {
-      const encrypted = safeStorage.encryptString(token)
+      const encrypted = safeStorage.encryptString(dataString)
       writeFileSync(tokenFile, encrypted)
     } catch (err) {
-      console.error('[TokenStore] Failed to encrypt token using safeStorage', err)
+      console.error('[TokenStore] Failed to encrypt session using safeStorage', err)
     }
   } else {
     if (!app.isPackaged) {
       console.warn(
         '[TokenStore] WARNING: safeStorage unavailable. Using plaintext fallback in development.'
       )
-      writeFileSync(tokenFile, token, 'utf8')
+      writeFileSync(tokenFile, dataString, 'utf8')
     } else {
       console.warn(
-        '[TokenStore] safeStorage unavailable in production. Token will NOT be persisted to disk.'
+        '[TokenStore] safeStorage unavailable in production. Session will NOT be persisted to disk.'
       )
     }
   }
 }
 
-export function getToken(): string | null {
-  if (memoryToken) return memoryToken
+export function getSession(): DesktopSessionData | null {
+  if (memorySession) return memorySession
 
   if (!existsSync(tokenFile)) return null
 
   try {
     const data = readFileSync(tokenFile)
+    let decryptedString = ''
 
     if (safeStorage.isEncryptionAvailable()) {
-      memoryToken = safeStorage.decryptString(data)
+      decryptedString = safeStorage.decryptString(data)
     } else {
       if (!app.isPackaged) {
-        memoryToken = data.toString('utf8')
+        decryptedString = data.toString('utf8')
       } else {
-        // In production, if we can't encrypt, we shouldn't have written it,
-        // but if it's there, we shouldn't trust it / can't decrypt it securely
         console.warn(
-          '[TokenStore] Found token file but safeStorage is unavailable in production. Ignoring.'
+          '[TokenStore] Found session file but safeStorage is unavailable in production. Ignoring.'
         )
-        memoryToken = null
+        return null
       }
     }
+
+    if (decryptedString) {
+      memorySession = JSON.parse(decryptedString)
+    }
   } catch (err) {
-    console.error('[TokenStore] Failed to read or decrypt token', err)
-    memoryToken = null
+    console.error('[TokenStore] Failed to read, decrypt, or parse session', err)
+    memorySession = null
   }
 
-  return memoryToken
+  return memorySession
 }
 
-export function clearToken(): void {
-  memoryToken = null
+export function getAccessToken(): string | null {
+  const session = getSession()
+  return session ? session.accessToken : null
+}
+
+export function getRefreshToken(): string | null {
+  const session = getSession()
+  return session ? session.refreshToken : null
+}
+
+export function clearSession(): void {
+  memorySession = null
   if (existsSync(tokenFile)) {
     try {
       unlinkSync(tokenFile)
     } catch (err) {
       console.error('[TokenStore] Failed to delete token file', err)
     }
+  }
+}
+
+export function updateTokens(newSessionData: Partial<DesktopSessionData>): void {
+  const currentSession = getSession()
+  if (currentSession) {
+    saveSession({ ...currentSession, ...newSessionData } as DesktopSessionData)
   }
 }

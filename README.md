@@ -177,8 +177,8 @@ Bu kapsamda:
 - Native `alert` / `confirm` kullanımları yerine tema uyumlu toast ve dialog sistemi kullanılmaya başlanmıştır.
 - Sözleşme durumları için merkezi formatlama ve rozet renklendirme yapısı eklenmiştir.
 - **Expired lease recovery / otomatik re-lease:** `syncManager`, `pending_insert` anotasyonlar için eksik veya süresi dolmuş lease kaydı tespit ettiğinde backend'den yeni lease almaya çalışır. Lokal anotasyon verisi silinmeden korunur ve tekrar gönderim için bekletilir. `Recover Tasks` akışı fallback olarak korunmaktadır.
-- **Desktop/Web auth ayrımı:** Desktop artık web cookie/CSRF modelini kullanmaz. Electron main process, backend'den desktop bearer token alır ve cloud API isteklerine `Authorization` header'ı ekler. Token `safeStorage` ile saklanır; production'da güvenli storage yoksa disk persistence yapılmaz.
-- **Production auth hardening TODO:** Canlı ortam öncesi desktop için `DesktopSession`, hash'li refresh token saklama, refresh token rotation ve server-side session revocation akışı eklenecektir.
+- **Desktop/Web auth ayrımı:** Desktop artık web cookie/CSRF modelini kullanmaz. Electron main process, backend'den desktop session (access + refresh token) alır ve cloud API isteklerine `Authorization` header'ı ekler. Token'lar `safeStorage` ile saklanır; süresi dolduğunda otomatik olarak `refresh` edilir. Sunucu tarafında `DesktopSession` modeli ile oturum takibi (ve logout durumunda anında revocation) yapılır.
+- **Cloud label izolasyonu:** Cloud contract label'ları lokal SQLite'a dataset'e özel id ile yazılır (`datasetId:labelId`). Böylece aynı backend label set'i birden fazla contract/dataset tarafından kullanıldığında `dataset_labels.id` çakışması oluşmaz.
 - **Daha okunabilir auth hata mesajları:** `authIpc` login hatasında backend response body'deki gerçek mesajı (`error.message`) kullanır; artık yalnızca "Request failed with status code 403" gibi teknik mesajlar dönmez.
 - **Geçici lease/ağ hatalarında lokal veri koruması:** Network hatası veya 5xx gibi geçici sorunlarda annotation `lease_expired` durumuna çekilmez; `pending_insert` olarak korunur ve `attempt_count` artırılır.
 
@@ -525,9 +525,9 @@ Cloud sync işlemleri sırasında görevleri diğer labeler'lara karşı kilitle
 
 | Kanal                         | Yön    | Açıklama                                                                        |
 | ----------------------------- | ------ | ------------------------------------------------------------------------------- |
-| `auth:login`                  | invoke | Desktop auth endpointinden bearer token alır, token'ı main process tarafında saklar ve kullanıcıyı döner |
-| `auth:bootstrapSession`       | invoke | Saklanan bearer token ile desktop profil endpointini doğrular                   |
-| `auth:logout`                 | invoke | Desktop logout endpointini çağırır ve lokal bearer token'ı temizler             |
+| `auth:login`                  | invoke | Desktop auth endpointinden session alr (access + refresh token), token'lar `safeStorage` ile main process tarafnda saklar ve kullancy dner |
+| `auth:bootstrapSession`       | invoke | Saklanan token'lar ile desktop profil endpointini doYrular; gerekirse refresh akYn tetikler                   |
+| `auth:logout`                 | invoke | Desktop logout endpointini aYrr ve lokal session verilerini (`tokenStore`) temizler             |
 | `cloud:fetchContracts`        | invoke | Kullanıcıya atanmış sözleşmeleri listeler                                       |
 | `cloud:downloadContractWork`  | invoke | Kiralama lease-batch ve asset indirme akışını yürütür                           |
 | `cloud:syncNow`               | invoke | Bekleyen anotasyonları anında senkronize eder; otomatik re-lease desteklidir    |
@@ -551,7 +551,7 @@ Cloud sync işlemleri sırasında görevleri diğer labeler'lara karşı kilitle
 
 | Composable               | Sorumluluk |
 | ------------------------ | ---------- |
-| `useAuth`                | Singleton kullanıcı oturum yönetimi. Login, logout, bootstrapSession ve cookie entegrasyonu sağlar. |
+| `useAuth`                | Singleton kullanıcı oturum yönetimi. Login, logout ve bootstrapSession akışlarını desktop session modeliyle yönetir. |
 | `useCloud`               | Singleton cloud state yönetimi. Sözleşme çekme, indirme, sağlık takibi, recover, submit ve reset işlemlerini yönetir. |
 | `useFeedback`            | Uygulama genelinde özel diyalog ve toast bildirimlerini yönetir. |
 | `useDatasetLabeling`     | Dataset etiket havuzu yükleme, aktif etiket seçimi ve cloud/local izin izolasyonunu yönetir. |

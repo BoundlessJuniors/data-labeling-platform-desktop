@@ -1,5 +1,5 @@
 import { app, shell, BrowserWindow, ipcMain, protocol, net } from 'electron'
-import { join } from 'path'
+import { extname, join } from 'path'
 import { pathToFileURL } from 'url'
 import { dialog } from 'electron'
 import { readdirSync } from 'fs'
@@ -41,6 +41,10 @@ function createWindow(): void {
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
       sandbox: false
     }
   })
@@ -50,7 +54,14 @@ function createWindow(): void {
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
+    try {
+      const url = new URL(details.url)
+      if (url.protocol === 'https:' || url.protocol === 'http:') {
+        shell.openExternal(details.url)
+      }
+    } catch {
+      // Ignore malformed URLs and deny opening a new window.
+    }
     return { action: 'deny' }
   })
 
@@ -88,6 +99,11 @@ app.whenReady().then(() => {
       // Windows'ta baştaki "/" kaldırılmalı ("/C:/..." -> "C:/...")
       if (/^\/[a-zA-Z]:\//.test(p)) {
         p = p.slice(1)
+      }
+
+      const ext = extname(p).toLowerCase()
+      if (!IMAGE_EXTS.includes(ext)) {
+        return new Response('Forbidden', { status: 403 })
       }
 
       const fileUrl = pathToFileURL(p).toString()

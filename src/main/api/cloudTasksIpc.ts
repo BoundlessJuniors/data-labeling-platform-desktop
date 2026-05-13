@@ -437,8 +437,9 @@ export function registerCloudTasksIpc(): void {
             )
             const now = Date.now()
             for (const lbl of meta.labelSet!.labels) {
+              const localLabelId = lbl.id ? `${datasetId}:${lbl.id}` : randomUUID()
               stmt.run(
-                lbl.id || randomUUID(),
+                localLabelId,
                 datasetId,
                 lbl.name,
                 lbl.color ?? null,

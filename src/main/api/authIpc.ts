@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import { apiClient } from './apiClient'
-import { saveToken, clearToken, getToken } from './tokenStore'
+import { saveSession, clearSession, getAccessToken, getRefreshToken } from './tokenStore'
 
 /**
  * Backend response body'sinden okunabilir hata mesajı çıkarır.
@@ -42,12 +42,19 @@ export function registerAuthIpc(): void {
       try {
         const response = await apiClient.post<{
           success: boolean
-          data: { user: UserProfile; token: string }
+          data: {
+            user: UserProfile
+            accessToken: string
+            refreshToken: string
+            accessTokenExpiresAt: string
+            refreshTokenExpiresAt: string
+            sessionId: string
+          }
         }>('/api/v1/desktop/auth/login', credentials)
 
-        const { user, token } = response.data.data
-        saveToken(token)
-        return user
+        const session = response.data.data
+        saveSession(session)
+        return session.user
       } catch (err: unknown) {
         const message = getApiErrorMessage(err, 'Login failed')
         const status = (err as { response?: { status?: number } }).response?.status ?? 0
@@ -61,8 +68,8 @@ export function registerAuthIpc(): void {
   // -----------------------------------------------------------------------
   ipcMain.handle('auth:bootstrapSession', async (): Promise<UserProfile | null> => {
     try {
-      const token = getToken()
-      if (!token) return null
+      const hasAnyToken = getAccessToken() || getRefreshToken()
+      if (!hasAnyToken) return null
 
       const response = await apiClient.get<{
         success: boolean
@@ -74,7 +81,7 @@ export function registerAuthIpc(): void {
       const status = (err as { response?: { status?: number } }).response?.status
       // Yalnızca kesin auth geçersizliği durumlarında token'ı sil (örn. 401, 403)
       if (status === 401 || status === 403) {
-        clearToken()
+        clearSession()
         return null
       }
       // Timeout veya network exception gibi 401/403 dışı hatalarda state'i silmeyiz.
@@ -92,7 +99,7 @@ export function registerAuthIpc(): void {
     } catch {
       // Sunucu erişilemez olsa dahi local token'ı temizle
     } finally {
-      clearToken()
+      clearSession()
     }
   })
 }

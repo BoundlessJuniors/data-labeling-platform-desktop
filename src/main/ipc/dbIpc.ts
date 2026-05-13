@@ -232,8 +232,10 @@ export function registerDbIpc(): void {
         )
         const now = Date.now()
         for (const lbl of payload.labels) {
+          const localLabelId =
+            payload.source === 'cloud' && lbl.id ? `${payload.dataset_id}:${lbl.id}` : lbl.id || randomUUID()
           stmt.run(
-            lbl.id || randomUUID(),
+            localLabelId,
             payload.dataset_id,
             lbl.name,
             lbl.color ?? null,
