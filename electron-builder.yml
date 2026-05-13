@@ -2,7 +2,7 @@ appId: com.labelgun.desktop
 productName: LabelGun
 directories:
   buildResources: build
-  output: ../data-labeling-platform-web/frontend/public/downloads
+  output: dist-installers
 files:
   - '!**/.vscode/*'
   - '!src/*'

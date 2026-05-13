@@ -1,7 +1,11 @@
+import { app } from 'electron'
 import axios, { AxiosHeaders } from 'axios'
 import { getAccessToken, getRefreshToken, clearSession, updateTokens } from './tokenStore'
 
-const baseURL = process.env.LABELGUN_API_ORIGIN || 'http://localhost:3000'
+// Base origin only. API calls below already include `/api/v1/...`.
+const baseURL =
+  process.env.LABELGUN_API_ORIGIN ||
+  (app.isPackaged ? 'https://api.labelgun.dev' : 'http://localhost:3000')
 
 export const apiClient = axios.create({
   baseURL,

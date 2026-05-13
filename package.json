@@ -4,7 +4,7 @@
   "description": "LabelGun desktop labeling client",
   "main": "./out/main/index.js",
   "author": "LabelGun",
-  "homepage": "https://labelgun.local",
+  "homepage": "https://app.labelgun.dev",
   "scripts": {
     "format": "prettier --write .",
     "lint": "eslint --cache .",

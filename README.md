@@ -629,8 +629,10 @@ npm run build:linux
 ```
 
 Windows, macOS ve Linux build çıktıları deterministik dosya adlarıyla
-`../data-labeling-platform-web/frontend/public/downloads/` dizinine yazılır. Web
-uygulamasındaki `/download` sayfası bu dosya adlarını doğrudan linkler.
+`dist-installers/` dizinine yazılır. Installer dosyaları web frontend'in
+`public/` klasörüne konmaz; canlı yayında GitHub Releases asset olarak manuel
+yüklenir. Web uygulamasındaki `/download` sayfası yalnızca doğrulanmış GitHub
+Release asset URL'leri config'e girildikten sonra aktif indirme linki gösterir.
 
 Tek mimari build gerektiğinde şu scriptler kullanılabilir:
 
@@ -645,6 +647,16 @@ npm run build:linux:arm64
 
 Not: macOS DMG üretimi ve imzalama/notarization adımları pratikte macOS runner
 üzerinde çalıştırılmalıdır.
+
+Canlı desktop build için API origin `https://api.labelgun.dev` olmalıdır. Kodda
+bu değer paketli uygulama için varsayılan olarak kullanılır; override gerektiğinde
+`LABELGUN_API_ORIGIN=https://api.labelgun.dev` verilebilir. Bu değer yalnızca
+origin içermelidir, `/api/v1` eklenmemelidir çünkü desktop istekleri endpoint
+path'lerinde `/api/v1/...` kullanır.
+
+İlk canlı beta hedefi Windows x64 kurulum dosyasıdır. macOS ve diğer mimariler,
+ilgili installer GitHub Releases asset olarak yayınlanana kadar web download
+sayfasında pasif kalmalıdır.
 
 ---
 

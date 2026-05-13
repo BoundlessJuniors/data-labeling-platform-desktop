@@ -30,6 +30,7 @@ logs/
 # -------------------------
 dist/
 dist-*/
+dist-installers/
 dist-electron/
 out/
 release/
